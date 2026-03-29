@@ -1,0 +1,20 @@
+# Archives
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.7z
+*.rar
+
+# HM3D scene assets
+*.glb
+*.semantic.glb
+*.navmesh
+*.semantic.txt
+
+
+# Generated outputs
+scene_info_export/
+semantic_demo_output/
+hm3d_pipeline_report.json
+*_scene_info.json
