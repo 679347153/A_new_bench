@@ -478,5 +478,12 @@
         "val/00894-HY1NcmCgn3n/*.basis.scene_instance.json"
       ]
     }
+  },
+  "objects": {
+    "paths": {
+      ".object_config.json": [
+        "../objects/*.object_config.json"
+      ]
+    }
   }
 }

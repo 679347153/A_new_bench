@@ -362,6 +362,15 @@ def resolve_template_handle(template_mgr, model_id):
 	return None
 
 
+def debug_list_templates(template_mgr):
+	"""List all loaded object templates for debugging."""
+	try:
+		all_handles = template_mgr.get_template_handles()
+		return all_handles if all_handles else ["(no templates loaded)"]
+	except Exception:
+		return []
+
+
 def safe_remove_object(rom, item):
 	handle = item.get("handle")
 	if handle:
@@ -583,6 +592,29 @@ def main():
 		if sim is not None:
 			sim.close()
 		sim = habitat_sim.Simulator(cfg)
+
+		# 显式加载物体配置目录
+		try:
+			template_mgr = sim.get_object_template_manager()
+			abs_objects_dir = os.path.abspath(OBJECTS_DIR)
+			if os.path.isdir(abs_objects_dir):
+				# 尝试多种可能的加载方法
+				if hasattr(template_mgr, "load_configs"):
+					template_mgr.load_configs(abs_objects_dir)
+					print(f"[Info] Loaded object configs from: {abs_objects_dir}")
+				elif hasattr(template_mgr, "add_template_search_path"):
+					template_mgr.add_template_search_path(abs_objects_dir)
+					print(f"[Info] Added template search path: {abs_objects_dir}")
+				elif hasattr(template_mgr, "load_object_configs"):
+					template_mgr.load_object_configs(abs_objects_dir)
+					print(f"[Info] Loaded object configs (method 3): {abs_objects_dir}")
+			# Debug output
+			loaded_templates = debug_list_templates(template_mgr)
+			print(f"[Debug] Loaded templates: {len(loaded_templates)} template(s)")
+			if loaded_templates and loaded_templates[0] != "(no templates loaded)":
+				print(f"        Examples: {loaded_templates[:3]}")
+		except Exception as exc:
+			print(f"[Warning] 无法加载物体配置: {exc}")
 
 		if not os.path.isabs(args.layout):
 			current_layout_path = get_default_layout_path(scene_name, os.path.basename(current_layout_path))
