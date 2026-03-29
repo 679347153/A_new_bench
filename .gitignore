@@ -13,8 +13,13 @@
 *.semantic.txt
 
 
+*.object_config.json
+objects/
+*.gltf
+
 # Generated outputs
 scene_info_export/
 semantic_demo_output/
 hm3d_pipeline_report.json
 *_scene_info.json
+

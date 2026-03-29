@@ -170,8 +170,9 @@ def overlay_legend(img: np.ndarray, palette: np.ndarray, cat_names: list,
                     cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1, cv2.LINE_AA)
     return out
 
+from typing import Optional
 
-def run(scene_name: str, save_dir: str | None, n_frames: int = 6):
+def run(scene_name: str, save_dir: Optional[str], n_frames: int = 6):
     print(f"\n加载场景: {scene_name} ...")
     os.environ["MAGNUM_LOG"]     = "quiet"
     os.environ["HABITAT_SIM_LOG"] = "quiet"
