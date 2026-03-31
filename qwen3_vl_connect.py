@@ -3,7 +3,7 @@
 Usage example:
 python qwen3_vl_connect.py \
   --ssh-host 7.216.187.6 \
-  --ssh-user ubuntu \
+  --ssh-user root \
   --remote-port 31822\
   --ssh-key /home/yuhang/zw_ws/qwen/zw_B200.txt \
   --image /home/yuhang/zw_ws/qwen/receipt.jpg \
