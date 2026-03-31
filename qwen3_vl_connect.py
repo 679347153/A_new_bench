@@ -25,6 +25,7 @@ import mimetypes
 import os
 import re
 import shlex
+import shutil
 import socket
 import subprocess
 import sys
@@ -99,6 +100,11 @@ def parse_args() -> argparse.Namespace:
 	parser.add_argument("--ssh-port", type=int, default=22, help="SSH server port")
 	parser.add_argument("--ssh-user", required=True, help="SSH username")
 	parser.add_argument("--ssh-key", required=True, help="Path to private key file")
+	parser.add_argument(
+		"--ssh-password",
+		default=None,
+		help="SSH password/passphrase for non-interactive mode (requires sshpass)",
+	)
 	parser.add_argument(
 		"--ssh-key-passphrase",
 		default=None,
@@ -211,14 +217,37 @@ def main() -> int:
 			"[Warn] --ssh-key-passphrase is not used by native ssh command. "
 			"Use ssh-agent or an unencrypted key, or enter passphrase when prompted."
 		)
+	if args.ssh_password and args.ssh_key_passphrase:
+		print(
+			"[Warn] Both --ssh-password and --ssh-key-passphrase are set. "
+			"Only --ssh-password is used for non-interactive authentication.",
+			file=sys.stderr,
+		)
+
+	cmd_for_run = tunnel_cmd
+	proc_env = os.environ.copy()
+	if args.ssh_password:
+		if shutil.which("sshpass") is None:
+			print(
+				"[Error] --ssh-password requires sshpass, but sshpass is not installed. "
+				"Install it first: sudo apt-get install -y sshpass",
+				file=sys.stderr,
+			)
+			return 1
+		proc_env["SSHPASS"] = args.ssh_password
+		cmd_for_run = ["sshpass", "-e", *tunnel_cmd]
 
 	print("[Info] SSH command:")
-	print(" ".join(shlex.quote(part) for part in tunnel_cmd))
+	if args.ssh_password:
+		print("sshpass -e " + " ".join(shlex.quote(part) for part in tunnel_cmd))
+	else:
+		print(" ".join(shlex.quote(part) for part in tunnel_cmd))
 	print("[Info] If prompted by ssh, please type passphrase/password in this terminal.")
 	tunnel_proc = subprocess.Popen(
-		tunnel_cmd,
+		cmd_for_run,
 		stdout=None,
 		stderr=None,
+		env=proc_env,
 	)
 
 	try:
