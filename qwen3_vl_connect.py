@@ -1,14 +1,26 @@
 """Connect to a remote vLLM Qwen3-VL endpoint through SSH private-key tunnel.
 
 Usage example:
+
+# Password mode (current setup)
 python qwen3_vl_connect.py \
   --ssh-host 7.216.187.6 \
 	--ssh-port 31822 \
 	--ssh-user root \
-	--ssh-password  \
+	--ssh-password 666666 \
 	--vllm-host 127.0.0.1 \
 	--vllm-port 8000 \
+  --image /home/yuhang/zw_ws/qwen/receipt.jpg \
+  --prompt "What is in the image?"
+
+# Private key mode
+python qwen3_vl_connect.py \
+  --ssh-host 7.216.187.6 \
+	--ssh-port 31822 \
+	--ssh-user root \
   --ssh-key /home/yuhang/zw_ws/qwen/zw_B200.txt \
+	--vllm-host 127.0.0.1 \
+	--vllm-port 8000 \
   --image /home/yuhang/zw_ws/qwen/receipt.jpg \
   --prompt "What is in the image?"
 
@@ -100,7 +112,7 @@ def parse_args() -> argparse.Namespace:
 	parser.add_argument("--ssh-host", required=True, help="SSH server host or IP")
 	parser.add_argument("--ssh-port", type=int, default=22, help="SSH server port")
 	parser.add_argument("--ssh-user", required=True, help="SSH username")
-	parser.add_argument("--ssh-key", required=True, help="Path to private key file")
+	parser.add_argument("--ssh-key", required=False, help="Path to private key file")
 	parser.add_argument(
 		"--ssh-password",
 		default=None,
@@ -170,9 +182,18 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
 	args = parse_args()
 
-	ssh_key_path = os.path.expanduser(args.ssh_key)
-	if not os.path.exists(ssh_key_path):
-		print(f"[Error] SSH private key not found: {ssh_key_path}", file=sys.stderr)
+	ssh_key_path = None
+	if args.ssh_key:
+		ssh_key_path = os.path.expanduser(args.ssh_key)
+		if not os.path.exists(ssh_key_path):
+			print(f"[Error] SSH private key not found: {ssh_key_path}", file=sys.stderr)
+			return 1
+
+	if not args.ssh_password and not ssh_key_path:
+		print(
+			"[Error] You must provide at least one auth method: --ssh-password or --ssh-key",
+			file=sys.stderr,
+		)
 		return 1
 
 	try:
@@ -203,8 +224,6 @@ def main() -> int:
 		"ServerAliveCountMax=3",
 		"-o",
 		f"StrictHostKeyChecking={args.ssh_strict_host_key_checking}",
-		"-i",
-		ssh_key_path,
 		"-p",
 		str(args.ssh_port),
 		"-N",
@@ -212,6 +231,18 @@ def main() -> int:
 		f"127.0.0.1:{local_port}:{args.remote_host}:{args.remote_port}",
 		f"{args.ssh_user}@{args.ssh_host}",
 	]
+	if args.ssh_password:
+		# Force password auth to avoid private-key prompt and interactive fallback.
+		tunnel_cmd[1:1] = [
+			"-o",
+			"PubkeyAuthentication=no",
+			"-o",
+			"PreferredAuthentications=password,keyboard-interactive",
+			"-o",
+			"NumberOfPasswordPrompts=1",
+		]
+	elif ssh_key_path:
+		tunnel_cmd[1:1] = ["-i", ssh_key_path]
 
 	if args.ssh_key_passphrase:
 		print(
@@ -243,7 +274,10 @@ def main() -> int:
 		print("sshpass -e " + " ".join(shlex.quote(part) for part in tunnel_cmd))
 	else:
 		print(" ".join(shlex.quote(part) for part in tunnel_cmd))
-	print("[Info] If prompted by ssh, please type passphrase/password in this terminal.")
+	if args.ssh_password:
+		print("[Info] Non-interactive password mode enabled.")
+	else:
+		print("[Info] If prompted by ssh, please type passphrase/password in this terminal.")
 	tunnel_proc = subprocess.Popen(
 		cmd_for_run,
 		stdout=None,
