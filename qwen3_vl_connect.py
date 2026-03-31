@@ -114,9 +114,15 @@ def parse_args() -> argparse.Namespace:
 	parser.add_argument("--max-tokens", type=int, default=2048)
 	parser.add_argument("--timeout", type=int, default=3600)
 	parser.add_argument(
+		"--ssh-strict-host-key-checking",
+		default="accept-new",
+		choices=["yes", "no", "accept-new", "ask"],
+		help="SSH StrictHostKeyChecking option",
+	)
+	parser.add_argument(
 		"--tunnel-ready-timeout",
 		type=float,
-		default=12.0,
+		default=30.0,
 		help="Seconds to wait for SSH tunnel to become ready",
 	)
 
@@ -151,6 +157,8 @@ def main() -> int:
 		"ServerAliveInterval=30",
 		"-o",
 		"ServerAliveCountMax=3",
+		"-o",
+		f"StrictHostKeyChecking={args.ssh_strict_host_key_checking}",
 		"-i",
 		ssh_key_path,
 		"-p",
@@ -169,31 +177,35 @@ def main() -> int:
 
 	print("[Info] SSH command:")
 	print(" ".join(shlex.quote(part) for part in tunnel_cmd))
+	print("[Info] If prompted by ssh, please type passphrase/password in this terminal.")
 	tunnel_proc = subprocess.Popen(
 		tunnel_cmd,
-		stdout=subprocess.PIPE,
-		stderr=subprocess.PIPE,
-		text=True,
+		stdout=None,
+		stderr=None,
 	)
 
 	try:
 		if tunnel_proc.poll() is not None:
-			stderr_text = tunnel_proc.stderr.read() if tunnel_proc.stderr else ""
 			print(
-				f"[Error] SSH tunnel process exited early. Details:\n{stderr_text}",
+				"[Error] SSH tunnel process exited early. "
+				"Please run the printed ssh command manually to see detailed SSH error.",
 				file=sys.stderr,
 			)
 			return 1
 
 		if not _wait_tunnel_ready("127.0.0.1", local_port, args.tunnel_ready_timeout):
-			stderr_text = ""
-			if tunnel_proc.poll() is not None and tunnel_proc.stderr:
-				stderr_text = tunnel_proc.stderr.read()
-			print(
-				"[Error] SSH tunnel was not ready in time. "
-				+ (f"Details:\n{stderr_text}" if stderr_text else ""),
-				file=sys.stderr,
-			)
+			if tunnel_proc.poll() is None:
+				print(
+					"[Error] SSH tunnel was not ready in time. "
+					"SSH may be waiting for passphrase/host-key confirmation, or connection is blocked.",
+					file=sys.stderr,
+				)
+			else:
+				print(
+					"[Error] SSH tunnel process exited before ready. "
+					"Please run the printed ssh command manually to inspect SSH error.",
+					file=sys.stderr,
+				)
 			return 1
 
 		base_url = f"http://127.0.0.1:{local_port}/v1"
