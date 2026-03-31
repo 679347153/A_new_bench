@@ -5,6 +5,7 @@ python qwen3_vl_connect.py \
   --ssh-host 7.216.187.6 \
 	--ssh-port 31822 \
 	--ssh-user root \
+	--ssh-password  \
 	--vllm-host 127.0.0.1 \
 	--vllm-port 8000 \
   --ssh-key /home/yuhang/zw_ws/qwen/zw_B200.txt \
