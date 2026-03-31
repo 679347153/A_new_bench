@@ -3,11 +3,18 @@
 Usage example:
 python qwen3_vl_connect.py \
   --ssh-host 7.216.187.6 \
-  --ssh-user root \
-  --remote-port 31822\
+	--ssh-port 31822 \
+	--ssh-user root \
+	--vllm-host 127.0.0.1 \
+	--vllm-port 8000 \
   --ssh-key /home/yuhang/zw_ws/qwen/zw_B200.txt \
   --image /home/yuhang/zw_ws/qwen/receipt.jpg \
   --prompt "Read all the text in the image."
+
+Note:
+- --ssh-port is SSH login port (your case is 31822)
+- --vllm-port is OpenAI-compatible API port inside remote host namespace
+- If vLLM runs in docker, publish container port to host (e.g. -p 8000:8000)
 """
 
 from __future__ import annotations
@@ -79,15 +86,19 @@ def parse_args() -> argparse.Namespace:
 	)
 
 	parser.add_argument(
+		"--vllm-host",
 		"--remote-host",
+		dest="remote_host",
 		default="127.0.0.1",
-		help="Remote host where vLLM API listens (usually 127.0.0.1)",
+		help="vLLM API host in remote namespace (usually 127.0.0.1)",
 	)
 	parser.add_argument(
+		"--vllm-port",
 		"--remote-port",
+		dest="remote_port",
 		type=int,
 		default=8000,
-		help="Remote vLLM API port",
+		help="vLLM OpenAI-compatible API port (NOT SSH port)",
 	)
 	parser.add_argument(
 		"--local-port",
@@ -147,6 +158,12 @@ def main() -> int:
 		f"[Info] Opening SSH tunnel {args.ssh_user}@{args.ssh_host}:{args.ssh_port} "
 		f"-> {args.remote_host}:{args.remote_port}"
 	)
+	if args.remote_port == args.ssh_port:
+		print(
+			"[Warn] vLLM port equals SSH port. Make sure this is intentional. "
+			"Usually SSH port and vLLM API port are different.",
+			file=sys.stderr,
+		)
 
 	local_port = args.local_port if args.local_port > 0 else _pick_free_local_port()
 	tunnel_cmd = [
