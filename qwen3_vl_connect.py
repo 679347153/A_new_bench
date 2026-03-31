@@ -9,7 +9,7 @@ python qwen3_vl_connect.py \
 	--vllm-port 8000 \
   --ssh-key /home/yuhang/zw_ws/qwen/zw_B200.txt \
   --image /home/yuhang/zw_ws/qwen/receipt.jpg \
-  --prompt "Read all the text in the image."
+  --prompt "What is in the image?"
 
 Note:
 - --ssh-port is SSH login port (your case is 31822)
@@ -23,6 +23,7 @@ import argparse
 import base64
 import mimetypes
 import os
+import re
 import shlex
 import socket
 import subprocess
@@ -68,6 +69,25 @@ def _build_image_url(image_input: str) -> str:
 	with open(image_path, "rb") as f:
 		encoded = base64.b64encode(f.read()).decode("utf-8")
 	return f"data:{mime_type};base64,{encoded}"
+
+
+def _clean_model_output(text: str | None) -> str:
+	"""Remove common thinking traces and return user-facing answer text."""
+	if not text:
+		return ""
+
+	cleaned = text
+	# Remove complete <think>...</think> blocks.
+	cleaned = re.sub(r"<think>.*?</think>", "", cleaned, flags=re.IGNORECASE | re.DOTALL)
+	# If reasoning leaked before a stray closing tag, keep content after the last closing tag.
+	if re.search(r"</think>", cleaned, flags=re.IGNORECASE):
+		parts = re.split(r"</think>", cleaned, flags=re.IGNORECASE)
+		cleaned = parts[-1]
+	# Remove stray open/close think tags.
+	cleaned = re.sub(r"</?think>", "", cleaned, flags=re.IGNORECASE)
+	# Normalize extra blank lines.
+	cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+	return cleaned.strip()
 
 
 def parse_args() -> argparse.Namespace:
@@ -250,7 +270,9 @@ def main() -> int:
 
 		print(f"Response costs: {elapsed:.2f}s")
 		print("Generated text:")
-		print(response.choices[0].message.content)
+		raw_text = response.choices[0].message.content
+		cleaned_text = _clean_model_output(raw_text)
+		print(cleaned_text if cleaned_text else raw_text)
 
 	except Exception as exc:
 		print(f"[Error] Request failed: {exc}", file=sys.stderr)
