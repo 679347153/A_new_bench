@@ -19,10 +19,12 @@
     --output-dir ./results/scene_info/
 
   # 或单个场景
+
   python query_rooms_for_objects.py \\
-    --ssh-host ... --ssh-port ... \\
-    --scene 00800-TEEsavR23oF \\
+    --ssh-host 7.216.187.6 --ssh-port 31822 --ssh-user root --ssh-password 666666 \\
+    --vllm-host 127.0.0.1 --vllm-port 8000 \\
     --images-dir ./objects_images \\
+    --scene 00808-y9hTuugGdiq \\
     --output-dir ./results/scene_info/
 """
 

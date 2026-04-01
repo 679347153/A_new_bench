@@ -46,6 +46,7 @@ Interactive layout editor.
 示例:
 	python test_layout.py 00800-TEEsavR23oF --layout scene_objects_v2.json
 	python test_layout.py 00800-TEEsavR23oF --ui-lang zh --font-path C:/Windows/Fonts/msyh.ttc
+	python test_layout.py  00808-y9hTuugGdiq
 """
 
 import argparse
