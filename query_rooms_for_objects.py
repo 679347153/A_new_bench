@@ -83,14 +83,15 @@ QWEN_SYSTEM_TEMPLATE = (
 )
 
 QWEN_QUERY_TEMPLATE = (
-    "任务：根据图片中的物体，选择该物体最可能出现的前5个房间区域。\n"
+    "任务：根据图片中的物体，选择该物体最可能出现的房间区域。\n"
     "\n"
     "约束（必须遵守）：\n"
     "1) 只能从下方候选房间中选择 region_id。\n"
     "2) room_center 必须与候选房间中的 center 完全一致，不得改写。\n"
-    "3) confidence_score 必须是 0 到 1 的浮点数，并按从高到低排序。\n"
-    "4) reasoning 必须是一句话，简短且具体。\n"
-    "5) 只输出 JSON，不要输出解释、推理过程、Markdown、前后缀文本。\n"
+    "3) 输出房间数量必须在 2 到 5 之间（可以少于5，但至少2个）。\n"
+    "4) confidence_score 必须是 0 到 1 的浮点数，并按从高到低排序。\n"
+    "5) reasoning 必须是一句话，简短且具体。\n"
+    "6) 只输出 JSON，不要输出解释、推理过程、Markdown、前后缀文本。\n"
     "\n"
     "请按如下 JSON Schema 输出（字段名必须一致）：\n"
     "{{\n"
@@ -386,6 +387,80 @@ def parse_room_recommendations(
         List of dicts with {rank, region_id, room_center, confidence_score, reasoning, ...}
     """
     recommendations = []
+
+    def _room_center_from_room(room: Dict[str, Any]) -> List[float]:
+        if "room_center" in room and isinstance(room["room_center"], list) and len(room["room_center"]) >= 3:
+            return [round(float(room["room_center"][0]), 4), round(float(room["room_center"][1]), 4), round(float(room["room_center"][2]), 4)]
+        bbox = room.get("bounding_box", {})
+        min_pt = bbox.get("min", [0.0, 0.0, 0.0])
+        max_pt = bbox.get("max", [0.0, 0.0, 0.0])
+        return [
+            round((float(min_pt[0]) + float(max_pt[0])) / 2.0, 4),
+            round((float(min_pt[1]) + float(max_pt[1])) / 2.0, 4),
+            round((float(min_pt[2]) + float(max_pt[2])) / 2.0, 4),
+        ]
+
+    def _normalize_and_fill(recs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        dedup: List[Dict[str, Any]] = []
+        seen = set()
+
+        for rec in recs:
+            rid = rec.get("region_id")
+            if rid is None:
+                continue
+            try:
+                rid = int(rid)
+            except Exception:
+                continue
+            if rid in seen or rid not in room_map:
+                continue
+            seen.add(rid)
+
+            confidence = float(rec.get("confidence_score", 0.5))
+            confidence = max(0.0, min(1.0, confidence))
+            reason = str(rec.get("reasoning", "")).strip() or "基于房间物体分布与空间语义的综合判断"
+
+            room = room_map[rid]
+            clean_rec = {
+                "rank": len(dedup) + 1,
+                "region_id": rid,
+                "confidence_score": round(confidence, 4),
+                "reasoning": reason,
+                "room_center": _room_center_from_room(room),
+            }
+            if "bounding_box" in room:
+                clean_rec["room_aabb"] = room["bounding_box"]
+            dedup.append(clean_rec)
+
+        if len(dedup) < 2:
+            fallback_rooms = sorted(
+                room_map.values(),
+                key=lambda r: int(r.get("object_count", 0)),
+                reverse=True,
+            )
+            for room in fallback_rooms:
+                rid = int(room.get("region_id", -1))
+                if rid < 0 or rid in seen:
+                    continue
+                seen.add(rid)
+                confidence = 0.51 if len(dedup) == 0 else 0.5
+                fallback = {
+                    "rank": len(dedup) + 1,
+                    "region_id": rid,
+                    "confidence_score": confidence,
+                    "reasoning": "模型输出候选不足，按场景房间信息回退补足",
+                    "room_center": _room_center_from_room(room),
+                }
+                if "bounding_box" in room:
+                    fallback["room_aabb"] = room["bounding_box"]
+                dedup.append(fallback)
+                if len(dedup) >= 2:
+                    break
+
+        dedup = sorted(dedup, key=lambda x: float(x.get("confidence_score", 0.0)), reverse=True)[:5]
+        for i, rec in enumerate(dedup, start=1):
+            rec["rank"] = i
+        return dedup
     
     # Build map of region_id -> room_info from scene_info
     room_map = {}
@@ -423,14 +498,7 @@ def parse_room_recommendations(
                 record["room_aabb"] = bbox
             recommendations.append(record)
 
-        recommendations = sorted(
-            recommendations,
-            key=lambda x: float(x.get("confidence_score", 0.0)),
-            reverse=True,
-        )
-        for i, rec in enumerate(recommendations, start=1):
-            rec["rank"] = i
-        return recommendations[:5]
+        return _normalize_and_fill(recommendations)
 
     # Fallback: Parse each line looking for "房间N:" pattern
     lines = cleaned_output.split("\n")
@@ -483,7 +551,7 @@ def parse_room_recommendations(
         
         recommendations.append(record)
     
-    return recommendations[:5]  # Top 5 only
+    return _normalize_and_fill(recommendations)
 
 
 # ===== 主логика =====
@@ -593,7 +661,9 @@ def process_scene(
                 "cleaned_output": cleaned_output,
                 "recommended_rooms": recommendations,
                 "metadata": {
-                    "total_objects_in_scene": len(scene_info.get("objects", [])),
+                    "total_objects_in_scene": scene_info.get("scene_info", {}).get(
+                        "total_objects", len(scene_info.get("objects", []))
+                    ),
                     "total_rooms_in_scene": len(scene_info.get("rooms", [])),
                     "top_5_found": len(recommendations),
                 },

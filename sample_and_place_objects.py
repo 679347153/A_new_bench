@@ -92,8 +92,13 @@ def generate_probabilities(
     if not recommended_rooms:
         print(f"  [Warning] No recommended rooms found for {object_name}")
         return None
+
+    # 允许推荐房间少于5，但至少需要2个。
+    if len(recommended_rooms) < 2:
+        print(f"  [Warning] Recommended rooms < 2 for {object_name}, skipping")
+        return None
     
-    # Generate random probabilities for top-5 rooms
+    # Generate random probabilities for top-N rooms, where N in [2, 5]
     n_rooms = min(5, len(recommended_rooms))
     raw_probs = np.random.rand(n_rooms)
     normalized_probs = raw_probs / raw_probs.sum()
@@ -138,7 +143,12 @@ def load_probabilities(object_name: str, scene_name: str, probabilities_dir: str
     
     try:
         with open(prob_path, "r", encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
+            probs = data.get("probabilities", [])
+            if len(probs) < 2:
+                print(f"  [Warning] Probability entries < 2: {prob_path}")
+                return None
+            return data
     except Exception as e:
         print(f"  [Error] Failed to load probabilities: {e}")
         return None
@@ -194,7 +204,7 @@ def sample_object_positions(
     # Scan images
     image_files = []
     if os.path.isdir(images_dir):
-        for ext in ["*.jpg", "*.jpeg", "*.png", "*.bmp"]:
+        for ext in ["*.webp", "*.jpg", "*.jpeg", "*.png", "*.bmp"]:
             image_files.extend(Path(images_dir).glob(ext))
     image_files = sorted(image_files)
     
@@ -217,6 +227,9 @@ def sample_object_positions(
         probabilities = probs_data.get("probabilities", [])
         if not probabilities:
             print(f"  [Warning] No probabilities for {object_name}")
+            continue
+        if len(probabilities) < 2:
+            print(f"  [Warning] Probabilities less than 2 for {object_name}, skipping")
             continue
         
         # Extract room centers and probability weights

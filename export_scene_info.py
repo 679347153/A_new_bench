@@ -109,13 +109,12 @@ def make_sim(scene_glb_path, dataset_config):
     """
     sim_cfg = habitat_sim.SimulatorConfiguration()
     sim_cfg.scene_dataset_config_file = os.path.abspath(dataset_config)
-    # scene_id 是不带路径前缀的场景 ID
-    scene_id = os.path.splitext(os.path.basename(scene_glb_path))[0]
-    if scene_id.endswith(".basis"):
-        scene_id = scene_id[:-6]  # 去掉 .basis 后缀
-    sim_cfg.scene_id = scene_id
+    # 直接使用场景文件绝对路径，避免不同版本对 scene_id 解析差异。
+    sim_cfg.scene_id = os.path.abspath(scene_glb_path)
     sim_cfg.enable_physics = False
     sim_cfg.gpu_device_id = 0
+    # 语义网格必须开启，否则许多对象/房间几何会退化为默认值。
+    sim_cfg.load_semantic_mesh = True
 
     sensor = habitat_sim.CameraSensorSpec()
     sensor.uuid = "color"
@@ -232,6 +231,12 @@ def _extract_obb_rotation(obb):
     return None
 
 
+def _bbox_is_zero(bbox_info):
+    min_pt = bbox_info.get("min", [0.0, 0.0, 0.0])
+    max_pt = bbox_info.get("max", [0.0, 0.0, 0.0])
+    return all(abs(float(v)) < 1e-8 for v in [*min_pt, *max_pt])
+
+
 def export_scene(scene_name, data_dir, dataset_config, output_dir):
     """
     导出单个场景信息并写入 JSON。
@@ -300,6 +305,18 @@ def export_scene(scene_name, data_dir, dataset_config, output_dir):
     category_counter = {}
     room_objects = {}  # region_id -> [obj_info, ...]
 
+    # 预取 region 几何，作为对象 AABB 异常时的回退。
+    region_bbox_map = {}
+    for region in getattr(sem_scene, "regions", []) or []:
+        if region is None:
+            continue
+        rid = getattr(region, "id", None)
+        if rid is None:
+            continue
+        rbbox = _extract_bbox_info(getattr(region, "aabb", None))
+        if not _bbox_is_zero(rbbox):
+            region_bbox_map[int(rid)] = rbbox
+
     sem_objects = sem_scene.objects
     for obj in sem_objects:
         sid = obj.semantic_id
@@ -355,26 +372,41 @@ def export_scene(scene_name, data_dir, dataset_config, output_dir):
     rooms_list = []
     for rid in sorted(room_objects.keys()):
         room_objs = room_objects[rid]
-        # 从房间内所有物体的 AABB 推算房间的大致范围
-        all_mins = np.array([o["aabb"]["min"] for o in room_objs])
-        all_maxs = np.array([o["aabb"]["max"] for o in room_objs])
-        room_min = all_mins.min(axis=0).tolist()
-        room_max = all_maxs.max(axis=0).tolist()
+
+        # 从房间内所有“非零AABB”物体估算范围，避免全零几何污染。
+        valid_boxes = [o["aabb"] for o in room_objs if not _bbox_is_zero(o["aabb"])]
+        if valid_boxes:
+            all_mins = np.array([b["min"] for b in valid_boxes])
+            all_maxs = np.array([b["max"] for b in valid_boxes])
+            room_min = all_mins.min(axis=0).tolist()
+            room_max = all_maxs.max(axis=0).tolist()
+        elif rid in region_bbox_map:
+            room_min = region_bbox_map[rid]["min"]
+            room_max = region_bbox_map[rid]["max"]
+        else:
+            room_min = [0.0, 0.0, 0.0]
+            room_max = [0.0, 0.0, 0.0]
 
         # 统计房间内的物体类别
         room_cats = {}
         for o in room_objs:
             room_cats[o["category"]] = room_cats.get(o["category"], 0) + 1
 
+        room_center = [
+            round((float(room_min[0]) + float(room_max[0])) / 2.0, 4),
+            round((float(room_min[1]) + float(room_max[1])) / 2.0, 4),
+            round((float(room_min[2]) + float(room_max[2])) / 2.0, 4),
+        ]
+
         rooms_list.append({
             "region_id": rid,
             "object_count": len(room_objs),
             "categories": room_cats,
+            "room_center": room_center,
             "bounding_box": {
                 "min": [round(x, 4) for x in room_min],
                 "max": [round(x, 4) for x in room_max],
             },
-            "object_ids": [o["id"] for o in room_objs],
         })
 
     # 5) 类别统计按数量降序，便于快速观察场景主导类别。
@@ -395,7 +427,6 @@ def export_scene(scene_name, data_dir, dataset_config, output_dir):
             {"name": name, "count": count} for name, count in categories_sorted
         ],
         "rooms": rooms_list,
-        "objects": objects_list,
     }
 
     # 显式关闭 Simulator，避免批量导出时资源占用累积。
