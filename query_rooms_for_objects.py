@@ -444,7 +444,7 @@ def process_scene(
         return {"success_count": 0, "fail_count": 0, "results": []}
     
     image_files = []
-    for ext in ["*.jpg", "*.jpeg", "*.png", "*.bmp"]:
+    for ext in ["*.webp", "*.jpg", "*.jpeg", "*.png", "*.bmp"]:
         image_files.extend(Path(images_dir).glob(ext))
     image_files = sorted(image_files)
     
