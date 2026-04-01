@@ -517,7 +517,7 @@ def main():
     
     # Scene selection
     parser.add_argument("--scene", type=str, help="Single scene name (e.g., 00800-TEEsavR23oF)")
-    parser.add_argument("--scenes", choices=["all"], default="all", help="Process all available scenes")
+    parser.add_argument("--scenes", choices=["all"], default=None, help="Process all available scenes")
     
     # Paths
     parser.add_argument("--images-dir", type=str, default=DEFAULT_IMAGES_DIR, help="Directory containing object images")
@@ -547,7 +547,7 @@ def main():
     args = parser.parse_args()
     
     # Validate scene selection
-    if args.scene and args.scenes == "all":
+    if args.scene and args.scenes is not None:
         print("[Error] Cannot specify both --scene and --scenes all")
         sys.exit(1)
     
