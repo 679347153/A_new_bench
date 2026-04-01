@@ -77,18 +77,36 @@ AVAILABLE_SCENES = [
     "00809-Qpor2mEya8F",
 ]
 
+QWEN_SYSTEM_TEMPLATE = (
+    "你是室内布局推荐助手。你必须基于用户给的候选房间列表作答，"
+    "禁止编造不存在的region_id和坐标。"
+)
+
 QWEN_QUERY_TEMPLATE = (
-    "看图片中的物体，它最有可能出现在房间的哪些地方？\n"
-    "请给出：\n"
-    "1. 前5个最可能的房间区域\n"
-    "2. 每个房间在3D空间中的几何中心点坐标 (x, y, z)\n"
-    "3. 置信分数（0-1）\n"
-    "4. 简短的理由（一句话）\n"
+    "任务：根据图片中的物体，选择该物体最可能出现的前5个房间区域。\n"
     "\n"
-    "格式示例：\n"
-    "房间1: region_id=0, 中心=(-2.5, 1.2, 3.8), 置信度=0.95, 理由：这是客厅中央的茶几\n"
-    "房间2: region_id=2, 中心=(-1.0, 0.9, 5.2), 置信度=0.80, 理由：厨房台面\n"
-    "..."
+    "约束（必须遵守）：\n"
+    "1) 只能从下方候选房间中选择 region_id。\n"
+    "2) room_center 必须与候选房间中的 center 完全一致，不得改写。\n"
+    "3) confidence_score 必须是 0 到 1 的浮点数，并按从高到低排序。\n"
+    "4) reasoning 必须是一句话，简短且具体。\n"
+    "5) 只输出 JSON，不要输出解释、推理过程、Markdown、前后缀文本。\n"
+    "\n"
+    "请按如下 JSON Schema 输出（字段名必须一致）：\n"
+    "{\n"
+    "  \"recommended_rooms\": [\n"
+    "    {\n"
+    "      \"rank\": 1,\n"
+    "      \"region_id\": 0,\n"
+    "      \"room_center\": [0.0, 0.0, 0.0],\n"
+    "      \"confidence_score\": 0.9,\n"
+    "      \"reasoning\": \"一句话理由\"\n"
+    "    }\n"
+    "  ]\n"
+    "}\n"
+    "\n"
+    "候选房间列表（仅可从中选5个）：\n"
+    "{room_candidates_json}\n"
 )
 
 
@@ -148,6 +166,33 @@ def _clean_model_output(text: str | None) -> str:
     # Normalize extra blank lines.
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     return cleaned.strip()
+
+
+def _extract_json_block(text: str) -> Optional[Dict[str, Any]]:
+    """Extract the first valid JSON object from model output."""
+    if not text:
+        return None
+
+    # Fast path: whole text is JSON
+    try:
+        obj = json.loads(text)
+        if isinstance(obj, dict):
+            return obj
+    except Exception:
+        pass
+
+    # Fallback: find first {...} block and parse
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return None
+    try:
+        obj = json.loads(text[start:end + 1])
+        if isinstance(obj, dict):
+            return obj
+    except Exception:
+        return None
+    return None
 
 
 # ===== SSH隧道管理 =====
@@ -259,6 +304,7 @@ class SSHTunnel:
 def query_qwen_for_rooms(
     client: OpenAI,
     image_path: str,
+    scene_info: Dict[str, Any],
     model: str = "Qwen/Qwen3-VL-235B-A22B-Thinking",
     max_tokens: int = 2048,
 ) -> Tuple[str, str]:
@@ -273,12 +319,38 @@ def query_qwen_for_rooms(
     except Exception as e:
         raise RuntimeError(f"Failed to build image URL: {e}")
     
+    room_candidates = []
+    for room in scene_info.get("rooms", []):
+        rid = room.get("region_id")
+        bbox = room.get("bounding_box", {})
+        min_pt = bbox.get("min", [0.0, 0.0, 0.0])
+        max_pt = bbox.get("max", [0.0, 0.0, 0.0])
+        if rid is None or len(min_pt) < 3 or len(max_pt) < 3:
+            continue
+        center = [
+            round((float(min_pt[0]) + float(max_pt[0])) / 2.0, 4),
+            round((float(min_pt[1]) + float(max_pt[1])) / 2.0, 4),
+            round((float(min_pt[2]) + float(max_pt[2])) / 2.0, 4),
+        ]
+        room_candidates.append(
+            {
+                "region_id": rid,
+                "center": center,
+                "object_count": room.get("object_count", 0),
+                "top_categories": list(room.get("categories", {}).keys())[:5],
+            }
+        )
+
+    room_candidates_json = json.dumps(room_candidates, ensure_ascii=False, indent=2)
+    query_text = QWEN_QUERY_TEMPLATE.format(room_candidates_json=room_candidates_json)
+
     messages = [
+        {"role": "system", "content": QWEN_SYSTEM_TEMPLATE},
         {
             "role": "user",
             "content": [
                 {"type": "image_url", "image_url": {"url": image_url}},
-                {"type": "text", "text": QWEN_QUERY_TEMPLATE},
+                {"type": "text", "text": query_text},
             ],
         }
     ]
@@ -323,7 +395,44 @@ def parse_room_recommendations(
             if rid is not None:
                 room_map[rid] = room
     
-    # Parse each line looking for "房间N:" pattern
+    # Try strict JSON parsing first
+    parsed_json = _extract_json_block(cleaned_output)
+    if parsed_json and isinstance(parsed_json.get("recommended_rooms"), list):
+        for idx, item in enumerate(parsed_json["recommended_rooms"][:5], start=1):
+            if not isinstance(item, dict):
+                continue
+            rid = item.get("region_id")
+            if rid is None:
+                continue
+            record = {
+                "rank": int(item.get("rank", idx)),
+                "region_id": int(rid),
+                "confidence_score": float(item.get("confidence_score", 0.5)),
+                "reasoning": str(item.get("reasoning", "")).strip(),
+            }
+            # Always trust scene_info center for consistency
+            if int(rid) in room_map and "bounding_box" in room_map[int(rid)]:
+                bbox = room_map[int(rid)]["bounding_box"]
+                min_pt = bbox.get("min", [0, 0, 0])
+                max_pt = bbox.get("max", [0, 0, 0])
+                record["room_center"] = [
+                    round((min_pt[0] + max_pt[0]) / 2, 4),
+                    round((min_pt[1] + max_pt[1]) / 2, 4),
+                    round((min_pt[2] + max_pt[2]) / 2, 4),
+                ]
+                record["room_aabb"] = bbox
+            recommendations.append(record)
+
+        recommendations = sorted(
+            recommendations,
+            key=lambda x: float(x.get("confidence_score", 0.0)),
+            reverse=True,
+        )
+        for i, rec in enumerate(recommendations, start=1):
+            rec["rank"] = i
+        return recommendations[:5]
+
+    # Fallback: Parse each line looking for "房间N:" pattern
     lines = cleaned_output.split("\n")
     rank = 0
     for line in lines:
@@ -464,7 +573,7 @@ def process_scene(
         
         try:
             # Query Qwen
-            raw_output, cleaned_output = query_qwen_for_rooms(client, str(image_path), model)
+            raw_output, cleaned_output = query_qwen_for_rooms(client, str(image_path), scene_info, model)
             
             # Parse recommendations
             recommendations = parse_room_recommendations(cleaned_output, scene_info)
@@ -479,7 +588,7 @@ def process_scene(
                     "query_timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
                     "model": model,
                 },
-                "query": QWEN_QUERY_TEMPLATE,
+                "query": "严格JSON模板，包含候选房间约束（见raw_output输入上下文）",
                 "raw_output": raw_output,
                 "cleaned_output": cleaned_output,
                 "recommended_rooms": recommendations,
