@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
 """
 批量查询物体在各场景中最有可能出现的房间位置。
 
@@ -11,20 +13,20 @@
 6. 生成JSON：场景信息 + 查询内容 + Qwen原始/清洗后回复 + 前5房间推荐 + 元数据
 
 用法：
-  python query_rooms_for_objects.py \\
-    --ssh-host 7.216.187.6 --ssh-port 31822 --ssh-user root --ssh-password 666666 \\
-    --vllm-host 127.0.0.1 --vllm-port 8000 \\
-    --images-dir ./objects_images \\
-    --scenes all \\
+  python query_rooms_for_objects.py \
+    --ssh-host 7.216.187.6 --ssh-port 31822 --ssh-user root --ssh-password 666666 \
+    --vllm-host 127.0.0.1 --vllm-port 8000 \
+    --images-dir ./objects_images \
+    --scenes all \
     --output-dir ./results/scene_info/
 
   # 或单个场景
 
-  python query_rooms_for_objects.py \\
-    --ssh-host 7.216.187.6 --ssh-port 31822 --ssh-user root --ssh-password 666666 \\
-    --vllm-host 127.0.0.1 --vllm-port 8000 \\
-    --images-dir ./objects_images \\
-    --scene 00808-y9hTuugGdiq \\
+  python query_rooms_for_objects.py \
+    --ssh-host 7.216.187.6 --ssh-port 31822 --ssh-user root --ssh-password 666666 \
+    --vllm-host 127.0.0.1 --vllm-port 8000 \
+    --images-dir ./objects_images \
+    --scene 00808-y9hTuugGdiq \
     --output-dir ./results/scene_info/
 """
 
