@@ -342,6 +342,8 @@ def launch_editor(scene_name: str, layout_json_path: str, ui_lang: str = "zh") -
     # Determine scene ID from scene_name
     scene_id = _get_scene_id(scene_name)
     
+    layout_json_path = os.path.abspath(layout_json_path)
+
     cmd = [
         sys.executable,
         "test_layout.py",

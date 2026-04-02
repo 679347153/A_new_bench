@@ -649,8 +649,9 @@ def main():
 			scene_idx = i
 			break
 
-	if os.path.isabs(args.layout):
-		current_layout_path = args.layout
+	# Keep user-provided layout path if it is absolute or points to an existing file.
+	if os.path.isabs(args.layout) or os.path.isfile(args.layout):
+		current_layout_path = os.path.abspath(args.layout)
 	else:
 		current_layout_path = get_default_layout_path(AVAILABLE_SCENES[scene_idx], args.layout)
 
@@ -720,7 +721,9 @@ def main():
 		except Exception as exc:
 			print(f"[Warning] 无法加载物体配置: {exc}")
 
-		if not os.path.isabs(args.layout):
+		# Only remap to scene configs when --layout is just a filename token.
+		layout_is_named_config = os.path.dirname(args.layout) == "" and not os.path.isfile(args.layout)
+		if not os.path.isabs(args.layout) and layout_is_named_config:
 			current_layout_path = get_default_layout_path(scene_name, os.path.basename(current_layout_path))
 		update_layout_catalog(scene_name)
 
