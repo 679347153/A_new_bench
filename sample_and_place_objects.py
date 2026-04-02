@@ -12,19 +12,19 @@
 
 用法：
   # 首次运行：生成概率文件
-  python sample_and_place_objects.py \\
-    --scene 00800-TEEsavR23oF \\
-    --mode generate \\
-    --images-dir ./objects_images \\
-    --rooms-info-dir ./results/scene_info \\
-    --probabilities-dir ./results/probabilities \\
+  python sample_and_place_objects.py \
+    --scene 00808-y9hTuugGdiq \
+    --mode generate \
+    --images-dir ./objects_images \
+    --rooms-info-dir ./results/scene_info \
+    --probabilities-dir ./results/probabilities \
     --layouts-dir ./results/layouts
 
   # 后续运行：读取已有概率文件
-  python sample_and_place_objects.py \\
-    --scene 00800-TEEsavR23oF \\
-    --mode load \\
-    --probabilities-dir ./results/probabilities \\
+  python sample_and_place_objects.py \
+    --scene 00808-y9hTuugGdiq \
+    --mode load \
+    --probabilities-dir ./results/probabilities \
     --layouts-dir ./results/layouts
 """
 
