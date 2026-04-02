@@ -115,6 +115,7 @@ UI_TEXT = {
 			"Z/X            Switch spawn template",
 			"V              Add current template in front of camera",
 			",/. </> 9/0    Switch selected object",
+			";/'            Switch selected object in current room",
 			"T/G            Move selected object forward/back",
 			"F/Y            Move selected object left/right",
 			"U/O            Move selected object up/down",
@@ -138,6 +139,8 @@ UI_TEXT = {
 		"layout": "Layout: {name}{dirty}",
 		"template": "Template: {name}  ({idx}/{total})",
 		"object_count": "Objects: {count}  Selected: {selected}",
+		"room_info": "Room: {room_id}  In-room objects: {count}",
+		"room_objects": "Room objects: {items}",
 		"camera": "Camera: ({x:.2f}, {y:.2f}, {z:.2f})  yaw={yaw:.1f} pitch={pitch:.1f}",
 		"help_hint": "[H] Help  [M] Save",
 		"selected_none": "None",
@@ -156,6 +159,7 @@ UI_TEXT = {
 			"Z/X            切换待添加模板",
 			"V              添加当前模板到相机前方",
 			",/. </> 9/0    切换选中物体",
+			";/'            在当前房间内切换物体",
 			"T/G            选中物体前后移动",
 			"F/Y            选中物体左右移动",
 			"U/O            选中物体上下移动",
@@ -179,6 +183,8 @@ UI_TEXT = {
 		"layout": "布局: {name}{dirty}",
 		"template": "模板: {name}  ({idx}/{total})",
 		"object_count": "物体数: {count}  选中: {selected}",
+		"room_info": "房间: {room_id}  房间内物体: {count}",
+		"room_objects": "房间物体: {items}",
 		"camera": "相机: ({x:.2f}, {y:.2f}, {z:.2f})  yaw={yaw:.1f} pitch={pitch:.1f}",
 		"help_hint": "[H] 帮助  [M] 保存",
 		"selected_none": "无",
@@ -192,6 +198,9 @@ DEFAULT_FONT_CANDIDATES = [
 	r"C:/Windows/Fonts/msyhbd.ttc",
 	r"C:/Windows/Fonts/simhei.ttf",
 	r"C:/Windows/Fonts/simsun.ttc",
+	"/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+	"/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+	"/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
 ]
 
 
@@ -295,6 +304,70 @@ def get_default_layout_path(scene_name, layout_name):
 	return os.path.join(get_configs_dir(scene_name), layout_name)
 
 
+def load_scene_rooms(scene_name):
+	"""Load room metadata from scene_info json for room-aware selection."""
+	candidates = [
+		os.path.join("results", "scene_info", scene_name, f"{scene_name}_scene_info.json"),
+		os.path.join("results", "scene_info", "temp_export", f"{scene_name}_scene_info.json"),
+	]
+
+	for path in candidates:
+		if not os.path.isfile(path):
+			continue
+		try:
+			with open(path, "r", encoding="utf-8") as f:
+				data = json.load(f)
+				rooms = data.get("rooms", [])
+				if isinstance(rooms, list):
+					return rooms
+		except Exception:
+			continue
+	return []
+
+
+def infer_room_id(position, rooms):
+	if position is None or not rooms:
+		return -1
+	try:
+		x, y, z = float(position[0]), float(position[1]), float(position[2])
+	except Exception:
+		return -1
+
+	for room in rooms:
+		bbox = room.get("bounding_box", {})
+		min_pt = bbox.get("min", [])
+		max_pt = bbox.get("max", [])
+		if len(min_pt) < 3 or len(max_pt) < 3:
+			continue
+		if min_pt[0] <= x <= max_pt[0] and min_pt[1] <= y <= max_pt[1] and min_pt[2] <= z <= max_pt[2]:
+			return int(room.get("region_id", -1))
+	return -1
+
+
+def get_room_object_indices(editor_items, room_id, rooms):
+	indices = []
+	if room_id < 0:
+		return indices
+	for idx, item in enumerate(editor_items):
+		obj = item.get("object")
+		if obj is None:
+			continue
+		if infer_room_id(obj.translation, rooms) == room_id:
+			indices.append(idx)
+	return indices
+
+
+def format_room_object_preview(editor_items, indices, max_items=4):
+	if not indices:
+		return "-"
+	labels = []
+	for idx in indices[:max_items]:
+		labels.append(f"{idx}:{editor_items[idx].get('model_id', '?')}")
+	if len(indices) > max_items:
+		labels.append(f"+{len(indices) - max_items}")
+	return " | ".join(labels)
+
+
 def scan_object_templates():
 	if not os.path.isdir(OBJECTS_DIR):
 		raise FileNotFoundError(f"物体模板目录不存在: {OBJECTS_DIR}")
@@ -351,14 +424,37 @@ def prettify_model_name(model_id):
 
 
 def resolve_template_handle(template_mgr, model_id):
+	# 1) exact
 	candidates = template_mgr.get_template_handles(model_id)
 	if candidates:
 		return candidates[0]
 
+	# 2) exact with suffix
 	if not model_id.endswith(".object_config.json"):
 		candidates = template_mgr.get_template_handles(f"{model_id}.object_config.json")
 		if candidates:
 			return candidates[0]
+
+	# 3) auto *_4k variant
+	if not model_id.endswith("_4k") and not model_id.endswith("_4k.object_config.json"):
+		model_4k = f"{model_id}_4k"
+		candidates = template_mgr.get_template_handles(model_4k)
+		if candidates:
+			return candidates[0]
+		candidates = template_mgr.get_template_handles(f"{model_4k}.object_config.json")
+		if candidates:
+			return candidates[0]
+
+	# 4) case-insensitive fallback
+	try:
+		needle = model_id.lower().replace(".object_config.json", "")
+		all_handles = template_mgr.get_template_handles()
+		for handle in all_handles:
+			name = os.path.basename(handle).lower().replace(".object_config.json", "")
+			if name == needle or name == f"{needle}_4k":
+				return handle
+	except Exception:
+		pass
 
 	return None
 
@@ -529,14 +625,20 @@ def main():
 	parser.add_argument("--font-path", default="", help="Path to a CJK font, for example C:/Windows/Fonts/msyh.ttc")
 	args = parser.parse_args()
 
-	ui = UI_TEXT[args.ui_lang]
-	overlay_text, unicode_ready = build_text_renderer(args.ui_lang, args.font_path or None)
+	ui_lang = args.ui_lang
+	overlay_text, unicode_ready = build_text_renderer(ui_lang, args.font_path or None)
+	if ui_lang == "zh" and not unicode_ready:
+		print("Warning: CJK font not found, fallback to English UI.")
+		ui_lang = "en"
+		overlay_text, unicode_ready = build_text_renderer(ui_lang, args.font_path or None)
+
+	ui = UI_TEXT[ui_lang]
 
 	if not os.path.isdir("hm3d") or not os.path.isdir("objects"):
 		print(ui["run_from_root"])
 		sys.exit(1)
 
-	if args.ui_lang == "zh" and not unicode_ready:
+	if ui_lang == "zh" and not unicode_ready:
 		print(ui["font_warning"])
 
 	templates = scan_object_templates()
@@ -565,6 +667,7 @@ def main():
 	show_help = True
 	dirty = False
 	status_text = ""
+	scene_rooms = []
 	camera_pos = np.array([0.0, CAMERA_HEIGHT, 0.0], dtype=np.float32)
 	yaw = 0.0
 	pitch = 0.0
@@ -584,7 +687,7 @@ def main():
 		layout_idx = find_layout_index(scene_layout_files, current_layout_path) if scene_layout_files else 0
 
 	def load_scene(idx):
-		nonlocal sim, camera_pos, yaw, pitch, dirty, current_layout_path
+		nonlocal sim, camera_pos, yaw, pitch, dirty, current_layout_path, scene_rooms
 		scene_name = AVAILABLE_SCENES[idx]
 		set_status(ui["loading_scene"].format(scene=scene_name))
 		scene_id = get_scene_id(scene_name)
@@ -623,6 +726,7 @@ def main():
 
 		loaded, skipped = load_layout_into_editor(sim, current_layout_path, editor_items)
 		select_after_load()
+		scene_rooms = load_scene_rooms(scene_name)
 		camera_pos = np.array([0.0, CAMERA_HEIGHT, 0.0], dtype=np.float32)
 		yaw = 0.0
 		pitch = 0.0
@@ -712,6 +816,25 @@ def main():
 		if key in (ord('.'), ord('>'), ord('0')) and editor_items:
 			selected_idx = cycle_index(selected_idx, len(editor_items), 1)
 
+		# 在当前房间内切换选中物体。
+		if key in (ord(';'), ord(':')) and editor_items and scene_rooms:
+			selected_item = editor_items[selected_idx] if 0 <= selected_idx < len(editor_items) else None
+			if selected_item is not None:
+				room_id = infer_room_id(selected_item["object"].translation, scene_rooms)
+				same_room_indices = get_room_object_indices(editor_items, room_id, scene_rooms)
+				if selected_idx in same_room_indices and len(same_room_indices) > 1:
+					pos = same_room_indices.index(selected_idx)
+					selected_idx = same_room_indices[(pos - 1) % len(same_room_indices)]
+
+		if key == ord("'") and editor_items and scene_rooms:
+			selected_item = editor_items[selected_idx] if 0 <= selected_idx < len(editor_items) else None
+			if selected_item is not None:
+				room_id = infer_room_id(selected_item["object"].translation, scene_rooms)
+				same_room_indices = get_room_object_indices(editor_items, room_id, scene_rooms)
+				if selected_idx in same_room_indices and len(same_room_indices) > 1:
+					pos = same_room_indices.index(selected_idx)
+					selected_idx = same_room_indices[(pos + 1) % len(same_room_indices)]
+
 		if key == ord('b') and 0 <= selected_idx < len(editor_items):
 			# 删除后尽量保持 selected_idx 仍指向一个有效对象，避免越界。
 			item = editor_items.pop(selected_idx)
@@ -797,9 +920,16 @@ def main():
 			frame = overlay_text(frame, [ui["render_error"].format(error=exc)], 20, 60, color=(80, 80, 255))
 
 		selected_label = ui["selected_none"]
+		room_id = -1
+		room_count = 0
+		room_preview = "-"
 		if 0 <= selected_idx < len(editor_items):
 			item = editor_items[selected_idx]
 			pos = item["object"].translation
+			room_id = infer_room_id(pos, scene_rooms)
+			room_indices = get_room_object_indices(editor_items, room_id, scene_rooms)
+			room_count = len(room_indices)
+			room_preview = format_room_object_preview(editor_items, room_indices)
 			selected_label = ui["selected_format"].format(
 				idx=selected_idx,
 				model=item["model_id"],
@@ -814,6 +944,8 @@ def main():
 			ui["layout"].format(name=os.path.basename(current_layout_path), dirty=" *" if dirty else ""),
 			ui["template"].format(name=templates[template_idx], idx=template_idx + 1, total=len(templates)),
 			ui["object_count"].format(count=len(editor_items), selected=selected_label),
+			ui["room_info"].format(room_id=room_id, count=room_count),
+			ui["room_objects"].format(items=room_preview),
 			ui["camera"].format(x=camera_pos[0], y=camera_pos[1], z=camera_pos[2], yaw=yaw, pitch=pitch),
 			ui["help_hint"],
 		]

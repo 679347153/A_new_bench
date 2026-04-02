@@ -64,6 +64,43 @@ AVAILABLE_SCENES = [
 ]
 
 
+# ===== 模板映射 =====
+
+def build_object_template_index(objects_dir: str = "./objects") -> Dict[str, str]:
+    """Build case-insensitive map: object stem -> template model_id."""
+    index: Dict[str, str] = {}
+    if not os.path.isdir(objects_dir):
+        return index
+
+    for filename in os.listdir(objects_dir):
+        if not filename.endswith(".object_config.json"):
+            continue
+        model_id = filename[:-len(".object_config.json")]
+        lower_model = model_id.lower()
+        index[lower_model] = model_id
+
+        # Add non-_4k alias if template uses _4k suffix.
+        if lower_model.endswith("_4k"):
+            alias = lower_model[:-3]
+            if alias and alias not in index:
+                index[alias] = model_id
+    return index
+
+
+def resolve_model_id_for_template(object_name: str, template_index: Dict[str, str]) -> str:
+    """Resolve object image stem to an existing template model_id."""
+    key = object_name.lower()
+    if key in template_index:
+        return template_index[key]
+
+    key_4k = f"{key}_4k"
+    if key_4k in template_index:
+        return template_index[key_4k]
+
+    # Fallback to original name, editor will try flexible matching.
+    return object_name
+
+
 # ===== 概率文件管理 =====
 
 def generate_probabilities(
@@ -211,6 +248,8 @@ def sample_object_positions(
     if not image_files:
         print(f"[Warning] No image files found in {images_dir}")
         return None
+
+    template_index = build_object_template_index("./objects")
     
     sampled_objects = []
     for obj_idx, image_path in enumerate(image_files):
@@ -247,19 +286,24 @@ def sample_object_positions(
         sampled_room = probabilities[sampled_idx]
         sampled_center = sampled_room.get("room_center", [0, 0, 0])
         sampled_confidence = sampled_room.get("probability", 0.5)
+
+        resolved_model_id = resolve_model_id_for_template(object_name, template_index)
         
         # Create object entry
         obj_entry = {
             "id": obj_idx,
-            "model_id": object_name,
-            "name": _prettify_model_name(object_name),
+            "model_id": resolved_model_id,
+            "name": _prettify_model_name(resolved_model_id),
             "position": sampled_center,
             "rotation": [0.0, 0.0, 0.0],
             "confidence": float(sampled_confidence),
             "source": "probability_sampling",
         }
         sampled_objects.append(obj_entry)
-        print(f"  ✓ Sampled {object_name}: room={sampled_room.get('region_id')}, center={sampled_center}")
+        print(
+            f"  ✓ Sampled {object_name} -> {resolved_model_id}: "
+            f"room={sampled_room.get('region_id')}, center={sampled_center}"
+        )
     
     if not sampled_objects:
         print("[Error] No objects sampled")
