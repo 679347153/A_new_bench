@@ -23,6 +23,8 @@
     2) 通过 habitat_sim 读取语义场景对象及其 3D 包围盒
     3) 将对象按 region_id 聚合为房间，并统计类别分布
     4) 生成统一 JSON（scene_info / categories / rooms / objects）
+
+    python export_scene_info.py --scene 00808-y9hTuugGdiq
 """
 
 import argparse
@@ -237,6 +239,22 @@ def _bbox_is_zero(bbox_info):
     return all(abs(float(v)) < 1e-8 for v in [*min_pt, *max_pt])
 
 
+def _obb_to_aabb_info(obb_center, obb_half_extents):
+    """Use OBB center/half-extents as a conservative AABB fallback."""
+    if not obb_center or not obb_half_extents:
+        return None
+    if len(obb_center) < 3 or len(obb_half_extents) < 3:
+        return None
+    min_pt = [round(float(obb_center[i]) - float(obb_half_extents[i]), 4) for i in range(3)]
+    max_pt = [round(float(obb_center[i]) + float(obb_half_extents[i]), 4) for i in range(3)]
+    return {
+        "min": min_pt,
+        "max": max_pt,
+        "center": [round((min_pt[i] + max_pt[i]) / 2.0, 4) for i in range(3)],
+        "size": [round(max_pt[i] - min_pt[i], 4) for i in range(3)],
+    }
+
+
 def export_scene(scene_name, data_dir, dataset_config, output_dir):
     """
     导出单个场景信息并写入 JSON。
@@ -344,11 +362,21 @@ def export_scene(scene_name, data_dir, dataset_config, output_dir):
         # 输出 3x3 旋转矩阵，旧版本绑定若不支持则返回 None。
         obb_rotation = _extract_obb_rotation(obb)
 
+        bbox_source = "aabb"
+        if _bbox_is_zero(aabb_info):
+            obb_fallback = _obb_to_aabb_info(obb_center, obb_half_extents)
+            if obb_fallback is not None and not _bbox_is_zero(obb_fallback):
+                aabb_info = obb_fallback
+                bbox_source = "obb_fallback"
+            else:
+                bbox_source = "zero"
+
         obj_info = {
             "id": sid,
             "category": cat,
             "region_id": region_id,
             "color_hex": color_hex,
+            "bbox_source": bbox_source,
             "aabb": {
                 "min": aabb_info["min"],
                 "max": aabb_info["max"],
@@ -380,12 +408,15 @@ def export_scene(scene_name, data_dir, dataset_config, output_dir):
             all_maxs = np.array([b["max"] for b in valid_boxes])
             room_min = all_mins.min(axis=0).tolist()
             room_max = all_maxs.max(axis=0).tolist()
+            room_bbox_source = "objects_aabb"
         elif rid in region_bbox_map:
             room_min = region_bbox_map[rid]["min"]
             room_max = region_bbox_map[rid]["max"]
+            room_bbox_source = "region_aabb"
         else:
             room_min = [0.0, 0.0, 0.0]
             room_max = [0.0, 0.0, 0.0]
+            room_bbox_source = "zero"
 
         # 统计房间内的物体类别
         room_cats = {}
@@ -403,6 +434,7 @@ def export_scene(scene_name, data_dir, dataset_config, output_dir):
             "object_count": len(room_objs),
             "categories": room_cats,
             "room_center": room_center,
+            "room_bbox_source": room_bbox_source,
             "bounding_box": {
                 "min": [round(x, 4) for x in room_min],
                 "max": [round(x, 4) for x in room_max],
@@ -411,6 +443,14 @@ def export_scene(scene_name, data_dir, dataset_config, output_dir):
 
     # 5) 类别统计按数量降序，便于快速观察场景主导类别。
     categories_sorted = sorted(category_counter.items(), key=lambda x: -x[1])
+
+    room_bbox_source_counter = {}
+    valid_room_bbox_count = 0
+    for room in rooms_list:
+        source = room.get("room_bbox_source", "zero")
+        room_bbox_source_counter[source] = room_bbox_source_counter.get(source, 0) + 1
+        if source != "zero":
+            valid_room_bbox_count += 1
 
     # 6) 组装最终 JSON。
     result = {
@@ -422,6 +462,10 @@ def export_scene(scene_name, data_dir, dataset_config, output_dir):
             "total_rooms": len(rooms_list),
             "navigable_area_m2": nav_area,
             "scene_aabb": scene_aabb_info,
+            "geometry_health": {
+                "rooms_with_valid_bbox": valid_room_bbox_count,
+                "room_bbox_sources": room_bbox_source_counter,
+            },
         },
         "categories": [
             {"name": name, "count": count} for name, count in categories_sorted
