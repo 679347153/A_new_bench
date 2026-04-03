@@ -22,7 +22,9 @@ def verify_file_existence():
         "test_layout.py",
         "export_scene_info.py",
         "qwen3_vl_connect.py",
+        "hm3d_paths.py",
         "hm3d/hm3d_annotated_basis.scene_dataset_config.json",
+        "hm3d/val/hm3d_annotated_val_basis.scene_dataset_config.json",
     ]
     
     missing = []
@@ -48,6 +50,8 @@ def verify_directory_structure():
         "results/probabilities",
         "results/layouts",
         "objects_images",
+        "hm3d/minival",
+        "hm3d/val",
     ]
     
     all_exist = True

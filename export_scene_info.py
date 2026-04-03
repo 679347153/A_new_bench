@@ -34,8 +34,11 @@ import os
 import sys
 import io
 import glob
+from pathlib import Path
 
 import numpy as np
+
+from hm3d_paths import list_available_scenes, resolve_scene_paths
 
 try:
     import habitat_sim
@@ -45,8 +48,8 @@ except ImportError:
 
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_DATA_DIR = os.path.join(SCRIPT_DIR, "hm3d", "minival")
-DEFAULT_DATASET_CONFIG = os.path.join(SCRIPT_DIR, "hm3d", "hm3d_annotated_basis.scene_dataset_config.json")
+DEFAULT_DATA_DIR = os.path.join(SCRIPT_DIR, "hm3d")
+DEFAULT_DATASET_CONFIG = None
 
 
 def parse_semantic_txt(semantic_txt_path):
@@ -106,16 +109,14 @@ def make_sim(scene_glb_path, dataset_config):
 
     说明:
         - 此处不做物理仿真，只读取语义图与包围盒，所以 enable_physics=False。
-        - scene_id 采用文件名去后缀的方式推导，并兼容 *.basis.glb -> scene_id。
+        - scene_id 使用 glb 的绝对路径，兼容 val/minival split。
         - 传感器配置是最小可运行配置，脚本并不依赖图像输出。
     """
     sim_cfg = habitat_sim.SimulatorConfiguration()
     sim_cfg.scene_dataset_config_file = os.path.abspath(dataset_config)
-    # 直接使用场景文件绝对路径，避免不同版本对 scene_id 解析差异。
     sim_cfg.scene_id = os.path.abspath(scene_glb_path)
     sim_cfg.enable_physics = False
     sim_cfg.gpu_device_id = 0
-    # 语义网格必须开启，否则许多对象/房间几何会退化为默认值。
     sim_cfg.load_semantic_mesh = True
 
     sensor = habitat_sim.CameraSensorSpec()
@@ -261,8 +262,8 @@ def export_scene(scene_name, data_dir, dataset_config, output_dir):
 
     参数:
         scene_name: 场景目录名，例如 00824-Dd4bFSTQ8gi。
-        data_dir: 场景根目录。
-        dataset_config: scene_dataset_config.json 路径。
+        data_dir: 场景根目录（hm3d、hm3d/minival 或 hm3d/val）。
+        dataset_config: scene_dataset_config.json 路径；若为空则自动按 split 解析。
         output_dir: 输出目录。
 
     返回:
@@ -274,29 +275,17 @@ def export_scene(scene_name, data_dir, dataset_config, output_dir):
         - rooms: 按 region_id 聚合的房间统计
         - objects: 每个对象的几何和语义信息
     """
-    scene_dir = os.path.join(data_dir, scene_name)
-    if not os.path.isdir(scene_dir):
-        print(f"  [跳过] 目录不存在: {scene_dir}")
+    scene_paths = resolve_scene_paths(scene_name, require_semantic=True, root=Path(data_dir))
+    if scene_paths is None:
+        print(f"  [跳过] 场景不可用或缺少 semantic.txt: {scene_name}")
         return None
 
-    parts = scene_name.split("-", 1)
-    scene_id = parts[1] if len(parts) > 1 else scene_name
-
-    # 目录名常见格式是 "00824-Dd4bFSTQ8gi"，scene_id 取 '-' 后半段。
-    # 如果没有 '-'，则直接退化为 scene_name。
-
-    # 检查必需文件。
-    # 注意：navmesh 可选（缺失时仅无法输出 navigable_area_m2）。
-    basis_glb = os.path.join(scene_dir, f"{scene_id}.basis.glb")
-    semantic_txt = os.path.join(scene_dir, f"{scene_id}.semantic.txt")
-    navmesh = os.path.join(scene_dir, f"{scene_id}.basis.navmesh")
-
-    if not os.path.isfile(basis_glb):
-        print(f"  [跳过] 缺少 basis.glb: {basis_glb}")
-        return None
-    if not os.path.isfile(semantic_txt):
-        print(f"  [跳过] 缺少 semantic.txt: {semantic_txt}")
-        return None
+    scene_dir = str(scene_paths.scene_dir)
+    scene_id = scene_paths.scene_id
+    basis_glb = str(scene_paths.stage_glb)
+    semantic_txt = str(scene_paths.semantic_txt)
+    navmesh = str(scene_paths.navmesh)
+    dataset_config = str(dataset_config or scene_paths.dataset_config)
 
     # 1) 解析 semantic.txt，得到语义 ID 到类别/房间的映射。
     txt_entries = parse_semantic_txt(semantic_txt)
@@ -487,23 +476,8 @@ def export_scene(scene_name, data_dir, dataset_config, output_dir):
 
 
 def find_scenes(data_dir):
-    """
-    自动发现 data_dir 下所有看起来像 HM3D 的场景目录。
-
-    当前规则较宽松：
-        - 是目录
-        - 前两位是数字
-        - 名称中含 '-'
-    """
-    scenes = []
-    for entry in sorted(os.listdir(data_dir)):
-        full = os.path.join(data_dir, entry)
-        if not os.path.isdir(full):
-            continue
-        # 匹配 00xxx-xxxx 格式
-        if len(entry) > 6 and entry[0:2].isdigit() and "-" in entry:
-            scenes.append(entry)
-    return scenes
+    """Return merged valid scenes from val/minival, de-duplicated with val priority."""
+    return list_available_scenes(require_semantic=True, root=Path(data_dir))
 
 
 def main():
@@ -519,9 +493,9 @@ def main():
     parser.add_argument("--scene", type=str, help="场景名, 例如 00824-Dd4bFSTQ8gi")
     parser.add_argument("--all", action="store_true", help="导出 data_dir 下所有场景")
     parser.add_argument("--data-dir", type=str, default=DEFAULT_DATA_DIR,
-                        help="场景数据根目录 (默认: 脚本目录下 hm3d/minival)")
+                        help="场景数据根目录 (默认: 脚本目录下 hm3d，自动合并 val/minival)")
     parser.add_argument("--dataset-config", type=str, default=None,
-                        help="scene_dataset_config.json 路径 (默认: data_dir 下的 hm3d_annotated_basis.scene_dataset_config.json)")
+                        help="scene_dataset_config.json 路径（可选；默认按场景 split 自动选择）")
     parser.add_argument("--output-dir", type=str, default=None,
                         help="输出目录 (默认: data_dir/scene_info_export)")
     args = parser.parse_args()
@@ -534,22 +508,15 @@ def main():
         print(f"数据目录不存在: {data_dir}")
         sys.exit(1)
 
-    dataset_config = args.dataset_config
-    if dataset_config is None:
-        dataset_config = DEFAULT_DATASET_CONFIG
-    if not os.path.isfile(dataset_config):
-        print(f"dataset config 不存在: {dataset_config}")
-        sys.exit(1)
-
     output_dir = args.output_dir or os.path.join(data_dir, "scene_info_export")
 
     if args.all:
         scenes = find_scenes(data_dir)
         print(f"发现 {len(scenes)} 个场景，开始导出...\n")
         for s in scenes:
-            export_scene(s, data_dir, dataset_config, output_dir)
+            export_scene(s, data_dir, args.dataset_config, output_dir)
     else:
-        export_scene(args.scene, data_dir, dataset_config, output_dir)
+        export_scene(args.scene, data_dir, args.dataset_config, output_dir)
 
     print(f"\n导出完成! 文件保存在: {output_dir}")
 

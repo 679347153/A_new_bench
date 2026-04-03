@@ -45,6 +45,8 @@ import time
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Any
 
+from hm3d_paths import list_available_scenes, resolve_scene_paths
+
 try:
     from openai import OpenAI
 except ImportError:
@@ -59,23 +61,9 @@ except ImportError:
 
 
 # ===== 常量 =====
-SCENES_DIR = "hm3d"
-SCENE_DATASET_CONFIG = "./hm3d/hm3d_annotated_basis.scene_dataset_config.json"
 DEFAULT_OUTPUT_DIR = "./results/scene_info"
 DEFAULT_IMAGES_DIR = "./objects_images"
-
-AVAILABLE_SCENES = [
-    "00800-TEEsavR23oF",
-    "00801-HaxA7YrQdEC",
-    "00802-wcojb4TFT35",
-    "00803-k1cupFYWXJ6",
-    "00804-BHXhpBwSMLh",
-    "00805-SUHsP6z2gcJ",
-    "00806-tQ5s4ShP627",
-    "00807-rsggHU7g7dh",
-    "00808-y9hTuugGdiq",
-    "00809-Qpor2mEya8F",
-]
+AVAILABLE_SCENES = list_available_scenes(require_semantic=True)
 
 QWEN_SYSTEM_TEMPLATE = (
     "你是室内布局推荐助手。你必须基于用户给的候选房间列表作答，"
@@ -573,6 +561,11 @@ def load_or_export_scene_info(scene_name: str, output_dir: str) -> Optional[Dict
     if habitat_sim is None:
         print(f"  [Error] habitat_sim not available and scene_info not pre-exported")
         return None
+
+    scene_paths = resolve_scene_paths(scene_name, require_semantic=True)
+    if scene_paths is None:
+        print(f"  [Error] Scene not found in merged hm3d splits or missing semantic.txt: {scene_name}")
+        return None
     
     try:
         from export_scene_info import export_scene
@@ -581,8 +574,8 @@ def load_or_export_scene_info(scene_name: str, output_dir: str) -> Optional[Dict
         temp_export_dir = os.path.join(output_dir, "temp_export")
         result = export_scene(
             scene_name,
-            os.path.join(SCENES_DIR, "minival"),
-            SCENE_DATASET_CONFIG,
+            str(scene_paths.split_root.parent),
+            str(scene_paths.dataset_config),
             temp_export_dir,
         )
         return result
@@ -729,10 +722,11 @@ def main():
     if args.scene and args.scenes is not None:
         print("[Error] Cannot specify both --scene and --scenes all")
         sys.exit(1)
-    
+    if args.scene and args.scene not in AVAILABLE_SCENES:
+        print(f"[Error] Scene not found in merged valid scenes: {args.scene}")
+        sys.exit(1)
+
     scenes_to_process = [args.scene] if args.scene else AVAILABLE_SCENES
-    
-    # Setup SSH tunnel
     tunnel = SSHTunnel(
         ssh_host=args.ssh_host,
         ssh_port=args.ssh_port,

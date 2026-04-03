@@ -17,6 +17,8 @@ import sys
 
 import numpy as np
 
+from hm3d_paths import list_available_scenes, resolve_scene_paths
+
 try:
     import habitat_sim
 except ImportError:
@@ -30,10 +32,8 @@ except ImportError:
 
 # ─────────────────────── 默认路径配置 ───────────────────────
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-ROOT_DATASET  = os.path.join(SCRIPT_DIR, "hm3d")
-DATASET_CONFIG = os.path.join(ROOT_DATASET, "hm3d_annotated_basis.scene_dataset_config.json")
-
 DEFAULT_SCENE  = "00800-TEEsavR23oF"
+AVAILABLE_SCENES = list_available_scenes(require_semantic=True)
 
 # 调色板：为每个 category index 分配固定颜色（HSV 均匀分布，转 BGR）
 def _build_palette(n: int) -> np.ndarray:
@@ -54,18 +54,13 @@ def _build_palette(n: int) -> np.ndarray:
 
 
 def make_simulator(scene_name: str) -> habitat_sim.Simulator:
-    scene_dir  = os.path.join(ROOT_DATASET, "minival", scene_name)
-    scene_stem = scene_name.split("-", 1)[1]
-    scene_glb  = os.path.join(scene_dir, scene_stem + ".basis.glb")
-
-    if not os.path.exists(scene_glb):
-        raise FileNotFoundError(f"场景文件不存在: {scene_glb}")
-    if not os.path.exists(DATASET_CONFIG):
-        raise FileNotFoundError(f"数据集配置文件不存在: {DATASET_CONFIG}")
+    scene_paths = resolve_scene_paths(scene_name, require_semantic=True)
+    if scene_paths is None:
+        raise FileNotFoundError(f"场景文件不存在或缺少 semantic.txt: {scene_name}")
 
     sim_cfg = habitat_sim.SimulatorConfiguration()
-    sim_cfg.scene_id = scene_glb
-    sim_cfg.scene_dataset_config_file = DATASET_CONFIG
+    sim_cfg.scene_id = str(scene_paths.stage_glb)
+    sim_cfg.scene_dataset_config_file = str(scene_paths.dataset_config)
     sim_cfg.enable_physics = False
     sim_cfg.load_semantic_mesh = True
 

@@ -59,6 +59,8 @@ import time
 import cv2
 import numpy as np
 
+from hm3d_paths import list_available_scenes, resolve_scene_paths
+
 try:
 	from PIL import Image, ImageDraw, ImageFont
 except ImportError:
@@ -76,21 +78,9 @@ except ImportError:
 
 
 SCENES_DIR = "hm3d"
-SCENE_DATASET_CONFIG = "./hm3d/hm3d_annotated_basis.scene_dataset_config.json"
 OBJECTS_DIR = "./objects"
 
-AVAILABLE_SCENES = [
-	"00800-TEEsavR23oF",
-	"00801-HaxA7YrQdEC",
-	"00802-wcojb4TFT35",
-	"00803-k1cupFYWXJ6",
-	"00804-BHXhpBwSMLh",
-	"00805-SUHsP6z2gcJ",
-	"00806-tQ5s4ShP627",
-	"00807-rsggHU7g7dh",
-	"00808-y9hTuugGdiq",
-	"00809-Qpor2mEya8F",
-]
+AVAILABLE_SCENES = list_available_scenes(require_semantic=True)
 
 DISPLAY_WIDTH = 1280
 DISPLAY_HEIGHT = 720
@@ -259,20 +249,24 @@ def normalize_key(raw_key):
 
 
 def get_scene_dir(scene_name):
-	return os.path.join(SCENES_DIR, "minival", scene_name)
+	scene_paths = resolve_scene_paths(scene_name, require_semantic=False)
+	if scene_paths is None:
+		raise FileNotFoundError(f"场景目录不存在: {scene_name}")
+	return str(scene_paths.scene_dir)
 
 
 def get_scene_id(scene_name):
-	scene_dir = get_scene_dir(scene_name)
-	if not os.path.isdir(scene_dir):
-		raise FileNotFoundError(f"场景目录不存在: {scene_dir}")
-	parts = scene_name.split("-", 1)
-	return parts[1] if len(parts) > 1 else scene_name
+	scene_paths = resolve_scene_paths(scene_name, require_semantic=False)
+	if scene_paths is None:
+		raise FileNotFoundError(f"场景目录不存在: {scene_name}")
+	return scene_paths.scene_id
 
 
 def get_stage_glb_path(scene_name):
-	scene_id = get_scene_id(scene_name)
-	return os.path.join(get_scene_dir(scene_name), f"{scene_id}.basis.glb")
+	scene_paths = resolve_scene_paths(scene_name, require_semantic=False)
+	if scene_paths is None:
+		raise FileNotFoundError(f"场景目录不存在: {scene_name}")
+	return str(scene_paths.stage_glb)
 
 
 def get_configs_dir(scene_name):
@@ -383,10 +377,14 @@ def scan_object_templates():
 	return templates
 
 
-def make_sim_cfg(scene_id):
+def make_sim_cfg(scene_name):
+	scene_paths = resolve_scene_paths(scene_name, require_semantic=False)
+	if scene_paths is None:
+		raise FileNotFoundError(f"场景目录不存在: {scene_name}")
+
 	sim_cfg = habitat_sim.SimulatorConfiguration()
-	sim_cfg.scene_dataset_config_file = SCENE_DATASET_CONFIG
-	sim_cfg.scene_id = scene_id
+	sim_cfg.scene_dataset_config_file = str(scene_paths.dataset_config)
+	sim_cfg.scene_id = str(scene_paths.stage_glb)
 	sim_cfg.enable_physics = False
 	sim_cfg.gpu_device_id = 0
 
@@ -691,8 +689,7 @@ def main():
 		nonlocal sim, camera_pos, yaw, pitch, dirty, current_layout_path, scene_rooms
 		scene_name = AVAILABLE_SCENES[idx]
 		set_status(ui["loading_scene"].format(scene=scene_name))
-		scene_id = get_scene_id(scene_name)
-		cfg = make_sim_cfg(scene_id)
+		cfg = make_sim_cfg(scene_name)
 
 		if sim is not None:
 			sim.close()

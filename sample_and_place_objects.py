@@ -37,6 +37,8 @@ import time
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
+from hm3d_paths import list_available_scenes, resolve_scene_paths
+
 try:
     import numpy as np
 except ImportError:
@@ -50,18 +52,7 @@ DEFAULT_PROBABILITIES_DIR = "./results/probabilities"
 DEFAULT_LAYOUTS_DIR = "./results/layouts"
 DEFAULT_IMAGES_DIR = "./objects_images"
 
-AVAILABLE_SCENES = [
-    "00800-TEEsavR23oF",
-    "00801-HaxA7YrQdEC",
-    "00802-wcojb4TFT35",
-    "00803-k1cupFYWXJ6",
-    "00804-BHXhpBwSMLh",
-    "00805-SUHsP6z2gcJ",
-    "00806-tQ5s4ShP627",
-    "00807-rsggHU7g7dh",
-    "00808-y9hTuugGdiq",
-    "00809-Qpor2mEya8F",
-]
+AVAILABLE_SCENES = list_available_scenes(require_semantic=True)
 
 
 # ===== 模板映射 =====
@@ -308,10 +299,15 @@ def sample_object_positions(
     if not sampled_objects:
         print("[Error] No objects sampled")
         return None
+
+    scene_paths = resolve_scene_paths(scene_name, require_semantic=True)
+    if scene_paths is None:
+        print(f"[Error] Scene not found in merged hm3d splits or missing semantic.txt: {scene_name}")
+        return None
     
     # Build layout JSON
     layout_json = {
-        "scene": f"hm3d/minival/{scene_name}/{_get_scene_id(scene_name)}.basis.glb",
+        "scene": str(scene_paths.stage_glb),
         "timestamp": time.time(),
         "objects": sampled_objects,
     }
@@ -419,7 +415,8 @@ def interactive_sampling_loop(
             user_input = input("Save to final layout? (y/n/q): ").strip().lower()
             if user_input in ("y", "yes"):
                 # Find the latest saved layout (should be overwritten by editor)
-                scene_configs_dir = os.path.join("hm3d", "minival", scene_name, "configs")
+                scene_paths = resolve_scene_paths(scene_name, require_semantic=False)
+                scene_configs_dir = os.path.join(str(scene_paths.scene_dir), "configs") if scene_paths else os.path.join("hm3d", "minival", scene_name, "configs")
                 if os.path.isdir(scene_configs_dir):
                     # Get the most recently modified JSON
                     json_files = list(Path(scene_configs_dir).glob("*.json"))
@@ -488,7 +485,8 @@ def main():
     
     # Validate scene
     if args.scene not in AVAILABLE_SCENES:
-        print(f"[Warning] Scene {args.scene} not in known list, but proceeding...")
+        print(f"[Error] Scene {args.scene} not in merged available list")
+        sys.exit(1)
     
     # Validate mode
     if args.mode == "load":
