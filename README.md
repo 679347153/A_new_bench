@@ -238,6 +238,63 @@ python sample_and_place_objects.py \
 - results/probabilities/00808-y9hTuugGdiq/mug_01_probs.json
 - results/layouts/00808-y9hTuugGdiq/final_*.json
 
+## Benchmark 实现（第一阶段）
+
+已新增基础实现文件：
+
+- benchmark/__init__.py
+- benchmark/schemas.py
+- benchmark/metrics.py
+- scripts/01_prepare_splits.py
+- scripts/03_generate_benchmark_episodes.py
+- scripts/04_validate_episodes.py
+- scripts/05_evaluate_benchmark.py
+
+推荐执行顺序：
+
+1. 生成 split 清单（60 train / 20 val）
+
+python scripts/01_prepare_splits.py \
+  --train-count 60 \
+  --val-count 20 \
+  --seed 42 \
+  --output benchmark/splits/benchmark_split_v1.json
+
+说明：当前场景数不足时，可临时加 --allow-reuse-scenes 做冒烟验证。
+
+1. 先做 dry-run，验证规模与分配逻辑
+
+python scripts/03_generate_benchmark_episodes.py \
+  --split-manifest benchmark/splits/benchmark_split_v1.json \
+  --states-per-scene 15 \
+  --train-episodes-per-scene 5000 \
+  --val-episodes-per-scene 10 \
+  --dry-run
+
+1. 正式生成 episodes
+
+python scripts/03_generate_benchmark_episodes.py \
+  --split-manifest benchmark/splits/benchmark_split_v1.json \
+  --states-per-scene 15 \
+  --train-episodes-per-scene 5000 \
+  --val-episodes-per-scene 10
+
+1. 校验生成结果结构与配额
+
+python scripts/04_validate_episodes.py \
+  --episodes-root benchmark/episodes/v1 \
+  --expected-train-scenes 60 \
+  --expected-val-scenes 20 \
+  --expected-states-per-scene 15 \
+  --expected-train-episodes-per-scene 5000 \
+  --expected-val-episodes-per-scene 10
+
+1. 评测汇总（输入为 agent 运行后导出的 jsonl）
+
+python scripts/05_evaluate_benchmark.py \
+  --input benchmark/eval/episode_results.jsonl \
+  --output benchmark/eval/summary.json
+
 ### 4）快速复跑（load）
 
 python sample_and_place_objects.py \

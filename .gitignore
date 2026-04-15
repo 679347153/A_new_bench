@@ -16,6 +16,8 @@
 *.object_config.json
 objects/
 *.gltf
+*.webp
+*.bin
 
 # Generated outputs
 scene_info_export/
