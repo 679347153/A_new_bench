@@ -84,6 +84,7 @@ python query_rooms_for_objects.py \
 - 基于 rooms.json 生成或加载概率
 - 为每个物体采样 1 个房间中心作为初始位置
 - 调用编辑器微调并保存最终布局
+- 支持 `--placement auto` 在指定 `--region-ids` 的房间/区域内自动放置
 
 ### 关键参数
 - --scene：必填
@@ -92,6 +93,8 @@ python query_rooms_for_objects.py \
 - --rooms-info-dir：默认 ./results/scene_info
 - --probabilities-dir：默认 ./results/probabilities
 - --layouts-dir：默认 ./results/layouts
+- --placement：manual 或 auto，默认 manual
+- --region-ids：逗号分隔的 region_id，例如 3 或 3,7,9；不填则不限制范围
 - --ui-lang：zh 或 en，默认 zh
 
 ### 首次运行（生成概率）
@@ -101,14 +104,17 @@ python sample_and_place_objects.py \
   --images-dir ./objects_images \
   --rooms-info-dir ./results/scene_info \
   --probabilities-dir ./results/probabilities \
-  --layouts-dir ./results/layouts
+  --layouts-dir ./results/layouts \
+  --placement auto \
+  --region-ids 3
 
 ### 后续迭代（读取已有概率）
 python sample_and_place_objects.py \
   --scene 00808-y9hTuugGdiq \
   --mode load \
   --probabilities-dir ./results/probabilities \
-  --layouts-dir ./results/layouts
+  --layouts-dir ./results/layouts \
+  --placement manual
 
 ## JSON 输出结构
 

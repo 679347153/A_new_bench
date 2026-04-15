@@ -28,3 +28,5 @@ hm3d_pipeline_report.json
 benchmark/episodes/
 benchmark/eval/
 benchmark/splits/
+
+*.pyc

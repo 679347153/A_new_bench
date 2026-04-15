@@ -150,6 +150,65 @@ def load_sd_ovon_layout(
         return None
 
 
+def parse_region_ids(region_ids_text: Optional[str]) -> Optional[List[int]]:
+    """Parse a comma-separated region id list into integers."""
+    if region_ids_text is None:
+        return None
+
+    text = str(region_ids_text).strip()
+    if not text or text.lower() in {"all", "*"}:
+        return None
+
+    region_ids: List[int] = []
+    for chunk in text.split(","):
+        token = chunk.strip()
+        if not token:
+            continue
+        try:
+            region_ids.append(int(token))
+        except ValueError as exc:
+            raise ValueError(f"Invalid region id: {token}") from exc
+
+    unique_ids = sorted(set(region_ids))
+    return unique_ids or None
+
+
+def _room_in_scope(room: Dict[str, Any], region_ids: Optional[List[int]]) -> bool:
+    """Check whether a room belongs to the selected placement scope."""
+    if not region_ids:
+        return True
+    try:
+        return int(room.get("region_id", -1)) in region_ids
+    except Exception:
+        return False
+
+
+def _room_center_from_room(room: Dict[str, Any]) -> List[float]:
+    """Extract a room center with a safe zero fallback."""
+    center = room.get("room_center", [0.0, 0.0, 0.0])
+    if not isinstance(center, list) or len(center) < 3:
+        return [0.0, 0.0, 0.0]
+    try:
+        return [float(center[0]), float(center[1]), float(center[2])]
+    except Exception:
+        return [0.0, 0.0, 0.0]
+
+
+def _filter_items_by_region_ids(items: List[Dict[str, Any]], region_ids: Optional[List[int]]) -> List[Dict[str, Any]]:
+    """Keep only items whose region_id is inside the requested scope."""
+    if not region_ids:
+        return list(items)
+
+    filtered: List[Dict[str, Any]] = []
+    for item in items:
+        try:
+            if int(item.get("region_id", -1)) in region_ids:
+                filtered.append(item)
+        except Exception:
+            continue
+    return filtered
+
+
 def sd_ovon_to_sampling_layout(
     sd_ovon_layout: Dict[str, Any], template_index: Dict[str, str]
 ) -> List[Dict[str, Any]]:
@@ -309,10 +368,12 @@ def auto_place_objects(
     """Automatically place objects in room bbox with collision-aware retries."""
     start_time = time.time()
     room_bbox_map: Dict[int, Tuple[List[float], List[float]]] = {}
+    room_center_map: Dict[int, List[float]] = {}
     for room in rooms:
         rid = room.get("region_id")
         if rid is None:
             continue
+        room_center_map[int(rid)] = _room_center_from_room(room)
         normalized = _normalize_bbox(room.get("bounding_box", {}))
         if normalized is not None:
             room_bbox_map[int(rid)] = normalized
@@ -321,6 +382,7 @@ def auto_place_objects(
     placed_objects: List[Dict[str, Any]] = []
     failed_objects: List[Dict[str, Any]] = []
     failed_ids: List[int] = []
+    fallback_to_center_count = 0
 
     for src in source_objects:
         obj = dict(src)
@@ -330,17 +392,23 @@ def auto_place_objects(
 
         region_id = obj.get("sampled_region_id")
         bbox_pair: Optional[Tuple[List[float], List[float]]] = None
+        room_center = obj.get("position", [0.0, 0.0, 0.0])
         if isinstance(region_id, int) and region_id in room_bbox_map:
             bbox_pair = room_bbox_map[region_id]
+            room_center = room_center_map.get(region_id, room_center)
+        elif isinstance(region_id, int) and region_id in room_center_map:
+            room_center = room_center_map[region_id]
 
         if bbox_pair is None:
             bbox_pair = _normalize_bbox(obj.get("room_aabb", {}))
+        if bbox_pair is None and isinstance(region_id, int) and region_id in room_center_map:
+            fallback_to_center_count += 1
 
         placed = False
         best_candidate = obj.get("position", [0.0, 0.0, 0.0])
         best_score = float("-inf")
         last_candidate = obj.get("position", [0.0, 0.0, 0.0])
-        center = obj.get("position", [0.0, 0.0, 0.0])
+        center = room_center
         if bbox_pair is not None:
             center = [
                 (float(bbox_pair[0][0]) + float(bbox_pair[1][0])) / 2.0,
@@ -352,7 +420,7 @@ def auto_place_objects(
             if bbox_pair is not None:
                 candidate = _random_point_in_bbox(bbox_pair[0], bbox_pair[1], y_offset)
             else:
-                candidate = _random_point_near_center(obj.get("position", [0.0, 0.0, 0.0]), y_offset)
+                candidate = _random_point_near_center(room_center, y_offset)
 
             last_candidate = candidate
             if _collides_xz(candidate, radius, placed_objects):
@@ -406,6 +474,7 @@ def auto_place_objects(
         "failed_count": len(failed_objects),
         "processing_time_sec": duration,
         "placement_backend": placement_backend,
+        "center_fallback_count": fallback_to_center_count,
         "failed_ids": failed_ids,
         "failed_objects": failed_objects,
     }
@@ -425,6 +494,7 @@ def generate_probabilities(
     scene_name: str,
     rooms_info_dir: str,
     probabilities_dir: str,
+    region_ids: Optional[List[int]] = None,
 ):
     """
     Load room recommendations from query result and generate random probabilities.
@@ -443,6 +513,7 @@ def generate_probabilities(
         return None
     
     recommended_rooms = rooms_info.get("recommended_rooms", [])
+    recommended_rooms = _filter_items_by_region_ids(recommended_rooms, region_ids)
     if not recommended_rooms:
         print(f"  [Warning] No recommended rooms found for {object_name}")
         return None
@@ -509,18 +580,53 @@ def load_probabilities(object_name: str, scene_name: str, probabilities_dir: str
         return None
 
 
+def filter_probability_data_by_region_ids(
+    data: Dict[str, Any], region_ids: Optional[List[int]]
+) -> Optional[Dict[str, Any]]:
+    """Filter an in-memory probability payload by placement scope."""
+    if not region_ids:
+        return data
+
+    probabilities = data.get("probabilities", [])
+    filtered = [p for p in probabilities if int(p.get("region_id", -1)) in region_ids]
+    if len(filtered) < 2:
+        return None
+
+    total = sum(float(p.get("probability", 0.0)) for p in filtered)
+    if total <= 0:
+        total = float(len(filtered))
+
+    data = dict(data)
+    data["probabilities"] = [dict(p, probability=float(p.get("probability", 0.0)) / total) for p in filtered]
+    data["placement_scope"] = {
+        "mode": "region_ids",
+        "region_ids": list(region_ids),
+    }
+    return data
+
+
 def get_or_create_probabilities(
     object_name: str,
     scene_name: str,
     mode: str,
     rooms_info_dir: str,
     probabilities_dir: str,
+    region_ids: Optional[List[int]] = None,
 ) -> Optional[Dict]:
     """Get probabilities: load if exists and mode=load, or generate if mode=generate."""
     if mode == "load":
-        return load_probabilities(object_name, scene_name, probabilities_dir)
+        data = load_probabilities(object_name, scene_name, probabilities_dir)
+        if data is None:
+            return None
+        return filter_probability_data_by_region_ids(data, region_ids)
     elif mode == "generate":
-        return generate_probabilities(object_name, scene_name, rooms_info_dir, probabilities_dir)
+        return generate_probabilities(
+            object_name,
+            scene_name,
+            rooms_info_dir,
+            probabilities_dir,
+            region_ids=region_ids,
+        )
     else:
         raise ValueError(f"Invalid mode: {mode}")
 
@@ -533,6 +639,7 @@ def sample_object_positions(
     mode: str,
     rooms_info_dir: str,
     probabilities_dir: str,
+    region_ids: Optional[List[int]] = None,
 ) -> Optional[Dict]:
     """
     Sample an object position for each image based on probabilities.
@@ -575,7 +682,12 @@ def sample_object_positions(
         
         # Get/create probabilities
         probs_data = get_or_create_probabilities(
-            object_name, scene_name, mode, rooms_info_dir, probabilities_dir
+            object_name,
+            scene_name,
+            mode,
+            rooms_info_dir,
+            probabilities_dir,
+            region_ids=region_ids,
         )
         if not probs_data:
             print(f"  [Warning] Cannot sample for {object_name}, skipping")
@@ -641,6 +753,10 @@ def sample_object_positions(
         "scene": str(scene_paths.stage_glb),
         "timestamp": time.time(),
         "objects": sampled_objects,
+        "placement_scope": {
+            "mode": "region_ids" if region_ids else "scene",
+            "region_ids": list(region_ids) if region_ids else [],
+        },
     }
     
     return layout_json
@@ -701,6 +817,7 @@ def interactive_sampling_loop(
     placement_backend: str,
     placement_attempts: int,
     collision_radius_override: Optional[float],
+    region_ids: Optional[List[int]],
     ui_lang: str = "zh",
 ):
     """
@@ -717,7 +834,12 @@ def interactive_sampling_loop(
         # Step 1: Sample object positions
         print(f"\n[Step 1] Sampling object positions from probabilities...")
         layout_json = sample_object_positions(
-            scene_name, images_dir, mode, rooms_info_dir, probabilities_dir
+            scene_name,
+            images_dir,
+            mode,
+            rooms_info_dir,
+            probabilities_dir,
+            region_ids=region_ids,
         )
         if not layout_json:
             print("[Error] Failed to sample layout")
@@ -726,6 +848,9 @@ def interactive_sampling_loop(
         if placement == "auto":
             print("[Info] Running auto placement (quality-first)...")
             rooms = load_scene_rooms(scene_name, rooms_info_dir)
+            if region_ids:
+                rooms = [room for room in rooms if _room_in_scope(room, region_ids)]
+                print(f"[Info] Placement scope: region_ids={region_ids}")
             layout_json, auto_stats = auto_place_objects(
                 layout_json,
                 rooms,
@@ -861,6 +986,11 @@ def main():
         help="Optional fixed collision radius for all objects in auto placement",
     )
     parser.add_argument(
+        "--region-ids",
+        default=None,
+        help="Comma-separated region ids to scope placement to, e.g. 3 or 3,7,9; use all for no scope",
+    )
+    parser.add_argument(
         "--placement-seed",
         type=int,
         default=42,
@@ -883,6 +1013,7 @@ def main():
     
     args = parser.parse_args()
     np.random.seed(args.placement_seed)
+    region_ids = parse_region_ids(args.region_ids)
     
     # Validate scene
     if args.scene not in AVAILABLE_SCENES:
@@ -933,6 +1064,7 @@ def main():
             args.placement_backend,
             args.placement_attempts,
             args.collision_radius_override,
+            region_ids,
             args.ui_lang,
         )
     except KeyboardInterrupt:

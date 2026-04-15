@@ -557,11 +557,30 @@ def load_layout_into_editor(sim, layout_path, editor_items):
 
 def save_layout(scene_name, layout_path, editor_items):
 	ensure_configs_dir(scene_name)
+	source_payload = {}
+	if os.path.isfile(layout_path):
+		try:
+			with open(layout_path, "r", encoding="utf-8") as f:
+				source_payload = json.load(f)
+		except Exception:
+			source_payload = {}
+	placement_scope = source_payload.get("placement_scope")
+	auto_placement_stats = source_payload.get("auto_placement_stats")
+	editor_focus_failed_ids = source_payload.get("editor_focus_failed_ids")
+	editor_review_order = source_payload.get("editor_review_order")
 	payload = {
 		"scene": get_stage_glb_path(scene_name),
 		"timestamp": time.time(),
 		"objects": [],
 	}
+	if placement_scope is not None:
+		payload["placement_scope"] = placement_scope
+	if auto_placement_stats is not None:
+		payload["auto_placement_stats"] = auto_placement_stats
+	if editor_focus_failed_ids is not None:
+		payload["editor_focus_failed_ids"] = editor_focus_failed_ids
+	if editor_review_order is not None:
+		payload["editor_review_order"] = editor_review_order
 
 	for index, item in enumerate(editor_items):
 		pos = item["object"].translation
