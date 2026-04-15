@@ -150,39 +150,6 @@ def load_sd_ovon_layout(
         return None
 
 
-def parse_region_ids(region_ids_text: Optional[str]) -> Optional[List[int]]:
-    """Parse a comma-separated region id list into integers."""
-    if region_ids_text is None:
-        return None
-
-    text = str(region_ids_text).strip()
-    if not text or text.lower() in {"all", "*"}:
-        return None
-
-    region_ids: List[int] = []
-    for chunk in text.split(","):
-        token = chunk.strip()
-        if not token:
-            continue
-        try:
-            region_ids.append(int(token))
-        except ValueError as exc:
-            raise ValueError(f"Invalid region id: {token}") from exc
-
-    unique_ids = sorted(set(region_ids))
-    return unique_ids or None
-
-
-def _room_in_scope(room: Dict[str, Any], region_ids: Optional[List[int]]) -> bool:
-    """Check whether a room belongs to the selected placement scope."""
-    if not region_ids:
-        return True
-    try:
-        return int(room.get("region_id", -1)) in region_ids
-    except Exception:
-        return False
-
-
 def _room_center_from_room(room: Dict[str, Any]) -> List[float]:
     """Extract a room center with a safe zero fallback."""
     center = room.get("room_center", [0.0, 0.0, 0.0])
@@ -192,21 +159,6 @@ def _room_center_from_room(room: Dict[str, Any]) -> List[float]:
         return [float(center[0]), float(center[1]), float(center[2])]
     except Exception:
         return [0.0, 0.0, 0.0]
-
-
-def _filter_items_by_region_ids(items: List[Dict[str, Any]], region_ids: Optional[List[int]]) -> List[Dict[str, Any]]:
-    """Keep only items whose region_id is inside the requested scope."""
-    if not region_ids:
-        return list(items)
-
-    filtered: List[Dict[str, Any]] = []
-    for item in items:
-        try:
-            if int(item.get("region_id", -1)) in region_ids:
-                filtered.append(item)
-        except Exception:
-            continue
-    return filtered
 
 
 def sd_ovon_to_sampling_layout(
@@ -365,32 +317,58 @@ def auto_place_objects(
     placement_backend: str = "rule",
     collision_radius_override: Optional[float] = None,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-    """Automatically place objects in room bbox with collision-aware retries."""
+    """Automatically place objects room-by-room using each object's sampled room."""
     start_time = time.time()
     room_bbox_map: Dict[int, Tuple[List[float], List[float]]] = {}
     room_center_map: Dict[int, List[float]] = {}
+    room_order: List[int] = []
     for room in rooms:
         rid = room.get("region_id")
         if rid is None:
             continue
-        room_center_map[int(rid)] = _room_center_from_room(room)
+        rid_int = int(rid)
+        room_order.append(rid_int)
+        room_center_map[rid_int] = _room_center_from_room(room)
         normalized = _normalize_bbox(room.get("bounding_box", {}))
         if normalized is not None:
-            room_bbox_map[int(rid)] = normalized
+            room_bbox_map[rid_int] = normalized
 
     source_objects = layout_json.get("objects", [])
     placed_objects: List[Dict[str, Any]] = []
     failed_objects: List[Dict[str, Any]] = []
     failed_ids: List[int] = []
     fallback_to_center_count = 0
+    per_room_stats: Dict[str, Dict[str, int]] = {}
 
-    for src in source_objects:
+    room_grouped_indices: Dict[int, List[int]] = {}
+    unknown_indices: List[int] = []
+    for idx, src in enumerate(source_objects):
+        region_id = src.get("sampled_region_id")
+        if isinstance(region_id, int) and region_id in room_center_map:
+            room_grouped_indices.setdefault(region_id, []).append(idx)
+        else:
+            unknown_indices.append(idx)
+
+    processing_order_indices: List[int] = []
+    for rid in room_order:
+        processing_order_indices.extend(room_grouped_indices.get(rid, []))
+    processing_order_indices.extend(unknown_indices)
+    object_processing_sequence: List[Any] = [source_objects[idx].get("id", idx) for idx in processing_order_indices]
+
+    def _place_single_object(src: Dict[str, Any]) -> Dict[str, Any]:
+        nonlocal fallback_to_center_count
+
         obj = dict(src)
         profile = infer_object_profile(obj.get("model_id", ""))
         radius = float(collision_radius_override) if collision_radius_override else float(profile["radius"])
         y_offset = float(profile["y_offset"])
 
         region_id = obj.get("sampled_region_id")
+        room_key = str(region_id) if isinstance(region_id, int) else "unknown"
+        if room_key not in per_room_stats:
+            per_room_stats[room_key] = {"total": 0, "placed": 0, "failed": 0}
+        per_room_stats[room_key]["total"] += 1
+
         bbox_pair: Optional[Tuple[List[float], List[float]]] = None
         room_center = obj.get("position", [0.0, 0.0, 0.0])
         if isinstance(region_id, int) and region_id in room_bbox_map:
@@ -442,8 +420,10 @@ def auto_place_objects(
             placed = True
 
         if placed:
+            per_room_stats[room_key]["placed"] += 1
             placed_objects.append(obj)
         else:
+            per_room_stats[room_key]["failed"] += 1
             obj["source"] = "auto_placement_failed"
             obj["_placement_radius"] = radius
             obj["edit_priority"] = "high"
@@ -462,6 +442,11 @@ def auto_place_objects(
                 failed_ids.append(int(obj["id"]))
             placed_objects.append(obj)
 
+        return obj
+
+    for idx in processing_order_indices:
+        _place_single_object(source_objects[idx])
+
     placed_objects.sort(key=lambda x: 0 if x.get("edit_status") == "needs_manual_fix" else 1)
 
     for obj in placed_objects:
@@ -475,6 +460,9 @@ def auto_place_objects(
         "processing_time_sec": duration,
         "placement_backend": placement_backend,
         "center_fallback_count": fallback_to_center_count,
+        "room_processing_order": room_order,
+        "object_processing_sequence": object_processing_sequence,
+        "room_processing": per_room_stats,
         "failed_ids": failed_ids,
         "failed_objects": failed_objects,
     }
@@ -494,7 +482,6 @@ def generate_probabilities(
     scene_name: str,
     rooms_info_dir: str,
     probabilities_dir: str,
-    region_ids: Optional[List[int]] = None,
 ):
     """
     Load room recommendations from query result and generate random probabilities.
@@ -513,7 +500,6 @@ def generate_probabilities(
         return None
     
     recommended_rooms = rooms_info.get("recommended_rooms", [])
-    recommended_rooms = _filter_items_by_region_ids(recommended_rooms, region_ids)
     if not recommended_rooms:
         print(f"  [Warning] No recommended rooms found for {object_name}")
         return None
@@ -580,52 +566,22 @@ def load_probabilities(object_name: str, scene_name: str, probabilities_dir: str
         return None
 
 
-def filter_probability_data_by_region_ids(
-    data: Dict[str, Any], region_ids: Optional[List[int]]
-) -> Optional[Dict[str, Any]]:
-    """Filter an in-memory probability payload by placement scope."""
-    if not region_ids:
-        return data
-
-    probabilities = data.get("probabilities", [])
-    filtered = [p for p in probabilities if int(p.get("region_id", -1)) in region_ids]
-    if len(filtered) < 2:
-        return None
-
-    total = sum(float(p.get("probability", 0.0)) for p in filtered)
-    if total <= 0:
-        total = float(len(filtered))
-
-    data = dict(data)
-    data["probabilities"] = [dict(p, probability=float(p.get("probability", 0.0)) / total) for p in filtered]
-    data["placement_scope"] = {
-        "mode": "region_ids",
-        "region_ids": list(region_ids),
-    }
-    return data
-
-
 def get_or_create_probabilities(
     object_name: str,
     scene_name: str,
     mode: str,
     rooms_info_dir: str,
     probabilities_dir: str,
-    region_ids: Optional[List[int]] = None,
 ) -> Optional[Dict]:
     """Get probabilities: load if exists and mode=load, or generate if mode=generate."""
     if mode == "load":
-        data = load_probabilities(object_name, scene_name, probabilities_dir)
-        if data is None:
-            return None
-        return filter_probability_data_by_region_ids(data, region_ids)
+        return load_probabilities(object_name, scene_name, probabilities_dir)
     elif mode == "generate":
         return generate_probabilities(
             object_name,
             scene_name,
             rooms_info_dir,
             probabilities_dir,
-            region_ids=region_ids,
         )
     else:
         raise ValueError(f"Invalid mode: {mode}")
@@ -639,7 +595,6 @@ def sample_object_positions(
     mode: str,
     rooms_info_dir: str,
     probabilities_dir: str,
-    region_ids: Optional[List[int]] = None,
 ) -> Optional[Dict]:
     """
     Sample an object position for each image based on probabilities.
@@ -687,7 +642,6 @@ def sample_object_positions(
             mode,
             rooms_info_dir,
             probabilities_dir,
-            region_ids=region_ids,
         )
         if not probs_data:
             print(f"  [Warning] Cannot sample for {object_name}, skipping")
@@ -754,8 +708,7 @@ def sample_object_positions(
         "timestamp": time.time(),
         "objects": sampled_objects,
         "placement_scope": {
-            "mode": "region_ids" if region_ids else "scene",
-            "region_ids": list(region_ids) if region_ids else [],
+            "mode": "sampled_region_per_object",
         },
     }
     
@@ -817,7 +770,6 @@ def interactive_sampling_loop(
     placement_backend: str,
     placement_attempts: int,
     collision_radius_override: Optional[float],
-    region_ids: Optional[List[int]],
     ui_lang: str = "zh",
 ):
     """
@@ -839,7 +791,6 @@ def interactive_sampling_loop(
             mode,
             rooms_info_dir,
             probabilities_dir,
-            region_ids=region_ids,
         )
         if not layout_json:
             print("[Error] Failed to sample layout")
@@ -848,9 +799,6 @@ def interactive_sampling_loop(
         if placement == "auto":
             print("[Info] Running auto placement (quality-first)...")
             rooms = load_scene_rooms(scene_name, rooms_info_dir)
-            if region_ids:
-                rooms = [room for room in rooms if _room_in_scope(room, region_ids)]
-                print(f"[Info] Placement scope: region_ids={region_ids}")
             layout_json, auto_stats = auto_place_objects(
                 layout_json,
                 rooms,
@@ -986,11 +934,6 @@ def main():
         help="Optional fixed collision radius for all objects in auto placement",
     )
     parser.add_argument(
-        "--region-ids",
-        default=None,
-        help="Comma-separated region ids to scope placement to, e.g. 3 or 3,7,9; use all for no scope",
-    )
-    parser.add_argument(
         "--placement-seed",
         type=int,
         default=42,
@@ -1013,7 +956,6 @@ def main():
     
     args = parser.parse_args()
     np.random.seed(args.placement_seed)
-    region_ids = parse_region_ids(args.region_ids)
     
     # Validate scene
     if args.scene not in AVAILABLE_SCENES:
@@ -1064,7 +1006,6 @@ def main():
             args.placement_backend,
             args.placement_attempts,
             args.collision_radius_override,
-            region_ids,
             args.ui_lang,
         )
     except KeyboardInterrupt:

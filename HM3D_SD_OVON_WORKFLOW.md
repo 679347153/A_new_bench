@@ -10,8 +10,9 @@
 
 自动放置能力支持区域约束：
 
-- 通过 `--region-ids` 指定房间区域（region_id）范围。
-- 当目标区域无有效 bbox 时，自动降级到 room center 附近采样（已内置）。
+- 每个物体先通过概率采样得到 `sampled_region_id`。
+- 自动放置按房间分组依次处理：先筛选出该房间的物体，再在该房间内依次放置。
+- 当该物体目标房间无有效 bbox 时，自动降级到该房间 room center 附近采样（已内置）。
 
 ---
 
@@ -54,7 +55,7 @@ flowchart TD
     C --> D[概率生成/加载\nsample_and_place_objects.py]
     D --> E{placement 模式}
     E -->|manual| F[进入 test_layout.py 人工微调]
-    E -->|auto| G[在 region_ids 范围内自动放置\n无 bbox 时回退 room center]
+    E -->|auto| G[按 sampled_region_id 分组\n逐房间自动放置\n无 bbox 时回退 room center]
     G --> F
     F --> H[保存 final_*.json 到 results/layouts]
 
@@ -125,7 +126,7 @@ python query_rooms_for_objects.py \
 
 #### 3.1 自动放置（推荐协同模式）
 
-仅在指定房间区域自动放置（示例：region_id=3）：
+按每个物体采样出的目标房间自动放置（逐房间处理）：
 
 ```bash
 python sample_and_place_objects.py \
@@ -136,12 +137,11 @@ python sample_and_place_objects.py \
   --probabilities-dir ./results/probabilities \
   --layouts-dir ./results/layouts \
   --placement auto \
-  --region-ids 3 \
   --placement-backend rule \
   --placement-attempts 24
 ```
 
-多区域示例：
+读取已生成概率并自动放置示例：
 
 ```bash
 python sample_and_place_objects.py \
@@ -149,14 +149,15 @@ python sample_and_place_objects.py \
   --mode load \
   --probabilities-dir ./results/probabilities \
   --layouts-dir ./results/layouts \
-  --placement auto \
-  --region-ids 3,7,9
+  --placement auto
 ```
 
 行为说明：
 
-- 优先在目标房间 bbox 内采样。
-- 如果目标区域 bbox 无效，则自动回退到该房间 room center 附近采样。
+- 每个物体先从其概率分布采样出目标房间（`sampled_region_id`）。
+- 按房间分组依次处理：同一房间中的物体连续放置。
+- 优先在该房间 bbox 内采样。
+- 如果该房间 bbox 无效，则自动回退到该房间 room center 附近采样。
 - 失败对象会被标记为 `needs_manual_fix` 并在编辑器中优先复核。
 
 #### 3.2 人工微调模式
@@ -202,7 +203,7 @@ python -c "from orchestrate_sd_ovon_complete import SDOVONPipelineOrchestrator a
 1. `python verify_workflow.py` 通过。
 2. `results/scene_info/<scene>/` 下存在 `*_rooms.json`。
 3. `results/probabilities/<scene>/` 下存在 `*_probs.json`。
-4. `sample_and_place_objects.py --placement auto --region-ids ...` 能输出临时布局并进入编辑器。
+4. `sample_and_place_objects.py --placement auto` 能输出临时布局并进入编辑器。
 5. 最终布局写入 `results/layouts/<scene>/final_*.json`。
 6. `orchestrate_sd_ovon_complete.py` 的 `stage_results` 中：
    - `stage_1_semantic_understanding.success == True`
@@ -225,7 +226,7 @@ python -c "from orchestrate_sd_ovon_complete import SDOVONPipelineOrchestrator a
 排查：
 
 - 增大 `--placement-attempts`（例如 48）。
-- 放宽 `--region-ids`（增加候选区域）。
+- 检查 `results/probabilities/<scene>/*_probs.json` 中各物体是否有足够的候选房间。
 - 不要强行使用过大的 `--collision-radius-override`。
 
 ### Q3：编辑器无法启动
@@ -255,8 +256,7 @@ python sample_and_place_objects.py \
   --rooms-info-dir ./results/scene_info \
   --probabilities-dir ./results/probabilities \
   --layouts-dir ./results/layouts \
-  --placement auto \
-  --region-ids 3
+  --placement auto
 
 python -c "from orchestrate_sd_ovon_complete import SDOVONPipelineOrchestrator as O; r=O('mock').run_full_pipeline('00808-y9hTuugGdiq'); print(r['pipeline_status'], r['final_output'])"
 ```
