@@ -386,6 +386,7 @@ def auto_place_objects(
         best_candidate = obj.get("position", [0.0, 0.0, 0.0])
         best_score = float("-inf")
         last_candidate = obj.get("position", [0.0, 0.0, 0.0])
+        collision_hits = 0
         center = room_center
         if bbox_pair is not None:
             center = [
@@ -402,6 +403,7 @@ def auto_place_objects(
 
             last_candidate = candidate
             if _collides_xz(candidate, radius, placed_objects):
+                collision_hits += 1
                 continue
 
             score = _score_candidate_by_backend(placement_backend, candidate, center, bbox_pair)
@@ -428,14 +430,22 @@ def auto_place_objects(
             obj["_placement_radius"] = radius
             obj["edit_priority"] = "high"
             obj["edit_status"] = "needs_manual_fix"
-            obj["edit_note"] = "AUTO_FAILED: collision_or_invalid_bbox"
+            if bbox_pair is None:
+                fail_reason = "no_valid_bbox_fallback_collision"
+            else:
+                fail_reason = "collision_after_retries"
+            obj["edit_note"] = f"AUTO_FAILED: {fail_reason}"
             failed_objects.append(
                 {
                     "id": obj.get("id"),
                     "model_id": obj.get("model_id"),
                     "sampled_region_id": obj.get("sampled_region_id", -1),
-                    "reason": "collision_or_invalid_bbox",
+                    "reason": fail_reason,
+                    "room_center": [round(float(room_center[0]), 4), round(float(room_center[1]), 4), round(float(room_center[2]), 4)],
+                    "target_center": [round(float(center[0]), 4), round(float(center[1]), 4), round(float(center[2]), 4)],
                     "last_candidate": [round(float(last_candidate[0]), 4), round(float(last_candidate[1]), 4), round(float(last_candidate[2]), 4)],
+                    "attempts": int(max(1, int(max_attempts))),
+                    "collision_hits": int(collision_hits),
                 }
             )
             if isinstance(obj.get("id"), int):
@@ -453,6 +463,11 @@ def auto_place_objects(
         obj.pop("_placement_radius", None)
 
     duration = round(float(time.time() - start_time), 4)
+    failed_by_reason: Dict[str, int] = {}
+    for item in failed_objects:
+        reason = str(item.get("reason", "unknown"))
+        failed_by_reason[reason] = failed_by_reason.get(reason, 0) + 1
+
     stats = {
         "total_objects": len(source_objects),
         "placed_count": len(source_objects) - len(failed_objects),
@@ -463,6 +478,7 @@ def auto_place_objects(
         "room_processing_order": room_order,
         "object_processing_sequence": object_processing_sequence,
         "room_processing": per_room_stats,
+        "failed_by_reason": failed_by_reason,
         "failed_ids": failed_ids,
         "failed_objects": failed_objects,
     }
@@ -813,10 +829,45 @@ def interactive_sampling_loop(
                 f"backend={auto_stats['placement_backend']}, "
                 f"time={auto_stats['processing_time_sec']}s"
             )
+
+            placed_positions = [obj.get("position", [0.0, 0.0, 0.0]) for obj in layout_json.get("objects", [])]
+            y_values = []
+            for pos in placed_positions:
+                if isinstance(pos, list) and len(pos) >= 3:
+                    try:
+                        y_values.append(float(pos[1]))
+                    except Exception:
+                        continue
+            if y_values:
+                y_min = min(y_values)
+                y_max = max(y_values)
+                y_avg = sum(y_values) / len(y_values)
+                below_zero = sum(1 for y in y_values if y < 0.0)
+                print(
+                    "[Diag] Placement Y summary: "
+                    f"min={y_min:.4f}, max={y_max:.4f}, avg={y_avg:.4f}, below_0={below_zero}/{len(y_values)}"
+                )
+
             if auto_stats["failed_count"] > 0:
                 failed_models = [x.get("model_id", "?") for x in auto_stats.get("failed_objects", [])]
                 print("[Info] Failed objects to focus in editor:", ", ".join(failed_models))
                 print("[Info] Failed object IDs:", auto_stats.get("failed_ids", []))
+                print("[Diag] Failed by reason:", auto_stats.get("failed_by_reason", {}))
+                for idx, fo in enumerate(auto_stats.get("failed_objects", []), start=1):
+                    print(
+                        "[Diag] Failed#{idx}: id={id} model={model} room={room} reason={reason} "
+                        "target_center={target} last_candidate={last} collision_hits={hits}/{attempts}".format(
+                            idx=idx,
+                            id=fo.get("id"),
+                            model=fo.get("model_id"),
+                            room=fo.get("sampled_region_id"),
+                            reason=fo.get("reason"),
+                            target=fo.get("target_center"),
+                            last=fo.get("last_candidate"),
+                            hits=fo.get("collision_hits"),
+                            attempts=fo.get("attempts"),
+                        )
+                    )
         
         # Step 2: Write temporary layout file
         prefix = "temp_auto" if placement == "auto" else "temp_sampled"
