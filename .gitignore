@@ -25,3 +25,6 @@ semantic_demo_output/
 hm3d_pipeline_report.json
 *_scene_info.json
 
+benchmark/episodes/
+benchmark/eval/
+benchmark/splits/

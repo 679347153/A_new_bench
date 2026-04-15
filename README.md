@@ -238,49 +238,86 @@ python sample_and_place_objects.py \
 - results/probabilities/00808-y9hTuugGdiq/mug_01_probs.json
 - results/layouts/00808-y9hTuugGdiq/final_*.json
 
-## Benchmark 实现（第一阶段）
+## Benchmark 完整生成流程
 
-已新增基础实现文件：
+本工程 benchmark 以 episode 为核心单位，完整链路如下：
 
-- benchmark/__init__.py
-- benchmark/schemas.py
-- benchmark/metrics.py
-- scripts/01_prepare_splits.py
-- scripts/03_generate_benchmark_episodes.py
-- scripts/04_validate_episodes.py
-- scripts/05_evaluate_benchmark.py
+```mermaid
+flowchart LR
+    A[01_prepare_splits.py\n生成 train/val 场景清单] --> B[03_generate_benchmark_episodes.py\n按 scene/state 生成 episodes]
+    B --> C[04_validate_episodes.py\n结构与配额校验]
+    C --> D[Agent 执行 episode\n导出 episode_results.jsonl]
+    D --> E[05_evaluate_benchmark.py\n聚合评估指标 summary.json]
+```
 
-推荐执行顺序：
+### Benchmark 相关文件
 
-1. 生成 split 清单（60 train / 20 val）
+- benchmark/schemas.py：Episode/SceneState/Subtask 数据结构和校验
+- benchmark/metrics.py：success rate、SPL、效率等聚合指标
+- scripts/01_prepare_splits.py：生成 split manifest
+- scripts/03_generate_benchmark_episodes.py：批量生成 episode JSON
+- scripts/04_validate_episodes.py：验证配额和子任务分布
+- scripts/05_evaluate_benchmark.py：汇总 jsonl 评测结果
 
+### 输入依赖
+
+- 语义场景目录：hm3d-minival-* 或 hm3d/ 下可解析场景
+- 可选对象来源：results/probabilities/{scene}/*_probs.json
+- 若缺少概率文件，03 脚本会回退到内置默认对象名
+
+### 第 1 步：生成 split 清单
+
+```bash
 python scripts/01_prepare_splits.py \
   --train-count 60 \
   --val-count 20 \
   --seed 42 \
   --output benchmark/splits/benchmark_split_v1.json
+```
 
-说明：当前场景数不足时，可临时加 --allow-reuse-scenes 做冒烟验证。
+可选参数：
 
-1. 先做 dry-run，验证规模与分配逻辑
+- --allow-reuse-scenes：当可用场景总数不足时允许复用场景（仅建议冒烟测试使用）
 
+输出：
+
+- benchmark/splits/benchmark_split_v1.json
+
+### 第 2 步：dry-run 估算规模
+
+```bash
 python scripts/03_generate_benchmark_episodes.py \
   --split-manifest benchmark/splits/benchmark_split_v1.json \
   --states-per-scene 15 \
   --train-episodes-per-scene 5000 \
   --val-episodes-per-scene 10 \
   --dry-run
+```
 
-1. 正式生成 episodes
+dry-run 只计算数量，不写文件。建议每次改参数后先跑一次。
 
+### 第 3 步：正式生成 episodes
+
+```bash
 python scripts/03_generate_benchmark_episodes.py \
   --split-manifest benchmark/splits/benchmark_split_v1.json \
   --states-per-scene 15 \
   --train-episodes-per-scene 5000 \
-  --val-episodes-per-scene 10
+  --val-episodes-per-scene 10 \
+  --output-root benchmark/episodes/v1
+```
 
-1. 校验生成结果结构与配额
+输出目录结构：
 
+```text
+benchmark/episodes/v1/
+  train/{scene}/state_XX/{episode_id}.json
+  val/{scene}/state_XX/{episode_id}.json
+```
+
+### 第 4 步：校验结构与配额
+
+```bash
 python scripts/04_validate_episodes.py \
   --episodes-root benchmark/episodes/v1 \
   --expected-train-scenes 60 \
@@ -288,19 +325,62 @@ python scripts/04_validate_episodes.py \
   --expected-states-per-scene 15 \
   --expected-train-episodes-per-scene 5000 \
   --expected-val-episodes-per-scene 10
+```
 
-1. 评测汇总（输入为 agent 运行后导出的 jsonl）
+校验内容：
 
+- split 目录和场景数量
+- 每个场景的 state 数量
+- 每个场景总 episode 数
+- 子任务数量范围（5-10）
+- 子任务类型平衡性（open_vocab/image_goal/language_goal 差值不超过 1）
+
+### 第 5 步：执行评测并汇总
+
+首先由你的 agent/策略执行 episode，产出逐条 jsonl（每行一个 episode 结果）。
+
+然后汇总：
+
+```bash
 python scripts/05_evaluate_benchmark.py \
   --input benchmark/eval/episode_results.jsonl \
   --output benchmark/eval/summary.json
+```
 
-### 4）快速复跑（load）
+输入 jsonl 每行建议至少包含：
 
+- success
+- path_length
+- shortest_path_length
+- elapsed_seconds
+- dynamic_memory_correct
+- dynamic_memory_total
+- fixed_memory_correct
+- fixed_memory_total
+- steps
+
+### 快速复跑布局（与 benchmark 并行）
+
+```bash
 python sample_and_place_objects.py \
   --scene 00808-y9hTuugGdiq \
   --mode load \
   --probabilities-dir ./results/probabilities \
   --layouts-dir ./results/layouts
+```
 
-说明：load 模式会复用上一步生成的概率文件，适合快速迭代。
+load 模式复用已有概率文件，适合快速迭代场景布局，不影响 benchmark 数据集生成流程。
+
+## Benchmark 常见问题
+
+1. 报错 "Need X scenes, but only Y available"
+   - 降低 --train-count/--val-count，或临时使用 --allow-reuse-scenes。
+
+2. 生成很慢或磁盘占用大
+   - 先使用 --dry-run 调整参数，再下调 --train-episodes-per-scene。
+
+3. 校验失败：subtask mix unbalanced
+   - 检查自定义生成逻辑是否破坏了三类子任务均衡约束。
+
+4. 评估 summary 数值异常（如 SPL 为 0）
+   - 检查 jsonl 中 shortest_path_length 是否写入，且大于 0。

@@ -31,11 +31,12 @@
 import argparse
 import json
 import os
+import math
 import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 
 from hm3d_paths import list_available_scenes, resolve_scene_paths
 
@@ -53,6 +54,23 @@ DEFAULT_LAYOUTS_DIR = "./results/layouts"
 DEFAULT_IMAGES_DIR = "./objects_images"
 
 AVAILABLE_SCENES = list_available_scenes(require_semantic=True)
+
+PROFILE_KEYWORDS: Dict[str, Dict[str, float]] = {
+    "table": {"radius": 0.60, "y_offset": 0.05},
+    "desk": {"radius": 0.58, "y_offset": 0.05},
+    "sofa": {"radius": 0.70, "y_offset": 0.05},
+    "chair": {"radius": 0.40, "y_offset": 0.05},
+    "bed": {"radius": 0.80, "y_offset": 0.05},
+    "cabinet": {"radius": 0.55, "y_offset": 0.05},
+    "shelf": {"radius": 0.50, "y_offset": 0.05},
+    "statue": {"radius": 0.42, "y_offset": 0.08},
+    "vase": {"radius": 0.28, "y_offset": 0.10},
+    "bottle": {"radius": 0.24, "y_offset": 0.08},
+    "clock": {"radius": 0.20, "y_offset": 0.10},
+    "camera": {"radius": 0.20, "y_offset": 0.08},
+}
+
+DEFAULT_OBJECT_PROFILE = {"radius": 0.35, "y_offset": 0.05}
 
 
 # ===== 模板映射 =====
@@ -90,6 +108,314 @@ def resolve_model_id_for_template(object_name: str, template_index: Dict[str, st
 
     # Fallback to original name, editor will try flexible matching.
     return object_name
+
+
+def infer_object_profile(model_id: str) -> Dict[str, float]:
+    """Infer placement profile from model keywords."""
+    key = (model_id or "").lower()
+    for keyword, profile in PROFILE_KEYWORDS.items():
+        if keyword in key:
+            return dict(profile)
+    return dict(DEFAULT_OBJECT_PROFILE)
+
+
+def load_sd_ovon_layout(
+    scene_name: str, sd_ovon_layouts_dir: str
+) -> Optional[Dict[str, Any]]:
+    """Load layout from SD-OVON output."""
+    if not sd_ovon_layouts_dir:
+        return None
+    
+    # Search for SD-OVON layout file
+    candidates = []
+    if os.path.isdir(sd_ovon_layouts_dir):
+        for f in os.listdir(sd_ovon_layouts_dir):
+            if scene_name in f and f.endswith(".json"):
+                candidates.append(os.path.join(sd_ovon_layouts_dir, f))
+    
+    if not candidates:
+        print(f"[Warning] No SD-OVON layout found in {sd_ovon_layouts_dir}")
+        return None
+    
+    # Use most recent
+    layout_file = max(candidates, key=os.path.getmtime)
+    
+    try:
+        with open(layout_file, "r", encoding="utf-8") as f:
+            layout = json.load(f)
+        print(f"[SD-OVON] Loaded layout from {layout_file}")
+        return layout
+    except Exception as e:
+        print(f"[Error] Failed to load SD-OVON layout: {e}")
+        return None
+
+
+def sd_ovon_to_sampling_layout(
+    sd_ovon_layout: Dict[str, Any], template_index: Dict[str, str]
+) -> List[Dict[str, Any]]:
+    """Convert SD-OVON layout to sampling layout format."""
+    objects = []
+    for obj in sd_ovon_layout.get("objects", []):
+        sampling_obj = {
+            "id": obj.get("id", f"obj_{len(objects)}"),
+            "category": obj.get("category", "object"),
+            "position": obj.get("position", [0, 0, 0]),
+            "rotation": obj.get("rotation", [0, 0, 0]),
+            "confidence": obj.get("confidence", 1.0),
+            "source": "sd_ovon",
+        }
+        objects.append(sampling_obj)
+    
+    return objects
+
+
+
+def load_scene_rooms(scene_name: str, rooms_info_dir: str) -> List[Dict[str, Any]]:
+    """Load scene room metadata from exported scene_info files."""
+    candidates = [
+        os.path.join(rooms_info_dir, scene_name, f"{scene_name}_scene_info.json"),
+        os.path.join(rooms_info_dir, "temp_export", f"{scene_name}_scene_info.json"),
+    ]
+
+    for path in candidates:
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            rooms = data.get("rooms", [])
+            if isinstance(rooms, list):
+                return rooms
+        except Exception:
+            continue
+    return []
+
+
+def _normalize_bbox(raw_bbox: Any) -> Optional[Tuple[List[float], List[float]]]:
+    """Normalize bbox to ([min_x, min_y, min_z], [max_x, max_y, max_z])."""
+    if not isinstance(raw_bbox, dict):
+        return None
+    min_pt = raw_bbox.get("min")
+    max_pt = raw_bbox.get("max")
+    if not isinstance(min_pt, list) or not isinstance(max_pt, list):
+        return None
+    if len(min_pt) < 3 or len(max_pt) < 3:
+        return None
+
+    try:
+        min_pt = [float(min_pt[0]), float(min_pt[1]), float(min_pt[2])]
+        max_pt = [float(max_pt[0]), float(max_pt[1]), float(max_pt[2])]
+    except Exception:
+        return None
+
+    if any((not math.isfinite(v)) for v in min_pt + max_pt):
+        return None
+    if min_pt[0] > max_pt[0] or min_pt[1] > max_pt[1] or min_pt[2] > max_pt[2]:
+        return None
+    return min_pt, max_pt
+
+
+def _random_point_in_bbox(
+    min_pt: List[float],
+    max_pt: List[float],
+    y_offset: float,
+    safety_margin: float = 0.12,
+) -> List[float]:
+    """Sample a random point in bbox with margin and floor-relative y."""
+    def _sample_1d(lo: float, hi: float) -> float:
+        if hi - lo <= 1e-6:
+            return lo
+        inner_lo = lo + safety_margin
+        inner_hi = hi - safety_margin
+        if inner_hi <= inner_lo:
+            return float((lo + hi) / 2.0)
+        return float(np.random.uniform(inner_lo, inner_hi))
+
+    x = _sample_1d(min_pt[0], max_pt[0])
+    z = _sample_1d(min_pt[2], max_pt[2])
+    y = float(min_pt[1] + max(y_offset, 0.02))
+    y = min(y, max_pt[1])
+    return [x, y, z]
+
+
+def _random_point_near_center(center: List[float], y_offset: float, jitter: float = 0.45) -> List[float]:
+    """Fallback point sampler when room bbox is unavailable."""
+    if not isinstance(center, list) or len(center) < 3:
+        center = [0.0, 0.0, 0.0]
+    x = float(center[0] + np.random.uniform(-jitter, jitter))
+    z = float(center[2] + np.random.uniform(-jitter, jitter))
+    y = float(center[1] + max(y_offset, 0.02))
+    return [x, y, z]
+
+
+def _collides_xz(candidate: List[float], candidate_radius: float, placed: List[Dict[str, Any]]) -> bool:
+    """Simple XZ collision check with stored placed radii."""
+    for obj in placed:
+        other_pos = obj.get("position", [0.0, 0.0, 0.0])
+        other_radius = float(obj.get("_placement_radius", DEFAULT_OBJECT_PROFILE["radius"]))
+        dx = float(candidate[0]) - float(other_pos[0])
+        dz = float(candidate[2]) - float(other_pos[2])
+        min_dist = float(candidate_radius + other_radius)
+        if (dx * dx + dz * dz) < (min_dist * min_dist):
+            return True
+    return False
+
+
+def _distance_to_bbox_edge(point: List[float], min_pt: List[float], max_pt: List[float]) -> float:
+    """Approximate distance from point to bbox inner edge on XZ plane."""
+    dx = min(float(point[0]) - float(min_pt[0]), float(max_pt[0]) - float(point[0]))
+    dz = min(float(point[2]) - float(min_pt[2]), float(max_pt[2]) - float(point[2]))
+    return max(0.0, min(dx, dz))
+
+
+def _score_candidate_rule(
+    candidate: List[float],
+    center: List[float],
+    bbox_pair: Optional[Tuple[List[float], List[float]]],
+) -> float:
+    """Rule-based score: prefer near-center and away from boundary."""
+    center_dist = math.sqrt((float(candidate[0]) - float(center[0])) ** 2 + (float(candidate[2]) - float(center[2])) ** 2)
+    score = -center_dist
+    if bbox_pair is not None:
+        edge_margin = _distance_to_bbox_edge(candidate, bbox_pair[0], bbox_pair[1])
+        score += 0.35 * edge_margin
+    return float(score)
+
+
+def _score_candidate_by_backend(
+    backend: str,
+    candidate: List[float],
+    center: List[float],
+    bbox_pair: Optional[Tuple[List[float], List[float]]],
+) -> float:
+    """
+    Unified candidate scoring hook for future model integration.
+
+    backend=rerank/policy currently falls back to rule scoring.
+    Replace here to plug in external reranker/policy models.
+    """
+    if backend in ("rerank", "policy"):
+        return _score_candidate_rule(candidate, center, bbox_pair)
+    return _score_candidate_rule(candidate, center, bbox_pair)
+
+
+def auto_place_objects(
+    layout_json: Dict[str, Any],
+    rooms: List[Dict[str, Any]],
+    max_attempts: int,
+    placement_backend: str = "rule",
+    collision_radius_override: Optional[float] = None,
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Automatically place objects in room bbox with collision-aware retries."""
+    start_time = time.time()
+    room_bbox_map: Dict[int, Tuple[List[float], List[float]]] = {}
+    for room in rooms:
+        rid = room.get("region_id")
+        if rid is None:
+            continue
+        normalized = _normalize_bbox(room.get("bounding_box", {}))
+        if normalized is not None:
+            room_bbox_map[int(rid)] = normalized
+
+    source_objects = layout_json.get("objects", [])
+    placed_objects: List[Dict[str, Any]] = []
+    failed_objects: List[Dict[str, Any]] = []
+    failed_ids: List[int] = []
+
+    for src in source_objects:
+        obj = dict(src)
+        profile = infer_object_profile(obj.get("model_id", ""))
+        radius = float(collision_radius_override) if collision_radius_override else float(profile["radius"])
+        y_offset = float(profile["y_offset"])
+
+        region_id = obj.get("sampled_region_id")
+        bbox_pair: Optional[Tuple[List[float], List[float]]] = None
+        if isinstance(region_id, int) and region_id in room_bbox_map:
+            bbox_pair = room_bbox_map[region_id]
+
+        if bbox_pair is None:
+            bbox_pair = _normalize_bbox(obj.get("room_aabb", {}))
+
+        placed = False
+        best_candidate = obj.get("position", [0.0, 0.0, 0.0])
+        best_score = float("-inf")
+        last_candidate = obj.get("position", [0.0, 0.0, 0.0])
+        center = obj.get("position", [0.0, 0.0, 0.0])
+        if bbox_pair is not None:
+            center = [
+                (float(bbox_pair[0][0]) + float(bbox_pair[1][0])) / 2.0,
+                (float(bbox_pair[0][1]) + float(bbox_pair[1][1])) / 2.0,
+                (float(bbox_pair[0][2]) + float(bbox_pair[1][2])) / 2.0,
+            ]
+
+        for _ in range(max(1, int(max_attempts))):
+            if bbox_pair is not None:
+                candidate = _random_point_in_bbox(bbox_pair[0], bbox_pair[1], y_offset)
+            else:
+                candidate = _random_point_near_center(obj.get("position", [0.0, 0.0, 0.0]), y_offset)
+
+            last_candidate = candidate
+            if _collides_xz(candidate, radius, placed_objects):
+                continue
+
+            score = _score_candidate_by_backend(placement_backend, candidate, center, bbox_pair)
+            if score > best_score:
+                best_score = score
+                best_candidate = candidate
+
+        if best_score > float("-inf"):
+            candidate = best_candidate
+            obj["position"] = [round(float(candidate[0]), 4), round(float(candidate[1]), 4), round(float(candidate[2]), 4)]
+            obj["rotation"] = [0.0, float(np.random.uniform(0.0, 360.0)), 0.0]
+            obj["source"] = "auto_placement"
+            obj["_placement_radius"] = radius
+            obj["edit_priority"] = "normal"
+            obj["edit_status"] = "auto_placed"
+            placed = True
+
+        if placed:
+            placed_objects.append(obj)
+        else:
+            obj["source"] = "auto_placement_failed"
+            obj["_placement_radius"] = radius
+            obj["edit_priority"] = "high"
+            obj["edit_status"] = "needs_manual_fix"
+            obj["edit_note"] = "AUTO_FAILED: collision_or_invalid_bbox"
+            failed_objects.append(
+                {
+                    "id": obj.get("id"),
+                    "model_id": obj.get("model_id"),
+                    "sampled_region_id": obj.get("sampled_region_id", -1),
+                    "reason": "collision_or_invalid_bbox",
+                    "last_candidate": [round(float(last_candidate[0]), 4), round(float(last_candidate[1]), 4), round(float(last_candidate[2]), 4)],
+                }
+            )
+            if isinstance(obj.get("id"), int):
+                failed_ids.append(int(obj["id"]))
+            placed_objects.append(obj)
+
+    placed_objects.sort(key=lambda x: 0 if x.get("edit_status") == "needs_manual_fix" else 1)
+
+    for obj in placed_objects:
+        obj.pop("_placement_radius", None)
+
+    duration = round(float(time.time() - start_time), 4)
+    stats = {
+        "total_objects": len(source_objects),
+        "placed_count": len(source_objects) - len(failed_objects),
+        "failed_count": len(failed_objects),
+        "processing_time_sec": duration,
+        "placement_backend": placement_backend,
+        "failed_ids": failed_ids,
+        "failed_objects": failed_objects,
+    }
+
+    new_layout = dict(layout_json)
+    new_layout["objects"] = placed_objects
+    new_layout["auto_placement_stats"] = stats
+    new_layout["editor_focus_failed_ids"] = failed_ids
+    new_layout["editor_review_order"] = "failed_first"
+    return new_layout, stats
 
 
 # ===== 概率文件管理 =====
@@ -140,6 +466,7 @@ def generate_probabilities(
                 "rank": room["rank"],
                 "region_id": room.get("region_id", -1),
                 "room_center": room.get("room_center", [0, 0, 0]),
+                "room_aabb": room.get("room_aabb", room.get("bounding_box", {})),
                 "probability": float(normalized_probs[i]),
             }
             for i, room in enumerate(recommended_rooms[:n_rooms])
@@ -277,6 +604,8 @@ def sample_object_positions(
         sampled_room = probabilities[sampled_idx]
         sampled_center = sampled_room.get("room_center", [0, 0, 0])
         sampled_confidence = sampled_room.get("probability", 0.5)
+        sampled_region_id = int(sampled_room.get("region_id", -1))
+        room_aabb = sampled_room.get("room_aabb", {})
 
         resolved_model_id = resolve_model_id_for_template(object_name, template_index)
         
@@ -288,6 +617,8 @@ def sample_object_positions(
             "position": sampled_center,
             "rotation": [0.0, 0.0, 0.0],
             "confidence": float(sampled_confidence),
+            "sampled_region_id": sampled_region_id,
+            "room_aabb": room_aabb,
             "source": "probability_sampling",
         }
         sampled_objects.append(obj_entry)
@@ -366,6 +697,10 @@ def interactive_sampling_loop(
     rooms_info_dir: str,
     probabilities_dir: str,
     layouts_dir: str,
+    placement: str,
+    placement_backend: str,
+    placement_attempts: int,
+    collision_radius_override: Optional[float],
     ui_lang: str = "zh",
 ):
     """
@@ -387,9 +722,32 @@ def interactive_sampling_loop(
         if not layout_json:
             print("[Error] Failed to sample layout")
             return
+
+        if placement == "auto":
+            print("[Info] Running auto placement (quality-first)...")
+            rooms = load_scene_rooms(scene_name, rooms_info_dir)
+            layout_json, auto_stats = auto_place_objects(
+                layout_json,
+                rooms,
+                max_attempts=placement_attempts,
+                placement_backend=placement_backend,
+                collision_radius_override=collision_radius_override,
+            )
+            print(
+                "[Info] Auto placement stats: "
+                f"placed={auto_stats['placed_count']}/{auto_stats['total_objects']}, "
+                f"failed={auto_stats['failed_count']}, "
+                f"backend={auto_stats['placement_backend']}, "
+                f"time={auto_stats['processing_time_sec']}s"
+            )
+            if auto_stats["failed_count"] > 0:
+                failed_models = [x.get("model_id", "?") for x in auto_stats.get("failed_objects", [])]
+                print("[Info] Failed objects to focus in editor:", ", ".join(failed_models))
+                print("[Info] Failed object IDs:", auto_stats.get("failed_ids", []))
         
         # Step 2: Write temporary layout file
-        temp_layout_path = os.path.join(layouts_dir, scene_name, f"temp_sampled_{int(time.time())}.json")
+        prefix = "temp_auto" if placement == "auto" else "temp_sampled"
+        temp_layout_path = os.path.join(layouts_dir, scene_name, f"{prefix}_{int(time.time())}.json")
         os.makedirs(os.path.dirname(temp_layout_path), exist_ok=True)
         
         try:
@@ -478,17 +836,75 @@ def main():
     parser.add_argument("--rooms-info-dir", default=DEFAULT_ROOMS_INFO_DIR, help="Room query results directory")
     parser.add_argument("--probabilities-dir", default=DEFAULT_PROBABILITIES_DIR, help="Probabilities directory")
     parser.add_argument("--layouts-dir", default=DEFAULT_LAYOUTS_DIR, help="Layouts output directory")
+    parser.add_argument(
+        "--placement",
+        choices=["manual", "auto"],
+        default="manual",
+        help="manual: sample then edit; auto: collision-aware auto placement then edit failed objects",
+    )
+    parser.add_argument(
+        "--placement-backend",
+        choices=["rule", "rerank", "policy"],
+        default="rule",
+        help="Auto placement backend. rerank/policy currently use rule fallback hook",
+    )
+    parser.add_argument(
+        "--placement-attempts",
+        type=int,
+        default=24,
+        help="Max retry attempts per object in auto placement",
+    )
+    parser.add_argument(
+        "--collision-radius-override",
+        type=float,
+        default=None,
+        help="Optional fixed collision radius for all objects in auto placement",
+    )
+    parser.add_argument(
+        "--placement-seed",
+        type=int,
+        default=42,
+        help="Random seed for reproducible sampling and auto placement",
+    )
+    
+    parser.add_argument(
+        "--backend",
+        choices=["default", "sd_ovon"],
+        default="default",
+        help="Sampling backend: default (rule-based) or sd_ovon (from SD-OVON pipeline)",
+    )
+    parser.add_argument(
+        "--sd-ovon-layouts-dir",
+        default=None,
+        help="SD-OVON layouts directory (if --backend sd_ovon)",
+    )
     
     parser.add_argument("--ui-lang", choices=["en", "zh"], default="zh", help="Editor UI language")
     
     args = parser.parse_args()
+    np.random.seed(args.placement_seed)
     
     # Validate scene
     if args.scene not in AVAILABLE_SCENES:
         print(f"[Error] Scene {args.scene} not in merged available list")
         sys.exit(1)
     
-    # Validate mode
+    # Handle SD-OVON backend
+    if args.backend == "sd_ovon":
+        print(f"[Info] Using SD-OVON backend")
+        sd_ovon_layout = load_sd_ovon_layout(args.scene, args.sd_ovon_layouts_dir)
+        if sd_ovon_layout is None:
+            print(f"[Error] Failed to load SD-OVON layout for {args.scene}")
+            sys.exit(1)
+        
+        # Convert to sampling format
+        template_index = build_object_template_index()
+        objects = sd_ovon_to_sampling_layout(sd_ovon_layout, template_index)
+        print(f"[Info] Loaded {len(objects)} objects from SD-OVON")
+        print(f"[Info] Ready for editing in layout editor")
+        return
+    
+    # Default backend validation
     if args.mode == "load":
         # Check if at least one probability file exists
         prob_dir = os.path.join(args.probabilities_dir, args.scene)
@@ -513,11 +929,16 @@ def main():
             args.rooms_info_dir,
             args.probabilities_dir,
             args.layouts_dir,
+            args.placement,
+            args.placement_backend,
+            args.placement_attempts,
+            args.collision_radius_override,
             args.ui_lang,
         )
     except KeyboardInterrupt:
         print("\nInterrupted by user")
         sys.exit(0)
+
 
 
 if __name__ == "__main__":
