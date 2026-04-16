@@ -30,3 +30,4 @@ benchmark/eval/
 benchmark/splits/
 
 *.pyc
+*.log

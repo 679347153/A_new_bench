@@ -180,6 +180,14 @@ def sd_ovon_to_sampling_layout(
     return objects
 
 
+def run_sd_ovon_roomwise_bridge(scene_name: str, layout_json: Dict[str, Any]) -> Dict[str, Any]:
+    """Bridge HM3D sampled room groups into the SD-OVON room-wise pipeline."""
+    from orchestrate_sd_ovon_complete import SDOVONPipelineOrchestrator
+
+    orchestrator = SDOVONPipelineOrchestrator(config_level="mock")
+    return orchestrator.run_roomwise_layout_pipeline(layout_json, scene_name)
+
+
 
 def load_scene_rooms(scene_name: str, rooms_info_dir: str) -> List[Dict[str, Any]]:
     """Load scene room metadata from exported scene_info files."""
@@ -231,8 +239,10 @@ def _random_point_in_bbox(
     max_pt: List[float],
     y_offset: float,
     safety_margin: float = 0.12,
+    preferred_y: Optional[float] = None,
+    global_y_lift: float = 0.0,
 ) -> List[float]:
-    """Sample a random point in bbox with margin and floor-relative y."""
+    """Sample a random point in bbox with margin and robust Y anchor."""
     def _sample_1d(lo: float, hi: float) -> float:
         if hi - lo <= 1e-6:
             return lo
@@ -244,18 +254,26 @@ def _random_point_in_bbox(
 
     x = _sample_1d(min_pt[0], max_pt[0])
     z = _sample_1d(min_pt[2], max_pt[2])
-    y = float(min_pt[1] + max(y_offset, 0.02))
-    y = min(y, max_pt[1])
+    base_y = float(min_pt[1])
+    if preferred_y is not None and math.isfinite(float(preferred_y)):
+        base_y = float(preferred_y)
+    y = float(base_y + max(y_offset, 0.02) + max(float(global_y_lift), 0.0))
+    y = min(max(y, float(min_pt[1]) + 0.01), float(max_pt[1]))
     return [x, y, z]
 
 
-def _random_point_near_center(center: List[float], y_offset: float, jitter: float = 0.45) -> List[float]:
+def _random_point_near_center(
+    center: List[float],
+    y_offset: float,
+    jitter: float = 0.45,
+    global_y_lift: float = 0.0,
+) -> List[float]:
     """Fallback point sampler when room bbox is unavailable."""
     if not isinstance(center, list) or len(center) < 3:
         center = [0.0, 0.0, 0.0]
     x = float(center[0] + np.random.uniform(-jitter, jitter))
     z = float(center[2] + np.random.uniform(-jitter, jitter))
-    y = float(center[1] + max(y_offset, 0.02))
+    y = float(center[1] + max(y_offset, 0.02) + max(float(global_y_lift), 0.0))
     return [x, y, z]
 
 
@@ -316,6 +334,7 @@ def auto_place_objects(
     max_attempts: int,
     placement_backend: str = "rule",
     collision_radius_override: Optional[float] = None,
+    global_y_lift: float = 0.0,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Automatically place objects room-by-room using each object's sampled room."""
     start_time = time.time()
@@ -397,9 +416,19 @@ def auto_place_objects(
 
         for _ in range(max(1, int(max_attempts))):
             if bbox_pair is not None:
-                candidate = _random_point_in_bbox(bbox_pair[0], bbox_pair[1], y_offset)
+                candidate = _random_point_in_bbox(
+                    bbox_pair[0],
+                    bbox_pair[1],
+                    y_offset,
+                    preferred_y=float(room_center[1]),
+                    global_y_lift=global_y_lift,
+                )
             else:
-                candidate = _random_point_near_center(room_center, y_offset)
+                candidate = _random_point_near_center(
+                    room_center,
+                    y_offset,
+                    global_y_lift=global_y_lift,
+                )
 
             last_candidate = candidate
             if _collides_xz(candidate, radius, placed_objects):
@@ -474,6 +503,7 @@ def auto_place_objects(
         "failed_count": len(failed_objects),
         "processing_time_sec": duration,
         "placement_backend": placement_backend,
+        "global_y_lift": float(global_y_lift),
         "center_fallback_count": fallback_to_center_count,
         "room_processing_order": room_order,
         "object_processing_sequence": object_processing_sequence,
@@ -723,6 +753,7 @@ def sample_object_positions(
         "scene": str(scene_paths.stage_glb),
         "timestamp": time.time(),
         "objects": sampled_objects,
+        "room_groups": _build_room_groups(sampled_objects),
         "placement_scope": {
             "mode": "sampled_region_per_object",
         },
@@ -734,6 +765,42 @@ def sample_object_positions(
 def _prettify_model_name(model_id: str) -> str:
     """Convert snake_case or camelCase to Title Case."""
     return model_id.replace("_", " ").title()
+
+
+def _build_room_groups(objects: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Group sampled objects by sampled_region_id for downstream room-wise placement."""
+    grouped: Dict[int, Dict[str, Any]] = {}
+    unknown_group: Optional[Dict[str, Any]] = None
+
+    for obj in objects:
+        region_id = obj.get("sampled_region_id")
+        if isinstance(region_id, int) and region_id >= 0:
+            group = grouped.setdefault(
+                region_id,
+                {
+                    "region_id": region_id,
+                    "objects": [],
+                    "room_center": obj.get("room_center", obj.get("position", [0.0, 0.0, 0.0])),
+                    "room_aabb": obj.get("room_aabb", {}),
+                },
+            )
+            group["objects"].append(obj)
+            if obj.get("room_aabb"):
+                group["room_aabb"] = obj.get("room_aabb", {})
+        else:
+            if unknown_group is None:
+                unknown_group = {
+                    "region_id": -1,
+                    "objects": [],
+                    "room_center": [0.0, 0.0, 0.0],
+                    "room_aabb": {},
+                }
+            unknown_group["objects"].append(obj)
+
+    room_groups = [grouped[key] for key in sorted(grouped.keys())]
+    if unknown_group is not None and unknown_group["objects"]:
+        room_groups.append(unknown_group)
+    return room_groups
 
 
 def _get_scene_id(scene_name: str) -> str:
@@ -786,6 +853,7 @@ def interactive_sampling_loop(
     placement_backend: str,
     placement_attempts: int,
     collision_radius_override: Optional[float],
+    global_y_lift: float,
     ui_lang: str = "zh",
 ):
     """
@@ -821,6 +889,7 @@ def interactive_sampling_loop(
                 max_attempts=placement_attempts,
                 placement_backend=placement_backend,
                 collision_radius_override=collision_radius_override,
+                global_y_lift=global_y_lift,
             )
             print(
                 "[Info] Auto placement stats: "
@@ -847,6 +916,11 @@ def interactive_sampling_loop(
                     "[Diag] Placement Y summary: "
                     f"min={y_min:.4f}, max={y_max:.4f}, avg={y_avg:.4f}, below_0={below_zero}/{len(y_values)}"
                 )
+                if below_zero > (len(y_values) // 2) and global_y_lift <= 0.0:
+                    print(
+                        "[Diag] Many objects are below y=0. "
+                        "Try adding --global-y-lift 0.4 (or 0.6) to raise all auto placements."
+                    )
 
             if auto_stats["failed_count"] > 0:
                 failed_models = [x.get("model_id", "?") for x in auto_stats.get("failed_objects", [])]
@@ -985,6 +1059,12 @@ def main():
         help="Optional fixed collision radius for all objects in auto placement",
     )
     parser.add_argument(
+        "--global-y-lift",
+        type=float,
+        default=0.0,
+        help="Global Y lift added to all auto placement candidates to avoid sinking",
+    )
+    parser.add_argument(
         "--placement-seed",
         type=int,
         default=42,
@@ -1020,12 +1100,39 @@ def main():
         if sd_ovon_layout is None:
             print(f"[Error] Failed to load SD-OVON layout for {args.scene}")
             sys.exit(1)
+
+        roomwise_report = run_sd_ovon_roomwise_bridge(args.scene, sd_ovon_layout)
+        print(
+            "[Info] SD-OVON roomwise bridge completed: "
+            f"rooms={roomwise_report.get('room_count', 0)}, "
+            f"objects={roomwise_report.get('object_count', 0)}, "
+            f"status={roomwise_report.get('pipeline_status')}"
+        )
         
-        # Convert to sampling format
-        template_index = build_object_template_index()
-        objects = sd_ovon_to_sampling_layout(sd_ovon_layout, template_index)
-        print(f"[Info] Loaded {len(objects)} objects from SD-OVON")
-        print(f"[Info] Ready for editing in layout editor")
+        # Save roomwise report as intermediate layout
+        layouts_dir = args.layouts_dir
+        layout_json = {
+            "scene": str(args.scene),
+            "timestamp": time.time(),
+            "objects": roomwise_report.get("placements", []),
+            "room_groups": roomwise_report.get("room_groups", []),
+            "placement_scope": {
+                "mode": "roomwise_from_sd_ovon",
+                "bridge_status": roomwise_report.get("pipeline_status"),
+            },
+        }
+        
+        os.makedirs(os.path.join(layouts_dir, args.scene), exist_ok=True)
+        temp_layout_path = os.path.join(layouts_dir, args.scene, f"roomwise_sd_ovon_{int(time.time())}.json")
+        try:
+            with open(temp_layout_path, "w", encoding="utf-8") as f:
+                json.dump(layout_json, f, ensure_ascii=False, indent=2)
+            print(f"[Info] Saved roomwise layout to: {temp_layout_path}")
+        except Exception as e:
+            print(f"[Error] Failed to save roomwise layout: {e}")
+            sys.exit(1)
+        
+        print(f"[Info] SD-OVON roomwise backend complete. Layout saved.")
         return
     
     # Default backend validation
@@ -1057,6 +1164,7 @@ def main():
             args.placement_backend,
             args.placement_attempts,
             args.collision_radius_override,
+            args.global_y_lift,
             args.ui_lang,
         )
     except KeyboardInterrupt:

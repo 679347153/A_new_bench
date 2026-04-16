@@ -435,6 +435,131 @@ class SDOVONPipelineOrchestrator:
             "has_physics_report": "physics_report" in physics,
         }
 
+    def _extract_room_groups(self, layout_json: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Extract per-room object batches from HM3D sampled layout output."""
+        room_groups = layout_json.get("room_groups", [])
+        if isinstance(room_groups, list) and room_groups:
+            normalized_groups = []
+            for group in room_groups:
+                if isinstance(group, dict):
+                    normalized_groups.append(group)
+            return normalized_groups
+
+        objects = layout_json.get("objects", [])
+        grouped: Dict[int, Dict[str, Any]] = {}
+        unknown_group: Optional[Dict[str, Any]] = None
+
+        for obj in objects:
+            region_id = obj.get("sampled_region_id")
+            if isinstance(region_id, int) and region_id >= 0:
+                group = grouped.setdefault(
+                    region_id,
+                    {
+                        "region_id": region_id,
+                        "room_center": obj.get("position", [0.0, 0.0, 0.0]),
+                        "room_aabb": obj.get("room_aabb", {}),
+                        "objects": [],
+                    },
+                )
+                group["objects"].append(obj)
+                if obj.get("room_aabb"):
+                    group["room_aabb"] = obj.get("room_aabb", {})
+            else:
+                if unknown_group is None:
+                    unknown_group = {
+                        "region_id": -1,
+                        "room_center": [0.0, 0.0, 0.0],
+                        "room_aabb": {},
+                        "objects": [],
+                    }
+                unknown_group["objects"].append(obj)
+
+        normalized_groups = [grouped[key] for key in sorted(grouped.keys())]
+        if unknown_group is not None and unknown_group["objects"]:
+            normalized_groups.append(unknown_group)
+        return normalized_groups
+
+    def _build_roomwise_placement(self, room_group: Dict[str, Any]) -> Dict[str, Any]:
+        """Build a simple room-wise placement result from one grouped room batch."""
+        objects = room_group.get("objects", [])
+        room_center = room_group.get("room_center", [0.0, 0.0, 0.0])
+        room_aabb = room_group.get("room_aabb", {})
+
+        if not isinstance(room_center, list) or len(room_center) < 3:
+            room_center = [0.0, 0.0, 0.0]
+
+        placements: List[Dict[str, Any]] = []
+        for idx, obj in enumerate(objects):
+            jitter = (idx % 3) * 0.12
+            position = [
+                float(room_center[0]) + jitter,
+                float(room_center[1]) + 0.05,
+                float(room_center[2]) + (jitter * 0.5),
+            ]
+            if isinstance(room_aabb, dict):
+                min_pt = room_aabb.get("min")
+                max_pt = room_aabb.get("max")
+                if isinstance(min_pt, list) and isinstance(max_pt, list) and len(min_pt) >= 3 and len(max_pt) >= 3:
+                    position[0] = max(float(min_pt[0]) + 0.05, min(position[0], float(max_pt[0]) - 0.05))
+                    position[1] = max(float(room_center[1]), float(room_center[1]) + 0.05)
+                    position[2] = max(float(min_pt[2]) + 0.05, min(position[2], float(max_pt[2]) - 0.05))
+
+            placements.append(
+                {
+                    "object_id": obj.get("object_id", obj.get("id", idx)),
+                    "name": obj.get("name", f"object_{idx}"),
+                    "model_id": obj.get("model_id", obj.get("name", f"object_{idx}")),
+                    "position": [round(float(position[0]), 4), round(float(position[1]), 4), round(float(position[2]), 4)],
+                    "rotation": obj.get("rotation", [0.0, 0.0, 0.0]),
+                    "size": obj.get("size", [0.3, 0.3, 0.3]),
+                    "sampled_region_id": room_group.get("region_id", -1),
+                    "placement_source": "room_group_bridge",
+                }
+            )
+
+        return {
+            "success": True,
+            "region_id": room_group.get("region_id", -1),
+            "object_count": len(objects),
+            "placements": placements,
+        }
+
+    def run_roomwise_layout_pipeline(
+        self,
+        layout_json: Dict[str, Any],
+        scene_name: str,
+    ) -> Dict[str, Any]:
+        """Bridge HM3D sampled room groups into a room-by-room SD-OVON placement report."""
+        room_groups = self._extract_room_groups(layout_json)
+        if not room_groups:
+            return {
+                "success": False,
+                "scene_name": scene_name,
+                "error": "No room_groups found in layout_json",
+                "room_groups": [],
+                "placements": [],
+            }
+
+        room_reports: List[Dict[str, Any]] = []
+        placements: List[Dict[str, Any]] = []
+
+        for room_group in room_groups:
+            room_report = self._build_roomwise_placement(room_group)
+            room_reports.append(room_report)
+            placements.extend(room_report.get("placements", []))
+
+        result = {
+            "success": True,
+            "scene_name": scene_name,
+            "room_count": len(room_reports),
+            "object_count": len(placements),
+            "room_groups": room_groups,
+            "room_reports": room_reports,
+            "placements": placements,
+            "pipeline_status": "completed",
+        }
+        return result
+
     def _generate_final_report(self, scene_name: str) -> Dict[str, Any]:
         """生成最终汇总报告。"""
         total_time = sum(self.stage_durations.values())

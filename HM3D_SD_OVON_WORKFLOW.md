@@ -6,9 +6,9 @@
 
 - HM3D 语义布局主线：房间推荐 -> 概率生成/读取 -> 自动放置或人工微调 -> 最终布局保存。
 - SD-OVON 编排链路：语义理解 -> 特征预处理 -> 对象生成 -> 实例融合 -> 去重 -> 语义放置 -> 物理检查 -> 校验。
-- 协同运行：SD-OVON 消费 HM3D 主线产出的 rooms/probabilities 数据目录。
+- 协同运行：HM3D 先为每个物体采样出 `sampled_region_id` 并输出 `room_groups`，随后 SD-OVON 消费这些 room_groups 逐房间放置。
 
-自动放置能力支持区域约束：
+自动放置能力支持按房间分组：
 
 - 每个物体先通过概率采样得到 `sampled_region_id`。
 - 自动放置按房间分组依次处理：先筛选出该房间的物体，再在该房间内依次放置。
@@ -137,6 +137,7 @@ python sample_and_place_objects.py \
   --probabilities-dir ./results/probabilities \
   --layouts-dir ./results/layouts \
   --placement auto \
+  --global-y-lift 0.4 \
   --placement-backend rule \
   --placement-attempts 24
 ```
@@ -158,6 +159,7 @@ python sample_and_place_objects.py \
 - 按房间分组依次处理：同一房间中的物体连续放置。
 - 优先在该房间 bbox 内采样。
 - 如果该房间 bbox 无效，则自动回退到该房间 room center 附近采样。
+- 如果出现“物体在地板以下”，可增加 `--global-y-lift 0.4`（或更大）统一抬升自动放置高度。
 - 失败对象会被标记为 `needs_manual_fix` 并在编辑器中优先复核。
 
 #### 3.2 人工微调模式
@@ -175,6 +177,8 @@ python sample_and_place_objects.py \
 
 ### Step 4：运行 SD-OVON 编排链路
 
+当前推荐的协同方式是：先由 HM3D 主线生成包含 `room_groups` 的 layout_json，再由 `orchestrate_sd_ovon_complete.py` 的 room-wise bridge 消费这些房间分组。
+
 #### 4.1 快速协同检查（mock）
 
 ```bash
@@ -185,6 +189,12 @@ python -c "from orchestrate_sd_ovon_complete import SDOVONPipelineOrchestrator a
 
 ```bash
 python -c "from orchestrate_sd_ovon_complete import SDOVONPipelineOrchestrator as O; r=O('production').run_full_pipeline('00808-y9hTuugGdiq'); print(r['pipeline_status'], r['final_output'])"
+```
+
+若你已经有 HM3D 采样产物，并希望直接走房间级桥接，可用：
+
+```bash
+python -c "import json; from orchestrate_sd_ovon_complete import SDOVONPipelineOrchestrator as O; layout=json.load(open('./results/layouts/00808-y9hTuugGdiq/temp_auto_example.json', 'r', encoding='utf-8')); r=O('mock').run_roomwise_layout_pipeline(layout, '00808-y9hTuugGdiq'); print(r['pipeline_status'], r['room_count'], r['object_count'])"
 ```
 
 说明：
@@ -259,6 +269,8 @@ python sample_and_place_objects.py \
   --placement auto
 
 python -c "from orchestrate_sd_ovon_complete import SDOVONPipelineOrchestrator as O; r=O('mock').run_full_pipeline('00808-y9hTuugGdiq'); print(r['pipeline_status'], r['final_output'])"
+
+python -c "import json; from orchestrate_sd_ovon_complete import SDOVONPipelineOrchestrator as O; layout=json.load(open('./results/layouts/00808-y9hTuugGdiq/temp_auto_example.json', 'r', encoding='utf-8')); r=O('mock').run_roomwise_layout_pipeline(layout, '00808-y9hTuugGdiq'); print(r['pipeline_status'], r['room_count'], r['object_count'])"
 ```
 
 以上流程跑通后，再切换 production 模式和更复杂场景。
