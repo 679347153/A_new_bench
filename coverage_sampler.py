@@ -1,8 +1,17 @@
 """
-Coverage Random Observations Sampling (Phase 3.1)
+本文件作用总览（Phase 3.1 Coverage Sampling）
 
-根据可导航区域进行随机采样，使用 Gaussian 覆盖图更新机制，确保采样点覆盖率。
-参考 SD-OVON section 3.1。
+本模块负责在场景可导航区域上生成一组“覆盖性较好”的观测点（viewpoints），
+供后续多视角观测与实例融合阶段使用。核心机制如下：
+1) 用 nav_map 表示可导航区域；
+2) 维护 coverage_map 表示已覆盖程度；
+3) 在 (1 - coverage_map) 高的区域优先采样候选点；
+4) 用局部可导航密度过滤无效点；
+5) 对有效点施加 Gaussian 覆盖核，持续更新 coverage_map；
+6) 达到目标覆盖率或超过最大迭代次数后停止。
+
+该实现是可直接运行的工程版本，同时保留了 mock 场景下的虚拟 nav_map 生成功能，
+便于无地图输入时进行链路联调。
 """
 
 from typing import Dict, List, Tuple, Any, Optional
@@ -10,11 +19,16 @@ import numpy as np
 import json
 import os
 from sd_ovon_config import SDOVONConfig
-from pipeline_schema import SchemaValidator
 
 
 class CoverageSampler:
-    """覆盖采样引擎"""
+    """覆盖采样引擎。
+
+    状态变量说明：
+    - nav_map: 当前场景可导航区域（二值图）
+    - coverage_map: 当前覆盖强度图（0~1）
+    - valid_viewpoints: 预留字段，保存有效视角（当前版本未使用）
+    """
 
     def __init__(self, config: SDOVONConfig):
         self.config = config
@@ -29,9 +43,7 @@ class CoverageSampler:
         objects: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """
-        主入口：从导航
-
-区域采样观测点，返回有效采样点列表。
+        主入口：从可导航区域采样观测点，并返回统计结果。
 
         Args:
             scene_name: 场景名称
@@ -54,17 +66,19 @@ class CoverageSampler:
         """
         cfg = self.config.COVERAGE_SAMPLING
 
-        # Step 1: 初始化或生成虚拟 nav map
+        # Step 1: 初始化或生成虚拟 nav map。
+        # 当外部没有传入地图时，使用 mock 可导航区域保持流程可执行。
         if nav_map is None:
             nav_map = self._generate_virtual_nav_map(scene_name)
 
         self.nav_map = nav_map
         h, w = nav_map.shape
 
-        # Step 2: 初始化覆盖概率图
+        # Step 2: 初始化覆盖图（不是概率图）。
+        # 值越大表示该像素已经被历史采样点“覆盖”得越充分。
         self.coverage_map = np.zeros((h, w), dtype=np.float32)
 
-        # Step 3: Gaussian 覆盖循环采样
+        # Step 3: 迭代采样并用 Gaussian 核累积覆盖。
         iteration = 0
         total_area = np.sum(nav_map > 0)
         viewpoints = []
@@ -72,17 +86,19 @@ class CoverageSampler:
         while iteration < cfg["max_iterations"]:
             iteration += 1
 
-            # 根据 (1 - coverage_map) 采样
+            # 根据 (1 - coverage_map) 构建采样权重：
+            # 已覆盖区域权重低，未覆盖区域权重高。
             prob_map = (1.0 - self.coverage_map) * (nav_map > 0).astype(np.float32)
             if np.sum(prob_map) < 1e-6:
+                # 所有可导航区域几乎都已覆盖，提前结束。
                 break
 
             prob_map = prob_map / np.sum(prob_map)
 
-            # 采样候选点
+            # 从概率图采样候选点（允许重复，后续由有效性过滤与质量排序间接抑制）。
             candidates = self._sample_candidates_from_map(prob_map, cfg["sample_points_per_iteration"], nav_map)
 
-            # 筛选有效候选（距离障碍物足够远）
+            # 筛选有效候选：局部可导航密度必须达到下限，避免贴边或狭缝点。
             valid_candidates = [
                 c for c in candidates
                 if self._is_valid_viewpoint(c, nav_map, cfg["min_distance_to_obstacle"])
@@ -91,17 +107,18 @@ class CoverageSampler:
             if not valid_candidates:
                 continue
 
-            # 对每个有效候选，生成多角度观测并更新覆盖图
+            # 对每个有效候选点打分并更新覆盖图。
+            # 注意：这里仅生成“位置点”，具体多角度观测一般在后续模块完成。
             for candidate in valid_candidates:
                 viewpoint_id = len(viewpoints)
                 quality = self._compute_quality_score(candidate, nav_map, viewpoints)
 
-                # 生成 Gaussian 覆盖核
+                # 生成当前点的 Gaussian 覆盖核并与全局 coverage_map 做逐像素最大值融合。
                 r_min = cfg["gaussian_radius_min"]
                 r_max = cfg["gaussian_radius_max"]
                 gaussian_kernel = self._create_gaussian_kernel(candidate, h, w, r_min, r_max)
 
-                # 更新覆盖图
+                # 采用 max 融合而非相加，避免覆盖强度无限增长。
                 self.coverage_map = np.maximum(self.coverage_map, gaussian_kernel)
 
                 viewpoints.append({
@@ -110,12 +127,12 @@ class CoverageSampler:
                     "quality_score": quality,
                 })
 
-            # 检查是否达到覆盖目标
+            # 检查是否达到覆盖目标：coverage_map >= 0.5 的区域占比。
             coverage_ratio = np.sum(self.coverage_map >= 0.5) / max(total_area, 1)
             if coverage_ratio >= cfg["coverage_threshold"]:
                 break
 
-        # 统计
+        # 汇总统计信息供后续阶段记录与可视化。
         final_coverage_ratio = np.sum(self.coverage_map >= 0.5) / max(total_area, 1)
         report = {
             "scene_name": scene_name,
@@ -132,7 +149,8 @@ class CoverageSampler:
 
     def _generate_virtual_nav_map(self, scene_name: str, h: int = 512, w: int = 512) -> np.ndarray:
         """生成虚拟可导航区域（用于 mock 测试）"""
-        # 虚拟：中心矩形可导航
+        # 简化假设：场景中心大矩形可导航，边缘不可导航。
+        # 该函数仅用于链路调试，不代表真实导航拓扑。
         nav_map = np.zeros((h, w), dtype=np.uint8)
         y1, y2 = h // 4, 3 * h // 4
         x1, x2 = w // 4, 3 * w // 4
@@ -154,6 +172,7 @@ class CoverageSampler:
             return candidates
 
         for _ in range(num_samples):
+            # 在可导航像素索引上做带权采样，权重来自 prob_map。
             idx = np.random.choice(len(valid_indices[0]), p=prob_map[valid_indices])
             y, x = valid_indices[0][idx], valid_indices[1][idx]
             candidates.append((float(x), float(y)))
@@ -167,7 +186,8 @@ class CoverageSampler:
         min_distance: float,
     ) -> bool:
         """判断采样点是否有效（距离障碍物足够远）"""
-        # 简化：检查局部区域内是否有足够多的可导航像素
+        # 简化判据：检查候选点邻域内可导航像素占比。
+        # 若邻域大部分不可导航，认为该点过于贴近障碍或处于狭窄区域。
         h, w = nav_map.shape
         x, y = int(candidate[0]), int(candidate[1])
         kernel_size = int(min_distance * 10 + 1)  # mock 距离转像素
@@ -190,10 +210,10 @@ class CoverageSampler:
         h, w = nav_map.shape
         x, y = int(candidate[0]), int(candidate[1])
 
-        # 距离图边缘的远近（越近中心越好）
+        # 指标1：距离边缘的相对距离（越靠中心通常可视域更稳定）。
         dist_to_edge = min(x, y, w - x, h - y) / max(h, w)
 
-        # 与现有采样点的距离
+        # 指标2：与已有采样点的最小距离（越远代表新增信息潜力越高）。
         min_dist_to_existing = 1.0
         if existing_viewpoints:
             for vp in existing_viewpoints:
@@ -201,6 +221,7 @@ class CoverageSampler:
                 dist = np.sqrt((x - pos[0]) ** 2 + (y - pos[1]) ** 2)
                 min_dist_to_existing = min(min_dist_to_existing, dist / (h + w))
 
+        # 两项等权融合，得到 [0,1] 附近的启发式质量分。
         quality = 0.5 * dist_to_edge + 0.5 * min_dist_to_existing
         return float(quality)
 
@@ -213,6 +234,7 @@ class CoverageSampler:
         r_max: float,
     ) -> np.ndarray:
         """生成 Gaussian 覆盖核"""
+        # 以 r_max 控制影响半径，常数 20 为“米到像素”的 mock 缩放。
         kernel_size = int(r_max * 20 + 1)  # mock 距离转像素
 
         y = int(center[1])
@@ -225,6 +247,7 @@ class CoverageSampler:
                 if 0 <= ny < h and 0 <= nx < w:
                     dist = np.sqrt(dx ** 2 + dy ** 2) / (20 * r_max)  # 归一化距离
                     if dist <= 1.0:
+                        # 固定 sigma=0.3 的二维高斯衰减。
                         value = np.exp(-(dist ** 2) / (2 * 0.3 ** 2))
                         kernel[ny, nx] = value
 
@@ -248,6 +271,7 @@ def run_coverage_sampler(
     config = SDOVONConfig()
     sampler = CoverageSampler(config)
 
+    # 执行场景级采样，得到 viewpoints 与覆盖统计。
     report = sampler.sample_viewpoints_for_scene(scene_name)
 
     if output_dir is None:
@@ -256,6 +280,7 @@ def run_coverage_sampler(
     output_file = os.path.join(output_dir, f"{scene_name}_observations.json")
     os.makedirs(output_dir, exist_ok=True)
 
+    # 输出为标准 JSON，供后续阶段直接读取。
     with open(output_file, "w") as f:
         json.dump(report, f, indent=2)
 

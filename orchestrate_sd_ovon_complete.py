@@ -1,6 +1,26 @@
-"""SD-OVON 编排管道 (完整版，可切换实现)。
+"""SD-OVON 编排管道（完整版，可切换实现）。
 
-该编排器只依赖当前仓库中实际存在的模块，避免幽灵导入导致的运行失败。
+文件功能总览
+1) 提供 SDOVONPipelineOrchestrator，统一封装 SD-OVON 的阶段化执行。
+2) 提供 run_full_pipeline，用于执行完整 8 阶段流程并产出统一报告。
+3) 提供 run_roomwise_layout_pipeline，将 HM3D layout_json 的 room_groups
+     直接桥接为按房间放置结果，便于快速联调。
+
+文件依赖关系
+- 强依赖（缺失会直接失败）：
+    - sd_ovon_config_enhanced.SDOVONConfig
+- 可选依赖（缺失会自动降级并继续运行）：
+    - instance_fusion_gsam_3d.GSAMInstanceFusion（生产级实例融合）
+    - instance_fusion_stub.InstanceFusionStub（融合回退实现）
+    - physics_stabilizer_complete.PhysicsStabilizer（物理稳定性检查）
+- 数据文件依赖（由各 stage 在运行期读取）：
+    - results/scene_info/<scene>/*_rooms.json
+    - results/probabilities/<scene>/*_probs.json
+    - objects_images/*（当 rooms 推荐缺失时作为对象回退来源）
+
+运行路径说明
+- production: 优先走 GSAM 融合与物理仿真检查；不可用时回退到 stub/heuristic。
+- mock: 走轻量路径，优先保证链路可运行与结果可调试。
 """
 
 from typing import Dict, Any, Optional, List
@@ -14,16 +34,26 @@ logging.basicConfig(level=logging.INFO)
 
 
 class SDOVONPipelineOrchestrator:
-    """可运行的 SD-OVON 编排器。"""
+    """可运行的 SD-OVON 编排器。
+
+    设计目标是“优先可运行、其次可增强”：在可选模块缺失时自动降级，
+    仍能产出结构化 stage_results，避免整条流水线被单点依赖阻塞。
+    """
 
     def __init__(self, config_level: str = "production"):
+        # 记录每个 stage 的耗时和结果，便于排查性能与质量问题。
         self.config_level = config_level
         self.stage_durations: Dict[str, float] = {}
         self.stage_results: Dict[str, Dict[str, Any]] = {}
         self._import_modules()
 
     def _import_modules(self) -> None:
-        """根据配置导入真实存在的模块。"""
+        """根据配置导入真实存在的模块。
+
+        该方法将“硬依赖”和“软依赖”拆分处理：
+        - 配置类必须可导入。
+        - 其他组件可缺失，缺失时仅记录 warning，不中断流程。
+        """
         logger.info("[SDOVONPipeline] Initializing in %s mode", self.config_level)
 
         from sd_ovon_config_enhanced import SDOVONConfig
@@ -61,7 +91,13 @@ class SDOVONPipelineOrchestrator:
         observations: Optional[List[Dict[str, Any]]] = None,
         stage_overrides: Optional[Dict[str, bool]] = None,
     ) -> Dict[str, Any]:
-        """运行完整流程并返回报告。"""
+        """运行完整流程并返回报告。
+
+        Args:
+            scene_name: 场景编号。
+            observations: 观测帧；若为空，部分 stage 会构造最小占位输入。
+            stage_overrides: 逐 stage 开关，True 表示执行，False 表示跳过。
+        """
         logger.info("[SDOVONPipeline] Starting full pipeline for scene: %s", scene_name)
 
         self.stage_durations = {}
@@ -71,6 +107,7 @@ class SDOVONPipelineOrchestrator:
         stages_config = stage_overrides or {}
         self.stage_results["config"] = config.to_dict()
 
+        # 统一声明 stage 执行顺序，报告聚合逻辑依赖该顺序。
         pipeline_stages = [
             ("stage_1_semantic_understanding", self._stage_1_semantic_understanding),
             ("stage_2_feature_preprocessing", self._stage_2_feature_preprocessing),
@@ -120,6 +157,7 @@ class SDOVONPipelineOrchestrator:
                 "object_room_map": {},
             }
 
+        # rooms 用 region_id 去重，object_room_map 保留逐对象原始推荐。
         rooms: Dict[int, Dict[str, Any]] = {}
         object_room_map: Dict[str, List[Dict[str, Any]]] = {}
 
@@ -204,7 +242,7 @@ class SDOVONPipelineOrchestrator:
                 }
             )
 
-        # 如果没有 rooms 推理结果，则回退到图片名
+        # 如果没有 rooms 推理结果，则回退到图片名，保证后续 stage 有可处理对象。
         if not objects:
             img_dir = Path("objects_images")
             for idx, p in enumerate(sorted(img_dir.glob("*"))):
@@ -238,6 +276,7 @@ class SDOVONPipelineOrchestrator:
         objects = self.stage_results.get("stage_3_object_generation", {}).get("objects", [])
 
         try:
+            # production 且 GSAM 可用时，优先走真实融合链路。
             if self.config_level == "production" and self.GSAMInstanceFusion is not None:
                 import numpy as np
 
@@ -273,6 +312,7 @@ class SDOVONPipelineOrchestrator:
                     "error": "No available instance fusion backend",
                 }
 
+            # 否则回退到 stub，保证流程不断。
             fusion = self.InstanceFusionStub(config)
             result = fusion.extract_and_fuse_instances(
                 scene_name=scene_name,
@@ -335,10 +375,12 @@ class SDOVONPipelineOrchestrator:
         for idx, obj in enumerate(objects):
             candidates = object_room_map.get(obj.get("name", ""), [])
             if candidates:
+                # 首选对象自身的第一推荐房间。
                 room = candidates[0]
                 room_center = room.get("room_center", [0.0, 0.0, 0.0])
                 region_id = room.get("region_id", -1)
             elif global_rooms:
+                # 无对象级推荐时，退化到全局房间轮询。
                 room = global_rooms[idx % len(global_rooms)]
                 room_center = room.get("room_center", [0.0, 0.0, 0.0])
                 region_id = room.get("region_id", -1)
@@ -400,6 +442,7 @@ class SDOVONPipelineOrchestrator:
                 scene_path=None,
                 config=config.PHYSICS_STABILIZATION,
             )
+            # use_physics_sim 由 config_level 控制：production 尝试仿真，其他模式走启发式。
             report = stabilizer.check_placement_stability(
                 placements=placements,
                 receptacles=[],
@@ -436,7 +479,11 @@ class SDOVONPipelineOrchestrator:
         }
 
     def _extract_room_groups(self, layout_json: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Extract per-room object batches from HM3D sampled layout output."""
+        """Extract per-room object batches from HM3D sampled layout output.
+
+        优先使用 layout_json 已提供的 room_groups；若缺失，则根据 objects 中的
+        sampled_region_id 现场重建，兼容旧版布局格式。
+        """
         room_groups = layout_json.get("room_groups", [])
         if isinstance(room_groups, list) and room_groups:
             normalized_groups = []
@@ -480,7 +527,11 @@ class SDOVONPipelineOrchestrator:
         return normalized_groups
 
     def _build_roomwise_placement(self, room_group: Dict[str, Any]) -> Dict[str, Any]:
-        """Build a simple room-wise placement result from one grouped room batch."""
+        """Build a simple room-wise placement result from one grouped room batch.
+
+        放置策略为轻量规则：以 room_center 为基准添加少量 jitter，随后用 room_aabb
+        做边界裁剪，避免对象被放到房间外。
+        """
         objects = room_group.get("objects", [])
         room_center = room_group.get("room_center", [0.0, 0.0, 0.0])
         room_aabb = room_group.get("room_aabb", {})
@@ -490,6 +541,7 @@ class SDOVONPipelineOrchestrator:
 
         placements: List[Dict[str, Any]] = []
         for idx, obj in enumerate(objects):
+            # 轻微抖动减少对象完全重叠，便于可视化和调试。
             jitter = (idx % 3) * 0.12
             position = [
                 float(room_center[0]) + jitter,
@@ -529,7 +581,11 @@ class SDOVONPipelineOrchestrator:
         layout_json: Dict[str, Any],
         scene_name: str,
     ) -> Dict[str, Any]:
-        """Bridge HM3D sampled room groups into a room-by-room SD-OVON placement report."""
+        """Bridge HM3D sampled room groups into a room-by-room SD-OVON placement report.
+
+        该接口不执行 full pipeline 的 8 个 stage，而是用于 HM3D->SD-OVON 的
+        房间级快速桥接，输出结构化 room_reports 与 placements。
+        """
         room_groups = self._extract_room_groups(layout_json)
         if not room_groups:
             return {
@@ -561,7 +617,11 @@ class SDOVONPipelineOrchestrator:
         return result
 
     def _generate_final_report(self, scene_name: str) -> Dict[str, Any]:
-        """生成最终汇总报告。"""
+        """生成最终汇总报告。
+
+        pipeline_status 判定规则：所有 stage.success 为 True 则 completed，
+        否则 completed_with_errors。
+        """
         total_time = sum(self.stage_durations.values())
         stage_entries = [v for k, v in self.stage_results.items() if k.startswith("stage_")]
         successful_stages = sum(1 for result in stage_entries if result.get("success", False))
