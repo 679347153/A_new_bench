@@ -130,6 +130,26 @@ def _extract_bbox_info(bbox: Any) -> Dict[str, List[float]]:
             round(max_vec[2] - min_vec[2], 4),
         ]
 
+    # habitat-sim 0.2.5 某些绑定下可能给出 center/size，但 min/max 读不到或退化为零。
+    # 这里补一层反推，避免把有效几何误判为零包围盒。
+    if (min_vec is None or max_vec is None) and center_vec is not None and size_vec is not None:
+        half = [round(float(size_vec[i]) / 2.0, 4) for i in range(3)]
+        min_vec = [round(float(center_vec[i]) - half[i], 4) for i in range(3)]
+        max_vec = [round(float(center_vec[i]) + half[i], 4) for i in range(3)]
+
+    if min_vec is not None and max_vec is not None and center_vec is not None and size_vec is not None:
+        minmax_near_zero = all(abs(float(v)) < 1e-8 for v in [*min_vec, *max_vec])
+        size_has_extent = any(abs(float(v)) > 1e-6 for v in size_vec)
+        center_nonzero = any(abs(float(v)) > 1e-6 for v in center_vec)
+        if minmax_near_zero and size_has_extent:
+            half = [round(float(size_vec[i]) / 2.0, 4) for i in range(3)]
+            min_vec = [round(float(center_vec[i]) - half[i], 4) for i in range(3)]
+            max_vec = [round(float(center_vec[i]) + half[i], 4) for i in range(3)]
+        elif minmax_near_zero and center_nonzero and size_has_extent:
+            half = [round(float(size_vec[i]) / 2.0, 4) for i in range(3)]
+            min_vec = [round(float(center_vec[i]) - half[i], 4) for i in range(3)]
+            max_vec = [round(float(center_vec[i]) + half[i], 4) for i in range(3)]
+
     return {
         "min": min_vec if min_vec is not None else [0.0, 0.0, 0.0],
         "max": max_vec if max_vec is not None else [0.0, 0.0, 0.0],
@@ -145,7 +165,40 @@ def _bbox_is_zero(bbox_info: Dict[str, List[float]]) -> bool:
     """
     min_pt = bbox_info.get("min", [0.0, 0.0, 0.0])
     max_pt = bbox_info.get("max", [0.0, 0.0, 0.0])
-    return all(abs(float(v)) < 1e-8 for v in [*min_pt, *max_pt])
+    center_pt = bbox_info.get("center", [0.0, 0.0, 0.0])
+    size_pt = bbox_info.get("size", [0.0, 0.0, 0.0])
+
+    minmax_zero = all(abs(float(v)) < 1e-8 for v in [*min_pt, *max_pt])
+    size_zero = all(abs(float(v)) < 1e-8 for v in size_pt)
+    center_zero = all(abs(float(v)) < 1e-8 for v in center_pt)
+
+    # 只要 size 有非零尺寸，就不应被视为零包围盒。
+    if not size_zero:
+        return False
+
+    # min/max 全零但 center 非零且 size 为零，通常仍表示无有效体积，按零包围盒处理。
+    return minmax_zero and size_zero and center_zero
+
+
+def _obb_to_aabb_info(obb_center: Optional[List[float]], obb_half_extents: Optional[List[float]]) -> Optional[Dict[str, List[float]]]:
+    """用 OBB center/half_extents 近似生成 AABB 信息。"""
+    if not obb_center or not obb_half_extents:
+        return None
+    if len(obb_center) < 3 or len(obb_half_extents) < 3:
+        return None
+
+    try:
+        min_pt = [round(float(obb_center[i]) - float(obb_half_extents[i]), 4) for i in range(3)]
+        max_pt = [round(float(obb_center[i]) + float(obb_half_extents[i]), 4) for i in range(3)]
+    except Exception:
+        return None
+
+    return {
+        "min": min_pt,
+        "max": max_pt,
+        "center": [round((min_pt[i] + max_pt[i]) / 2.0, 4) for i in range(3)],
+        "size": [round(max_pt[i] - min_pt[i], 4) for i in range(3)],
+    }
 
 
 def _load_scene_info(scene_name: str, data_dir: Path, scene_info_path: Optional[Path] = None) -> Dict[str, Any]:
@@ -327,12 +380,22 @@ def _build_scene_objects_from_sim(scene_name: str, data_dir: Path) -> List[Dict[
             if obb_half_extents is None:
                 obb_half_extents = _as_vec3(_get_attr_or_call(obb, "halfExtents")) or [0.0, 0.0, 0.0]
 
+            bbox_source = "aabb"
+            if _bbox_is_zero(aabb_info):
+                obb_fallback = _obb_to_aabb_info(obb_center, obb_half_extents)
+                if obb_fallback is not None and not _bbox_is_zero(obb_fallback):
+                    aabb_info = obb_fallback
+                    bbox_source = "obb_fallback"
+                else:
+                    bbox_source = "zero"
+
             objects.append(
                 {
                     "id": sid,
                     "category": category,
                     "region_id": region_id,
                     "color_hex": color_hex,
+                    "bbox_source": bbox_source,
                     "aabb": aabb_info,
                     "obb": {
                         "center": obb_center,
@@ -617,12 +680,28 @@ def get_instance_point_cloud(
         min_pt = bbox.get("min", [0.0, 0.0, 0.0])
         max_pt = bbox.get("max", [0.0, 0.0, 0.0])
         if _bbox_is_zero({"min": min_pt, "max": max_pt}):
-            # 如果连 AABB 都不可用，就返回空点云，避免伪造几何。
-            _warn(
-                "instance 的 AABB 为全零或缺失，无法进行几何采样，最终输出为空点云。"
-            )
-            points = np.zeros((0, 3), dtype=np.float32)
-            generation_trace.append("fallback=empty_point_cloud_due_to_zero_bbox")
+            # AABB 不可用时，尝试用 OBB center+half_extents 构造近似 AABB。
+            obb_info = instance.get("obb") or {}
+            obb_center = obb_info.get("center")
+            obb_half_extents = obb_info.get("half_extents")
+            obb_fallback = _obb_to_aabb_info(obb_center, obb_half_extents)
+
+            if obb_fallback is not None and not _bbox_is_zero(obb_fallback):
+                min_pt = obb_fallback.get("min", min_pt)
+                max_pt = obb_fallback.get("max", max_pt)
+                points = _sample_points_on_aabb(min_pt, max_pt, num_points)
+                _warn(
+                    f"instance 的 AABB 无效，已回退为 OBB->AABB 近似采样，采样点数={int(num_points)}，"
+                    "source=sampled_obb_fallback。"
+                )
+                generation_trace.append(f"fallback=sampled_obb_fallback,num_points={int(num_points)}")
+            else:
+                # 如果连 OBB 也不可用，就返回空点云，避免伪造几何。
+                _warn(
+                    "instance 的 AABB 为全零或缺失，且 OBB 也不可用于回退采样，最终输出为空点云。"
+                )
+                points = np.zeros((0, 3), dtype=np.float32)
+                generation_trace.append("fallback=empty_point_cloud_due_to_invalid_bbox_and_obb")
         else:
             # 回退到包围盒表面采样，生成一个可用的近似点云。
             points = _sample_points_on_aabb(min_pt, max_pt, num_points)
@@ -635,10 +714,23 @@ def get_instance_point_cloud(
         return {
             "scene_name": scene_name,
             "instance": instance,
-            "point_cloud": _summarize_point_cloud(points, "sampled_aabb_surface"),
+            "point_cloud": _summarize_point_cloud(
+                points,
+                "sampled_obb_fallback"
+                if any("sampled_obb_fallback" in t for t in generation_trace)
+                else "sampled_aabb_surface",
+            ),
             "point_cloud_generation": {
-                "method": "sampled_aabb_surface",
-                "details": "fallback sampling from instance AABB surfaces because direct semantic point cloud is unavailable",
+                "method": (
+                    "sampled_obb_fallback"
+                    if any("sampled_obb_fallback" in t for t in generation_trace)
+                    else "sampled_aabb_surface"
+                ),
+                "details": (
+                    "fallback sampling from OBB-derived AABB because instance AABB is invalid"
+                    if any("sampled_obb_fallback" in t for t in generation_trace)
+                    else "fallback sampling from instance AABB surfaces because direct semantic point cloud is unavailable"
+                ),
                 "trace": generation_trace,
             },
         }
