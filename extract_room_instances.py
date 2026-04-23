@@ -593,6 +593,32 @@ def _sample_points_from_triangles(vertices: np.ndarray, faces: np.ndarray, num_p
     return np.round(points.astype(np.float32), 4)
 
 
+def _populate_instance_color_from_semantic_txt(
+    scene_name: str,
+    instance: Dict[str, Any],
+    data_dir: Path,
+) -> bool:
+    """若 instance 缺少 color_hex，尝试从 semantic.txt 按 instance id 补全。"""
+    color_hex = str(instance.get("color_hex", "") or "").strip()
+    if color_hex:
+        return True
+
+    scene_paths = resolve_scene_paths(scene_name, require_semantic=True, root=data_dir)
+    if scene_paths is None:
+        return False
+    entries = _parse_semantic_txt(scene_paths.semantic_txt)
+    sid = int(instance.get("id", -1))
+    info = entries.get(sid)
+    if not info:
+        return False
+
+    ch = str(info.get("color_hex", "") or "").strip()
+    if not ch:
+        return False
+    instance["color_hex"] = ch
+    return True
+
+
 def _extract_point_cloud_from_semantic_mesh(
     scene_name: str,
     instance: Dict[str, Any],
@@ -610,6 +636,10 @@ def _extract_point_cloud_from_semantic_mesh(
 
     target_rgb = _parse_color_hex_to_rgb(instance.get("color_hex"))
     if target_rgb is None:
+        _warn(
+            f"instance_id={int(instance.get('id', -1))} 缺少可用 color_hex，"
+            "semantic.glb 颜色匹配无法执行。"
+        )
         return None
 
     try:
@@ -638,9 +668,21 @@ def _extract_point_cloud_from_semantic_mesh(
         if per_face_rgb is None or len(per_face_rgb) != len(faces):
             continue
 
-        match_mask = np.all(per_face_rgb == np.asarray(target_rgb, dtype=np.uint8), axis=1)
-        if not np.any(match_mask):
-            continue
+        target_arr = np.asarray(target_rgb, dtype=np.int16)
+        per_face_int = per_face_rgb.astype(np.int16)
+        exact_mask = np.all(per_face_int == target_arr[None, :], axis=1)
+
+        if np.any(exact_mask):
+            match_mask = exact_mask
+        else:
+            # 兼容少量颜色量化误差：允许与目标色在 RGB 欧氏距离 <= 6 的面片作为近似匹配。
+            diff = per_face_int - target_arr[None, :]
+            dist = np.sqrt(np.sum(diff * diff, axis=1))
+            near_mask = dist <= 6.0
+            if np.any(near_mask):
+                match_mask = near_mask
+            else:
+                continue
 
         matched_faces = faces[match_mask][:, :3]
         unique_vids, inverse = np.unique(matched_faces.reshape(-1), return_inverse=True)
@@ -652,10 +694,18 @@ def _extract_point_cloud_from_semantic_mesh(
         vertex_offset += len(local_vertices)
 
     if not collected_vertices or not collected_faces:
+        _warn(
+            f"semantic.glb 颜色匹配失败：instance_id={int(instance.get('id', -1))}, "
+            f"target_color={instance.get('color_hex', 'N/A')}。"
+        )
         return None
 
     merged_vertices = np.concatenate(collected_vertices, axis=0)
     merged_faces = np.concatenate(collected_faces, axis=0)
+    _warn(
+        f"semantic.glb 颜色匹配成功：instance_id={int(instance.get('id', -1))}, "
+        f"matched_faces={int(len(merged_faces))}, source=semantic_mesh_by_color。"
+    )
     return _sample_points_from_triangles(merged_vertices, merged_faces, num_points)
 
 
@@ -980,6 +1030,13 @@ def get_instance_point_cloud(
             f"当前可用 instance_id 示例: {preview}{suffix}"
         )
 
+    # scene_info 可能缺少 color_hex，先尝试从 semantic.txt 补齐，以提高 semantic mesh 提取命中率。
+    if not str(instance.get("color_hex", "") or "").strip():
+        if _populate_instance_color_from_semantic_txt(scene_name, instance, data_dir):
+            generation_trace.append("instance_color_hex_filled_from_semantic_txt")
+        else:
+            generation_trace.append("instance_color_hex_missing")
+
     semantic_mesh_points = _extract_point_cloud_from_semantic_mesh(
         scene_name=scene_name,
         instance=instance,
@@ -999,6 +1056,9 @@ def get_instance_point_cloud(
             },
         }
     generation_trace.append("semantic_mesh_by_color_unavailable")
+    _warn(
+        "semantic.glb 颜色匹配未命中，继续尝试 habitat-sim 直读与其他回退策略。"
+    )
 
     # 这一段会触发 habitat-sim 初始化日志（Renderer/OpenGL）。
     sim = _load_sim(scene_name, data_dir)
