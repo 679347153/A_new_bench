@@ -36,8 +36,10 @@ class ScenePaths:
     split_root: Path
     scene_dir: Path
     stage_glb: Path
+    semantic_glb: Path
     semantic_txt: Path
     navmesh: Path
+    scene_instance_json: Path
     dataset_config: Path
 
 
@@ -74,8 +76,10 @@ def _candidate_scene_paths(scene_name: str, split: str, root: Optional[Path] = N
         split_root=split_root_dir,
         scene_dir=scene_dir,
         stage_glb=scene_dir / f"{scene_id}.basis.glb",
+        semantic_glb=scene_dir / f"{scene_id}.semantic.glb",
         semantic_txt=scene_dir / f"{scene_id}.semantic.txt",
         navmesh=scene_dir / f"{scene_id}.basis.navmesh",
+        scene_instance_json=scene_dir / f"{scene_id}.basis.scene_instance.json",
         dataset_config=dataset_config_for_split(split, root),
     )
 

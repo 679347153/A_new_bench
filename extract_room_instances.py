@@ -32,7 +32,7 @@ import io
 import json
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -42,6 +42,11 @@ try:
     import habitat_sim  # type: ignore[import-not-found]
 except ImportError:
     habitat_sim = None
+
+try:
+    import trimesh  # type: ignore[import-not-found]
+except ImportError:
+    trimesh = None
 
 
 DEFAULT_DATA_DIR = Path(__file__).resolve().parent / "hm3d"
@@ -472,6 +477,165 @@ def _extract_direct_point_cloud(obj: Any) -> Optional[np.ndarray]:
     return None
 
 
+def _parse_color_hex_to_rgb(color_hex: Any) -> Optional[Tuple[int, int, int]]:
+    """把 semantic.txt 里的十六进制颜色解析成 RGB 三元组。"""
+    if color_hex is None:
+        return None
+    text = str(color_hex).strip().lstrip("#")
+    if len(text) != 6:
+        return None
+    try:
+        return tuple(int(text[i:i + 2], 16) for i in range(0, 6, 2))
+    except ValueError:
+        return None
+
+
+def _as_rgb_uint8(arr: Any) -> Optional[np.ndarray]:
+    """把颜色数组统一转成 uint8 RGB。"""
+    try:
+        rgb = np.asarray(arr)
+    except Exception:
+        return None
+    if rgb.ndim != 2 or rgb.shape[1] < 3:
+        return None
+    rgb = rgb[:, :3]
+    if np.issubdtype(rgb.dtype, np.floating):
+        max_val = float(np.max(rgb)) if rgb.size > 0 else 0.0
+        if max_val <= 1.0 + 1e-6:
+            rgb = np.clip(np.round(rgb * 255.0), 0.0, 255.0)
+        else:
+            rgb = np.clip(np.round(rgb), 0.0, 255.0)
+    else:
+        rgb = np.clip(rgb, 0, 255)
+    return rgb.astype(np.uint8, copy=False)
+
+
+def _extract_mesh_face_colors(geom: Any) -> Optional[np.ndarray]:
+    """尽量把 mesh 的颜色统一到 per-face RGB，便于按 semantic color 筛面片。"""
+    visual = getattr(geom, "visual", None)
+    if visual is None:
+        return None
+
+    face_colors = getattr(visual, "face_colors", None)
+    if face_colors is not None:
+        arr = _as_rgb_uint8(face_colors)
+        if arr is not None and arr.ndim == 2 and arr.shape[0] == len(getattr(geom, "faces", [])) and arr.shape[1] >= 3:
+            return arr[:, :3].astype(np.uint8, copy=False)
+
+    vertex_colors = getattr(visual, "vertex_colors", None)
+    vertices = np.asarray(getattr(geom, "vertices", []), dtype=np.float32)
+    faces = np.asarray(getattr(geom, "faces", []), dtype=np.int64)
+    if vertex_colors is None or len(vertices) == 0 or len(faces) == 0:
+        return None
+
+    arr = _as_rgb_uint8(vertex_colors)
+    if arr is None or arr.ndim != 2 or arr.shape[0] != len(vertices) or arr.shape[1] < 3:
+        return None
+
+    rgb = arr[:, :3].astype(np.int32, copy=False)
+    face_rgb = rgb[faces]
+    return np.round(face_rgb.mean(axis=1)).astype(np.uint8)
+
+
+def _sample_points_from_triangles(vertices: np.ndarray, faces: np.ndarray, num_points: int) -> np.ndarray:
+    """按三角面面积加权采样真实表面点。"""
+    verts = np.asarray(vertices, dtype=np.float32)
+    tris = np.asarray(faces, dtype=np.int64)
+    if verts.ndim != 2 or verts.shape[1] < 3 or tris.ndim != 2 or tris.shape[1] < 3 or len(tris) == 0:
+        return np.zeros((0, 3), dtype=np.float32)
+
+    tri_verts = verts[tris[:, :3]]
+    cross = np.cross(tri_verts[:, 1] - tri_verts[:, 0], tri_verts[:, 2] - tri_verts[:, 0])
+    areas = 0.5 * np.linalg.norm(cross, axis=1)
+    valid_mask = areas > 1e-12
+    if not np.any(valid_mask):
+        return np.zeros((0, 3), dtype=np.float32)
+
+    tri_verts = tri_verts[valid_mask]
+    areas = areas[valid_mask]
+    probs = areas / areas.sum()
+
+    count = max(int(num_points), 1)
+    rng = np.random.default_rng(42)
+    tri_ids = rng.choice(len(tri_verts), size=count, p=probs)
+    chosen = tri_verts[tri_ids]
+
+    r1 = rng.random((count, 1), dtype=np.float32)
+    r2 = rng.random((count, 1), dtype=np.float32)
+    sqrt_r1 = np.sqrt(r1)
+    bary_a = 1.0 - sqrt_r1
+    bary_b = sqrt_r1 * (1.0 - r2)
+    bary_c = sqrt_r1 * r2
+    points = bary_a * chosen[:, 0] + bary_b * chosen[:, 1] + bary_c * chosen[:, 2]
+    return np.round(points.astype(np.float32), 4)
+
+
+def _extract_point_cloud_from_semantic_mesh(
+    scene_name: str,
+    instance: Dict[str, Any],
+    data_dir: Path,
+    num_points: int,
+) -> Optional[np.ndarray]:
+    """从 HM3D 的 semantic.glb 中按 instance 颜色恢复真实表面点云。"""
+    if trimesh is None:
+        _warn("trimesh 不可用，无法从 semantic.glb 提取实例真实面片；将继续尝试其他点云来源。")
+        return None
+
+    scene_paths = resolve_scene_paths(scene_name, require_semantic=True, root=data_dir)
+    if scene_paths is None or not scene_paths.semantic_glb.is_file():
+        return None
+
+    target_rgb = _parse_color_hex_to_rgb(instance.get("color_hex"))
+    if target_rgb is None:
+        return None
+
+    try:
+        loaded = trimesh.load(scene_paths.semantic_glb, force="scene")
+    except Exception as exc:
+        _warn(f"加载 semantic.glb 失败: {exc}")
+        return None
+
+    geometries = getattr(loaded, "geometry", None)
+    if isinstance(loaded, trimesh.Trimesh):
+        geometries = {"semantic_mesh": loaded}
+    if not geometries:
+        return None
+
+    collected_vertices: List[np.ndarray] = []
+    collected_faces: List[np.ndarray] = []
+    vertex_offset = 0
+
+    for geom in geometries.values():
+        vertices = np.asarray(getattr(geom, "vertices", []), dtype=np.float32)
+        faces = np.asarray(getattr(geom, "faces", []), dtype=np.int64)
+        if vertices.ndim != 2 or vertices.shape[1] < 3 or faces.ndim != 2 or faces.shape[1] < 3 or len(faces) == 0:
+            continue
+
+        per_face_rgb = _extract_mesh_face_colors(geom)
+        if per_face_rgb is None or len(per_face_rgb) != len(faces):
+            continue
+
+        match_mask = np.all(per_face_rgb == np.asarray(target_rgb, dtype=np.uint8), axis=1)
+        if not np.any(match_mask):
+            continue
+
+        matched_faces = faces[match_mask][:, :3]
+        unique_vids, inverse = np.unique(matched_faces.reshape(-1), return_inverse=True)
+        local_vertices = vertices[unique_vids][:, :3]
+        local_faces = inverse.reshape(-1, 3).astype(np.int64) + vertex_offset
+
+        collected_vertices.append(local_vertices)
+        collected_faces.append(local_faces)
+        vertex_offset += len(local_vertices)
+
+    if not collected_vertices or not collected_faces:
+        return None
+
+    merged_vertices = np.concatenate(collected_vertices, axis=0)
+    merged_faces = np.concatenate(collected_faces, axis=0)
+    return _sample_points_from_triangles(merged_vertices, merged_faces, num_points)
+
+
 def _sample_points_on_aabb(min_pt: List[float], max_pt: List[float], num_points: int) -> np.ndarray:
     """基于 AABB 表面采样一个近似点云。
 
@@ -671,6 +835,26 @@ def get_instance_point_cloud(
             f"{instance_id}. "
             f"当前可用 instance_id 示例: {preview}{suffix}"
         )
+
+    semantic_mesh_points = _extract_point_cloud_from_semantic_mesh(
+        scene_name=scene_name,
+        instance=instance,
+        data_dir=data_dir,
+        num_points=num_points,
+    )
+    if semantic_mesh_points is not None and len(semantic_mesh_points) > 0:
+        generation_trace.append("point_cloud_source=semantic_mesh_by_color")
+        return {
+            "scene_name": scene_name,
+            "instance": instance,
+            "point_cloud": _summarize_point_cloud(semantic_mesh_points, "semantic_mesh_by_color"),
+            "point_cloud_generation": {
+                "method": "semantic_mesh_by_color",
+                "details": "sampled from matched triangles in HM3D semantic.glb using semantic.txt color mapping",
+                "trace": generation_trace,
+            },
+        }
+    generation_trace.append("semantic_mesh_by_color_unavailable")
 
     sim = _load_sim(scene_name, data_dir)
     try:
