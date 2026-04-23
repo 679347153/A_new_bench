@@ -27,6 +27,8 @@ instance 的点云信息。
 from __future__ import annotations
 
 import argparse
+import csv
+import io
 import json
 import sys
 from pathlib import Path
@@ -265,6 +267,86 @@ def _load_sim(scene_name: str, data_dir: Path) -> Optional[Any]:
     return habitat_sim.Simulator(cfg)
 
 
+def _parse_semantic_txt(semantic_txt_path: Path) -> Dict[int, Dict[str, Any]]:
+    """解析 semantic.txt，建立 semantic_id 到类别/房间映射。"""
+    entries: Dict[int, Dict[str, Any]] = {}
+    if not semantic_txt_path.is_file():
+        return entries
+
+    with open(semantic_txt_path, "r", encoding="utf-8") as f:
+        for line_no, line in enumerate(f):
+            line = line.strip()
+            if line_no == 0 or not line:
+                continue
+            reader = csv.reader(io.StringIO(line))
+            for row in reader:
+                if len(row) < 4:
+                    continue
+                try:
+                    obj_id = int(row[0])
+                    entries[obj_id] = {
+                        "category": row[2].strip().strip('"'),
+                        "region_id": int(row[3]),
+                        "color_hex": row[1].strip(),
+                    }
+                except Exception:
+                    continue
+    return entries
+
+
+def _build_scene_objects_from_sim(scene_name: str, data_dir: Path) -> List[Dict[str, Any]]:
+    """当 scene_info 缺少 objects 时，从 habitat-sim 重建对象明细。"""
+    if habitat_sim is None:
+        return []
+
+    scene_paths = resolve_scene_paths(scene_name, require_semantic=True, root=data_dir)
+    if scene_paths is None:
+        return []
+
+    txt_entries = _parse_semantic_txt(scene_paths.semantic_txt)
+    sim = _load_sim(scene_name, data_dir)
+    if sim is None:
+        return []
+
+    objects: List[Dict[str, Any]] = []
+    try:
+        sem_scene = sim.semantic_scene
+        for obj in getattr(sem_scene, "objects", []) or []:
+            if obj is None:
+                continue
+            sid = int(getattr(obj, "semantic_id", -1))
+            txt_info = txt_entries.get(sid, {})
+            category = txt_info.get("category", obj.category.name() if getattr(obj, "category", None) else "unknown")
+            region_id = int(txt_info.get("region_id", -1))
+            color_hex = txt_info.get("color_hex", "")
+
+            aabb_info = _extract_bbox_info(getattr(obj, "aabb", None))
+            obb = getattr(obj, "obb", None)
+            obb_center = _as_vec3(_get_attr_or_call(obb, "center")) or [0.0, 0.0, 0.0]
+            obb_half_extents = _as_vec3(_get_attr_or_call(obb, "half_extents"))
+            if obb_half_extents is None:
+                obb_half_extents = _as_vec3(_get_attr_or_call(obb, "halfExtents")) or [0.0, 0.0, 0.0]
+
+            objects.append(
+                {
+                    "id": sid,
+                    "category": category,
+                    "region_id": region_id,
+                    "color_hex": color_hex,
+                    "aabb": aabb_info,
+                    "obb": {
+                        "center": obb_center,
+                        "half_extents": obb_half_extents,
+                        "rotation": None,
+                    },
+                }
+            )
+    finally:
+        sim.close()
+
+    return objects
+
+
 def _find_scene_object(sim: Any, instance_id: int) -> Optional[Any]:
     """在 semantic_scene.objects 中找到指定 instance_id 对应的对象。"""
     sem_scene = getattr(sim, "semantic_scene", None)
@@ -402,7 +484,12 @@ def _summarize_point_cloud(points: np.ndarray, source: str) -> Dict[str, Any]:
     }
 
 
-def get_room_instances(scene_info: Dict[str, Any], room_id: int) -> Dict[str, Any]:
+def get_room_instances(
+    scene_info: Dict[str, Any],
+    room_id: int,
+    scene_name: Optional[str] = None,
+    data_dir: Path = DEFAULT_DATA_DIR,
+) -> Dict[str, Any]:
     """根据房间号从 scene_info 中提取该房间内的所有 instance。
 
     优先使用 room 里的 object_ids 做精确关联；如果没有 object_ids，则退化为按
@@ -410,6 +497,14 @@ def get_room_instances(scene_info: Dict[str, Any], room_id: int) -> Dict[str, An
     """
     rooms = scene_info.get("rooms", []) or []
     objects = scene_info.get("objects", []) or []
+
+    # 某些导出版本只包含 rooms 的数量统计，没有 objects 明细；这里自动补全。
+    if not objects and scene_name:
+        _warn(
+            "scene_info 中缺少 objects 明细，正在尝试从 habitat-sim 重建实例列表，"
+            "用于输出每个物体的编号与几何信息。"
+        )
+        objects = _build_scene_objects_from_sim(scene_name=scene_name, data_dir=data_dir)
     room = next((item for item in rooms if int(item.get("region_id", -999)) == int(room_id)), None)
     if room is None:
         raise KeyError(f"找不到房间 region_id={room_id}")
@@ -425,6 +520,7 @@ def get_room_instances(scene_info: Dict[str, Any], room_id: int) -> Dict[str, An
         "room": room,
         "instances": room_objects,
         "instance_count": len(room_objects),
+        "instance_ids": [int(obj.get("id", -1)) for obj in room_objects if int(obj.get("id", -1)) >= 0],
     }
 
 
@@ -538,7 +634,12 @@ def extract_room_instances(
     则返回该 instance 的点云信息，并附带所属房间。
     """
     scene_info = _load_scene_info(scene_name, data_dir, scene_info_path=scene_info_path)
-    room_report = get_room_instances(scene_info, room_id)
+    room_report = get_room_instances(
+        scene_info,
+        room_id,
+        scene_name=scene_name,
+        data_dir=data_dir,
+    )
 
     if instance_id is not None:
         matched = next((obj for obj in room_report["instances"] if int(obj.get("id", -1)) == int(instance_id)), None)
