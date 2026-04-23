@@ -59,6 +59,12 @@ def _as_list3(value: Any) -> Optional[List[float]]:
     return None
 
 
+def _as_np3(value: Any) -> np.ndarray:
+    """将输入转为 shape=(3,) 的 float32 numpy 向量。"""
+    vec = _as_list3(value) or [0.0, 0.0, 0.0]
+    return np.asarray(vec, dtype=np.float32).reshape(3)
+
+
 def _bbox_to_corners(bbox: Dict[str, Any]) -> Tuple[np.ndarray, np.ndarray]:
     min_pt = np.asarray(_as_list3(bbox.get("min")) or [0.0, 0.0, 0.0], dtype=np.float32)
     max_pt = np.asarray(_as_list3(bbox.get("max")) or [0.0, 0.0, 0.0], dtype=np.float32)
@@ -184,7 +190,12 @@ def _add_bbox_lines(server: viser.ViserServer, name: str, bbox: Dict[str, Any], 
 
 
 def _add_axes(server: viser.ViserServer) -> None:
-    server.scene.add_frame("world_frame", wxyz=(1.0, 0.0, 0.0, 0.0), position=(0.0, 0.0, 0.0), show_axes=True)
+    server.scene.add_frame(
+        "world_frame",
+        wxyz=np.asarray([1.0, 0.0, 0.0, 0.0], dtype=np.float32),
+        position=np.asarray([0.0, 0.0, 0.0], dtype=np.float32),
+        show_axes=True,
+    )
 
 
 def _add_point_cloud(server: viser.ViserServer, name: str, points: np.ndarray, color: Tuple[int, int, int]) -> None:
@@ -327,11 +338,12 @@ def _add_room_instances_overview(server: viser.ViserServer, data: Dict[str, Any]
         colors.append((hue, 255 - hue // 2, 120))
 
     for i, center in enumerate(centers):
+        center_np = _as_np3(center)
         try:
             server.scene.add_sphere(
                 name=f"room_instance_center_{i}",
                 radius=0.03,
-                center=center,
+                center=center_np,
                 color=colors[i],
             )
         except TypeError:
@@ -339,14 +351,14 @@ def _add_room_instances_overview(server: viser.ViserServer, data: Dict[str, Any]
                 server.scene.add_sphere(
                     name=f"room_instance_center_{i}",
                     radius=0.03,
-                    position=center,
+                    position=center_np,
                     color=colors[i],
                 )
             except TypeError:
                 server.scene.add_sphere(
                     name=f"room_instance_center_{i}",
                     radius=0.03,
-                    center=center,
+                    center=center_np,
                 )
 
 
@@ -377,8 +389,8 @@ def build_visualization(
         _add_point_cloud(server, "instance_point_cloud", points, (30, 180, 255))
         server.scene.add_frame(
             "point_cloud_origin",
-            position=points.mean(axis=0).tolist(),
-            wxyz=(1.0, 0.0, 0.0, 0.0),
+            position=np.asarray(points.mean(axis=0), dtype=np.float32).reshape(3),
+            wxyz=np.asarray([1.0, 0.0, 0.0, 0.0], dtype=np.float32),
             show_axes=True,
         )
         if point_source:
