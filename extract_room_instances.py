@@ -1,27 +1,43 @@
 #!/usr/bin/env python3
-"""HM3D 房间实例提取工具。
+"""HM3D 房间实例提取与单实例点云导出工具。
 
-这个脚本的目标很单一：给定一个 HM3D 场景和一个房间编号，把这个房间里
-的所有 instance 取出来；如果再给一个具体 instance_id，则进一步返回该
-instance 的点云信息。
+这个脚本有两类用途：
+1) 房间级查询：输入 scene + room_id，返回该房间内全部 instance 元信息。
+2) 单实例点云：再输入 instance_id，返回该实例点云摘要并导出 ply/xyz 文件。
 
-运行逻辑分成 4 步：
-1. 读取 scene_info JSON，拿到 rooms / objects 的结构化信息。
-2. 按 region_id 过滤出目标房间，再按 object_ids 或 region_id 关联该房间内的 instance。
-3. 如果用户要求单个 instance 的点云，则优先尝试从 habitat-sim 的语义对象上直接
-     读取点云/顶点信息。
-4. 如果当前版本的 habitat-sim 没有暴露可直接读取的数据，则退化为基于 AABB 的
-     表面采样点云，并在结果里标明 source，方便你区分“真实点云”和“几何近似点云”。
+点云获取链路（按优先级）
+------------------------
+1. semantic.glb 颜色匹配（推荐优先）
+    从 HM3D semantic.glb 中按 semantic.txt 对应 color_hex 匹配面片，
+    再按面面积采样真实表面点。
+2. habitat-sim 语义对象直读
+    尝试从 semantic object 的 point_cloud / vertices 等字段直接读取。
+3. stage mesh 颜色匹配（次级补充）
+    在 stage.basis.glb 中按颜色近邻匹配面片并采样。
+4. AABB/OBB 采样兜底
+    若前三条都失败，才退回包围盒近似采样。
 
-输出形式：
-    - 仅房间：返回 room 元信息 + 该房间内的 instance 列表。
-    - 指定 instance：返回 room 元信息 + instance 信息 + point_cloud 摘要。
+为什么会看到“habitat-sim 像是启动了多次”
+--------------------------------------
+这是当前设计下的正常现象，不一定是错误：
+1. 当 scene_info 缺少 objects 时，会先启动一次 Simulator 重建对象清单。
+2. 进入单实例点云查询时，可能再启动一次 Simulator 读取 semantic_scene。
+3. 如果你后续再运行可视化脚本，那个脚本也可能单独启动 Simulator。
 
-推荐用法：
-    python extract_room_instances.py --scene 00824-Dd4bFSTQ8gi --room-id 0
-    python extract_room_instances.py --scene 00824-Dd4bFSTQ8gi --room-id 0 --instance-id 1
+每次创建 Simulator 都会触发 OpenGL/Renderer 初始化日志，所以终端里会看到
+类似 "Renderer: ..." 的重复输出。
 
-默认会优先读取已导出的 scene_info JSON；若未找到，可通过 --scene-info-path 显式指定。
+输出形式
+--------
+- 仅房间：返回 room 元信息 + instance 列表。
+- 指定 instance：返回 room 元信息 + instance + point_cloud + generation trace。
+
+推荐用法
+--------
+python extract_room_instances.py --scene 00824-Dd4bFSTQ8gi --room-id 0
+python extract_room_instances.py --scene 00824-Dd4bFSTQ8gi --room-id 0 --instance-id 1
+
+说明：默认优先读取已导出的 scene_info JSON；若未找到，可用 --scene-info-path 显式指定。
 """
 
 from __future__ import annotations
@@ -42,11 +58,6 @@ try:
     import habitat_sim  # type: ignore[import-not-found]
 except ImportError:
     habitat_sim = None
-
-try:
-    import trimesh  # type: ignore[import-not-found]
-except ImportError:
-    trimesh = None
 
 try:
     import trimesh  # type: ignore[import-not-found]
@@ -303,6 +314,10 @@ def _load_sim(scene_name: str, data_dir: Path) -> Optional[Any]:
 
     这个 simulator 不做渲染和物理，只是为了访问 semantic_scene 以及对象几何。
     如果 habitat_sim 不可用，函数返回 None，调用方会自动走纯 JSON 逻辑。
+
+    注意：每调用一次本函数，habitat-sim 都会初始化一次图形上下文，
+    终端通常会打印 Renderer/OpenGL 信息。若在一次任务里多处调用本函数，
+    看起来就像“启动了多次”。
     """
     if habitat_sim is None:
         return None
@@ -358,7 +373,10 @@ def _parse_semantic_txt(semantic_txt_path: Path) -> Dict[int, Dict[str, Any]]:
 
 
 def _build_scene_objects_from_sim(scene_name: str, data_dir: Path) -> List[Dict[str, Any]]:
-    """当 scene_info 缺少 objects 时，从 habitat-sim 重建对象明细。"""
+    """当 scene_info 缺少 objects 时，从 habitat-sim 重建对象明细。
+
+    这是“对象清单补全”步骤，可能触发一次独立 Simulator 初始化。
+    """
     if habitat_sim is None:
         return []
 
@@ -919,9 +937,12 @@ def get_instance_point_cloud(
 
     处理顺序：
     1. 从 scene_info 中定位 instance 的 AABB 和基础元数据。
-    2. 如果 habitat-sim 可用，尝试从语义对象直接读取点云或顶点。
-    3. 如果直接读取失败，尝试从 stage mesh 里按 semantic 颜色提取实例表面点云。
-    4. 如果仍失败，则用 AABB/OBB 表面采样生成近似点云。
+    2. 先尝试 semantic.glb 颜色匹配，恢复实例真实表面点。
+    3. 再尝试 habitat-sim semantic object 直读。
+    4. 再尝试 stage mesh 颜色匹配。
+    5. 若仍失败，则用 AABB/OBB 表面采样兜底。
+
+    注意：步骤 3 会创建 Simulator，因此会出现一次 Renderer/OpenGL 初始化日志。
     """
     scene_info = _load_scene_info(scene_name, data_dir)
     generation_trace: List[str] = [
@@ -979,6 +1000,7 @@ def get_instance_point_cloud(
         }
     generation_trace.append("semantic_mesh_by_color_unavailable")
 
+    # 这一段会触发 habitat-sim 初始化日志（Renderer/OpenGL）。
     sim = _load_sim(scene_name, data_dir)
     try:
         if sim is not None:
