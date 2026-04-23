@@ -512,6 +512,20 @@ def _maybe_add_room_and_instance_boxes(server: viser.ViserServer, data: Dict[str
             _add_bbox_lines(server, "instance_bbox", bbox, (0, 200, 255))
 
 
+def _maybe_add_mesh_crop_debug_box(server: viser.ViserServer, data: Dict[str, Any]) -> None:
+    """若导出结果包含 mesh crop 调试信息，则显示裁剪包围域框。"""
+    gen = data.get("point_cloud_generation")
+    if not isinstance(gen, dict):
+        return
+    debug = gen.get("mesh_crop_debug")
+    if not isinstance(debug, dict):
+        return
+    bbox = debug.get("crop_bbox")
+    if not isinstance(bbox, dict):
+        return
+    _add_bbox_lines(server, "mesh_crop_bbox", bbox, (255, 60, 170))
+
+
 def _find_companion_point_cloud_file(input_path: Path, explicit_path: Optional[Path] = None) -> Optional[Path]:
     """查找与 JSON 同名的 ply/xyz 点云文件。"""
     if explicit_path is not None:
@@ -750,6 +764,11 @@ def build_visualization(
             instance = render_data.get("instance")
             if isinstance(instance, dict) and isinstance(instance.get("aabb"), dict):
                 instance["aabb"] = _transform_bbox_aabb(instance["aabb"], rot)
+            gen = render_data.get("point_cloud_generation")
+            if isinstance(gen, dict):
+                dbg = gen.get("mesh_crop_debug")
+                if isinstance(dbg, dict) and isinstance(dbg.get("crop_bbox"), dict):
+                    dbg["crop_bbox"] = _transform_bbox_aabb(dbg["crop_bbox"], rot)
         elif auto_align_grid and scene_name:
             mesh_vertices = _get_scene_mesh_vertices(scene_name=scene_name, data_dir=data_dir)
             if mesh_vertices.size > 0:
@@ -775,11 +794,17 @@ def build_visualization(
                 instance = render_data.get("instance")
                 if isinstance(instance, dict) and isinstance(instance.get("aabb"), dict):
                     instance["aabb"] = _transform_bbox_aabb(instance["aabb"], rot)
+                gen = render_data.get("point_cloud_generation")
+                if isinstance(gen, dict):
+                    dbg = gen.get("mesh_crop_debug")
+                    if isinstance(dbg, dict) and isinstance(dbg.get("crop_bbox"), dict):
+                        dbg["crop_bbox"] = _transform_bbox_aabb(dbg["crop_bbox"], rot)
             else:
                 print("[Info] Auto-align skipped: scene mesh vertices unavailable.")
 
         # 在 auto align 可能更新了 bbox 后再绘制包围盒。
         _maybe_add_room_and_instance_boxes(server, render_data)
+        _maybe_add_mesh_crop_debug_box(server, render_data)
 
         _add_point_cloud(server, "instance_point_cloud", points, (30, 180, 255))
         server.scene.add_frame(
@@ -792,6 +817,7 @@ def build_visualization(
             print(f"[Info] Loaded point cloud from: {point_source}")
     else:
         _maybe_add_room_and_instance_boxes(server, render_data)
+        _maybe_add_mesh_crop_debug_box(server, render_data)
         _add_room_instances_overview(server, render_data)
 
     return {

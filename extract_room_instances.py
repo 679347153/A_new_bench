@@ -709,6 +709,149 @@ def _extract_point_cloud_from_semantic_mesh(
     return _sample_points_from_triangles(merged_vertices, merged_faces, num_points)
 
 
+def _get_instance_bbox_for_mesh_crop(instance: Dict[str, Any]) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+    """获取用于 semantic mesh 空间裁剪的包围域。
+
+    优先使用 instance.aabb；若无效则尝试用 obb(center/half_extents) 近似转成 AABB。
+    """
+    bbox = instance.get("aabb") if isinstance(instance.get("aabb"), dict) else {}
+    min_pt = bbox.get("min", [0.0, 0.0, 0.0])
+    max_pt = bbox.get("max", [0.0, 0.0, 0.0])
+    if _bbox_is_zero({"min": min_pt, "max": max_pt}):
+        obb = instance.get("obb") if isinstance(instance.get("obb"), dict) else {}
+        obb_fallback = _obb_to_aabb_info(obb.get("center"), obb.get("half_extents"))
+        if obb_fallback is None or _bbox_is_zero(obb_fallback):
+            return None
+        min_pt = obb_fallback.get("min", min_pt)
+        max_pt = obb_fallback.get("max", max_pt)
+
+    try:
+        min_arr = np.asarray(min_pt, dtype=np.float32).reshape(3)
+        max_arr = np.asarray(max_pt, dtype=np.float32).reshape(3)
+    except Exception:
+        return None
+    return min_arr, max_arr
+
+
+def _extract_point_cloud_from_semantic_mesh_by_bbox(
+    scene_name: str,
+    instance: Dict[str, Any],
+    data_dir: Path,
+    num_points: int,
+) -> Tuple[Optional[np.ndarray], Dict[str, Any]]:
+    """当颜色匹配失败时，按实例包围域从 semantic.glb 裁剪面片再采样。
+
+    该方法不依赖 semantic 颜色标签，适合 semantic 颜色映射失效的场景。
+    """
+    stats: Dict[str, Any] = {
+        "instance_id": int(instance.get("id", -1)),
+        "method": "semantic_mesh_by_bbox_crop",
+        "available": False,
+        "matched": False,
+        "reason": "",
+        "crop_bbox": None,
+        "crop_size": None,
+        "total_faces": 0,
+        "matched_faces": 0,
+        "match_ratio": 0.0,
+    }
+
+    if trimesh is None:
+        stats["reason"] = "trimesh_unavailable"
+        return None, stats
+
+    bbox_pair = _get_instance_bbox_for_mesh_crop(instance)
+    if bbox_pair is None:
+        stats["reason"] = "invalid_instance_bbox_and_obb"
+        _warn(
+            f"instance_id={int(instance.get('id', -1))} 的 AABB/OBB 都不可用，无法执行 semantic mesh 空间裁剪。"
+        )
+        return None, stats
+    min_arr, max_arr = bbox_pair
+    extent = np.maximum(max_arr - min_arr, 1e-4)
+    pad = np.maximum(extent * 0.08, 0.03).astype(np.float32)
+    crop_min = min_arr - pad
+    crop_max = max_arr + pad
+    stats["crop_bbox"] = {
+        "min": [round(float(v), 4) for v in crop_min],
+        "max": [round(float(v), 4) for v in crop_max],
+    }
+    stats["crop_size"] = [round(float(v), 4) for v in (crop_max - crop_min)]
+
+    scene_paths = resolve_scene_paths(scene_name, require_semantic=True, root=data_dir)
+    if scene_paths is None or not scene_paths.semantic_glb.is_file():
+        stats["reason"] = "semantic_glb_missing"
+        return None, stats
+
+    try:
+        loaded = trimesh.load(scene_paths.semantic_glb, force="scene")
+    except Exception as exc:
+        stats["reason"] = "semantic_glb_load_failed"
+        stats["error"] = str(exc)
+        _warn(f"加载 semantic.glb 失败（bbox 裁剪路径）: {exc}")
+        return None, stats
+
+    geometries = getattr(loaded, "geometry", None)
+    if isinstance(loaded, trimesh.Trimesh):
+        geometries = {"semantic_mesh": loaded}
+    if not geometries:
+        stats["reason"] = "semantic_glb_empty_geometry"
+        return None, stats
+
+    stats["available"] = True
+
+    collected_vertices: List[np.ndarray] = []
+    collected_faces: List[np.ndarray] = []
+    vertex_offset = 0
+    total_faces = 0
+    matched_face_count = 0
+
+    for geom in geometries.values():
+        vertices = np.asarray(getattr(geom, "vertices", []), dtype=np.float32)
+        faces = np.asarray(getattr(geom, "faces", []), dtype=np.int64)
+        if vertices.ndim != 2 or vertices.shape[1] < 3 or faces.ndim != 2 or faces.shape[1] < 3 or len(faces) == 0:
+            continue
+        total_faces += int(len(faces))
+
+        tris = vertices[faces[:, :3]]
+        centroids = tris.mean(axis=1)
+        inside = np.all((centroids >= crop_min[None, :]) & (centroids <= crop_max[None, :]), axis=1)
+        if not np.any(inside):
+            continue
+
+        selected_faces = faces[inside][:, :3]
+        matched_face_count += int(len(selected_faces))
+        unique_vids, inverse = np.unique(selected_faces.reshape(-1), return_inverse=True)
+        local_vertices = vertices[unique_vids][:, :3]
+        local_faces = inverse.reshape(-1, 3).astype(np.int64) + vertex_offset
+
+        collected_vertices.append(local_vertices)
+        collected_faces.append(local_faces)
+        vertex_offset += len(local_vertices)
+
+    stats["total_faces"] = int(total_faces)
+    stats["matched_faces"] = int(matched_face_count)
+    stats["match_ratio"] = round(float(matched_face_count) / float(total_faces), 6) if total_faces > 0 else 0.0
+
+    if not collected_vertices or not collected_faces:
+        stats["reason"] = "no_faces_in_crop"
+        _warn(
+            f"semantic.glb 空间裁剪未命中：instance_id={int(instance.get('id', -1))}, "
+            f"crop_extent=({float(extent[0]):.3f},{float(extent[1]):.3f},{float(extent[2]):.3f})。"
+        )
+        return None, stats
+
+    merged_vertices = np.concatenate(collected_vertices, axis=0)
+    merged_faces = np.concatenate(collected_faces, axis=0)
+    stats["matched"] = True
+    stats["reason"] = "ok"
+    _warn(
+        f"semantic.glb 空间裁剪成功：instance_id={int(instance.get('id', -1))}, "
+        f"matched_faces={int(len(merged_faces))}, source=semantic_mesh_by_bbox_crop。"
+    )
+    return _sample_points_from_triangles(merged_vertices, merged_faces, num_points), stats
+
+
 def _sample_points_on_aabb(min_pt: List[float], max_pt: List[float], num_points: int) -> np.ndarray:
     """基于 AABB 表面采样一个近似点云。
 
@@ -982,6 +1125,7 @@ def get_instance_point_cloud(
     data_dir: Path = DEFAULT_DATA_DIR,
     num_points: int = 2048,
     instance_hint: Optional[Dict[str, Any]] = None,
+    debug_mesh_crop: bool = False,
 ) -> Dict[str, Any]:
     """获取单个 instance 的点云信息。
 
@@ -1059,6 +1203,40 @@ def get_instance_point_cloud(
     _warn(
         "semantic.glb 颜色匹配未命中，继续尝试 habitat-sim 直读与其他回退策略。"
     )
+
+    semantic_bbox_points, mesh_crop_stats = _extract_point_cloud_from_semantic_mesh_by_bbox(
+        scene_name=scene_name,
+        instance=instance,
+        data_dir=data_dir,
+        num_points=num_points,
+    )
+
+    if debug_mesh_crop:
+        crop_size = mesh_crop_stats.get("crop_size")
+        _warn(
+            "mesh crop debug: "
+            f"total_faces={mesh_crop_stats.get('total_faces', 0)}, "
+            f"matched_faces={mesh_crop_stats.get('matched_faces', 0)}, "
+            f"match_ratio={mesh_crop_stats.get('match_ratio', 0.0):.6f}, "
+            f"crop_size={crop_size if crop_size is not None else 'N/A'}, "
+            f"reason={mesh_crop_stats.get('reason', '')}"
+        )
+    if semantic_bbox_points is not None and len(semantic_bbox_points) > 0:
+        generation_trace.append("point_cloud_source=semantic_mesh_by_bbox_crop")
+        generation_meta = {
+            "method": "semantic_mesh_by_bbox_crop",
+            "details": "sampled from semantic.glb triangles whose centroids fall in instance AABB/OBB crop",
+            "trace": generation_trace,
+        }
+        if debug_mesh_crop:
+            generation_meta["mesh_crop_debug"] = mesh_crop_stats
+        return {
+            "scene_name": scene_name,
+            "instance": instance,
+            "point_cloud": _summarize_point_cloud(semantic_bbox_points, "semantic_mesh_by_bbox_crop"),
+            "point_cloud_generation": generation_meta,
+        }
+    generation_trace.append("semantic_mesh_by_bbox_crop_unavailable")
 
     # 这一段会触发 habitat-sim 初始化日志（Renderer/OpenGL）。
     sim = _load_sim(scene_name, data_dir)
@@ -1183,6 +1361,7 @@ def get_instance_point_cloud(
                     else "fallback sampling from instance AABB surfaces because direct semantic point cloud is unavailable"
                 ),
                 "trace": generation_trace,
+                **({"mesh_crop_debug": mesh_crop_stats} if debug_mesh_crop else {}),
             },
         }
     finally:
@@ -1197,6 +1376,7 @@ def extract_room_instances(
     scene_info_path: Optional[Path] = None,
     instance_id: Optional[int] = None,
     num_points: int = 2048,
+    debug_mesh_crop: bool = False,
 ) -> Dict[str, Any]:
     """对外暴露的主查询接口。
 
@@ -1222,6 +1402,7 @@ def extract_room_instances(
             data_dir=data_dir,
             num_points=num_points,
             instance_hint=matched,
+            debug_mesh_crop=debug_mesh_crop,
         )
         point_cloud_report["room"] = room_report["room"]
         return point_cloud_report
@@ -1247,6 +1428,11 @@ def main() -> None:
     parser.add_argument("--scene-info-path", type=str, default=None, help="可选：scene_info JSON 路径")
     parser.add_argument("--data-dir", type=str, default=str(DEFAULT_DATA_DIR), help="HM3D 数据根目录")
     parser.add_argument("--num-points", type=int, default=2048, help="点云采样数量（仅在没有直接点云时使用）")
+    parser.add_argument(
+        "--debug-mesh-crop",
+        action="store_true",
+        help="输出 semantic mesh 空间裁剪调试统计（面片数、包围域尺寸、命中比例），并写入 JSON。",
+    )
     parser.add_argument("--output", type=str, default=None, help="可选：输出 JSON 文件路径")
     parser.add_argument("--pointcloud-format", choices=["ply", "xyz"], default="ply", help="instance 查询时点云文件格式")
     parser.add_argument("--pointcloud-output", type=str, default=None, help="可选：instance 查询时点云输出路径")
@@ -1260,6 +1446,7 @@ def main() -> None:
         scene_info_path=Path(args.scene_info_path) if args.scene_info_path else None,
         instance_id=args.instance_id,
         num_points=args.num_points,
+        debug_mesh_crop=args.debug_mesh_crop,
     )
 
     payload = json.dumps(result, ensure_ascii=False, indent=2)
