@@ -13,7 +13,8 @@
   python visualize_instance_pointcloud_viser.py \
   --input results/room_instances/00808-y9hTuugGdiq/room_0_instance_1.json \
   --pointcloud-file results/room_instances/00808-y9hTuugGdiq/room_0_instance_1.ply \
-  --show-scene-mesh
+  --show-scene-mesh \
+  --port 8080
 如果输入的 JSON 是 room 级别的（包含多个实例），则会显示房间包围盒，并在房间内用小球标记每个实例的中心位置。
 如果输入的是 room 级 JSON，而不是 instance 级 JSON，也会尽量把房间内的实例中心和边框显示出来。
 """
@@ -153,12 +154,39 @@ def _add_bbox_lines(server: viser.ViserServer, name: str, bbox: Dict[str, Any], 
     if np.allclose(min_pt, max_pt):
         return
     corners, edges = _make_box_edges(min_pt, max_pt)
-    server.scene.add_line_segments(
-        name=name,
-        points=corners[edges].reshape(-1, 3),
-        color=color,
-        line_width=2.0,
-    )
+    seg_points = corners[edges].reshape(-1, 3)
+    seg_colors = np.tile(np.asarray(color, dtype=np.uint8)[None, :], (len(seg_points), 1))
+    try:
+        server.scene.add_line_segments(
+            name=name,
+            points=seg_points,
+            color=color,
+            line_width=2.0,
+        )
+        return
+    except TypeError:
+        pass
+    try:
+        server.scene.add_line_segments(
+            name=name,
+            points=seg_points,
+            colors=seg_colors,
+            line_width=2.0,
+        )
+        return
+    except TypeError:
+        pass
+    try:
+        server.scene.add_line_segments(
+            name=name,
+            points=seg_points,
+            colors=seg_colors,
+        )
+        return
+    except TypeError:
+        pass
+    # Last fallback: no color options.
+    server.scene.add_line_segments(name=name, points=seg_points)
 
 
 def _add_axes(server: viser.ViserServer) -> None:
@@ -172,12 +200,26 @@ def _add_point_cloud(server: viser.ViserServer, name: str, points: np.ndarray, c
     rgb[:, 0] = color[0]
     rgb[:, 1] = color[1]
     rgb[:, 2] = color[2]
-    server.scene.add_point_cloud(
-        name=name,
-        points=points,
-        colors=rgb,
-        point_size=0.02,
-    )
+    try:
+        server.scene.add_point_cloud(
+            name=name,
+            points=points,
+            colors=rgb,
+            point_size=0.02,
+        )
+        return
+    except TypeError:
+        pass
+    try:
+        server.scene.add_point_cloud(
+            name=name,
+            points=points,
+            colors=rgb,
+        )
+        return
+    except TypeError:
+        pass
+    server.scene.add_point_cloud(name=name, points=points)
 
 
 def _load_scene_mesh_if_available(server: viser.ViserServer, scene_name: str, data_dir: Path, alpha: float = 0.25) -> bool:
@@ -199,12 +241,25 @@ def _load_scene_mesh_if_available(server: viser.ViserServer, scene_name: str, da
         mesh = trimesh.load(mesh_path, force="mesh")
         if mesh is None:
             return False
-        server.scene.add_mesh_trimesh(
-            name="scene_mesh",
-            mesh=mesh,
-            color=(180, 180, 180),
-            opacity=alpha,
-        )
+        try:
+            server.scene.add_mesh_trimesh(
+                name="scene_mesh",
+                mesh=mesh,
+                color=(180, 180, 180),
+                opacity=alpha,
+            )
+        except TypeError:
+            try:
+                server.scene.add_mesh_trimesh(
+                    name="scene_mesh",
+                    mesh=mesh,
+                    opacity=alpha,
+                )
+            except TypeError:
+                server.scene.add_mesh_trimesh(
+                    name="scene_mesh",
+                    mesh=mesh,
+                )
         return True
     except Exception as exc:
         print(f"[Warning] Failed to load scene mesh: {exc}")
@@ -278,24 +333,39 @@ def _add_room_instances_overview(server: viser.ViserServer, data: Dict[str, Any]
         colors.append((hue, 255 - hue // 2, 120))
 
     for i, center in enumerate(centers):
-        server.scene.add_sphere(
-            name=f"room_instance_center_{i}",
-            radius=0.03,
-            center=center,
-            color=colors[i],
-        )
+        try:
+            server.scene.add_sphere(
+                name=f"room_instance_center_{i}",
+                radius=0.03,
+                center=center,
+                color=colors[i],
+            )
+        except TypeError:
+            try:
+                server.scene.add_sphere(
+                    name=f"room_instance_center_{i}",
+                    radius=0.03,
+                    position=center,
+                    color=colors[i],
+                )
+            except TypeError:
+                server.scene.add_sphere(
+                    name=f"room_instance_center_{i}",
+                    radius=0.03,
+                    center=center,
+                )
 
 
 def build_visualization(
+    server: viser.ViserServer,
     data: Dict[str, Any],
     show_scene_mesh: bool,
     data_dir: Path,
+    scene_name: Optional[str],
     point_cloud_path: Optional[Path] = None,
-) -> viser.ViserServer:
-    server = viser.ViserServer(port=0)
+) -> None:
     _add_axes(server)
 
-    scene_name = _pick_scene_name(data, Path("input"))
     if show_scene_mesh and scene_name:
         _load_scene_mesh_if_available(server, scene_name, data_dir=data_dir)
 
@@ -322,8 +392,6 @@ def build_visualization(
     else:
         _add_room_instances_overview(server, data)
 
-    return server
-
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Visualize exported HM3D instance point clouds with viser")
@@ -339,41 +407,26 @@ def main() -> None:
         raise FileNotFoundError(f"Input JSON not found: {input_path}")
 
     data = _load_export_json(input_path)
+    scene_name = _pick_scene_name(data, input_path)
     explicit_pc = Path(args.pointcloud_file).expanduser().resolve() if args.pointcloud_file else None
     companion_pc = _find_companion_point_cloud_file(input_path, explicit_pc)
     if companion_pc is not None:
         print(f"[Info] Point cloud file detected: {companion_pc}")
-    server = build_visualization(
-        data,
+
+    try:
+        server = viser.ViserServer(port=args.port if args.port >= 0 else 8080)
+    except Exception as exc:
+        print(f"[Warning] Failed to bind requested port {args.port}: {exc}. Using auto port instead.")
+        server = viser.ViserServer(port=0)
+
+    build_visualization(
+        server=server,
+        data=data,
         show_scene_mesh=args.show_scene_mesh,
         data_dir=Path(args.data_dir),
+        scene_name=scene_name,
         point_cloud_path=companion_pc,
     )
-
-    if args.port > 0:
-        try:
-            server = viser.ViserServer(port=args.port)
-            _add_axes(server)
-            if args.show_scene_mesh:
-                scene_name = _pick_scene_name(data, input_path)
-                if scene_name:
-                    _load_scene_mesh_if_available(server, scene_name, data_dir=Path(args.data_dir))
-            _maybe_add_room_and_instance_boxes(server, data)
-            points = _load_point_cloud_file(companion_pc) if companion_pc is not None else np.zeros((0, 3), dtype=np.float32)
-            if points.size == 0:
-                points = _extract_points(data)
-            if points.size > 0:
-                _add_point_cloud(server, "instance_point_cloud", points, (30, 180, 255))
-            else:
-                _add_room_instances_overview(server, data)
-        except Exception as exc:
-            print(f"[Warning] Failed to bind requested port {args.port}: {exc}. Using auto port instead.")
-            server = build_visualization(
-                data,
-                show_scene_mesh=args.show_scene_mesh,
-                data_dir=Path(args.data_dir),
-                point_cloud_path=companion_pc,
-            )
 
     print("[OK] viser server started.")
     print("[OK] Open the printed URL in your browser to inspect the scene.")
