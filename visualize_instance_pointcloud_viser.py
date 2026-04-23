@@ -15,6 +15,7 @@
   --pointcloud-file results/room_instances/00808-y9hTuugGdiq/room_0_instance_1.ply \
   --show-scene-mesh \
   --port 8080
+  
 如果输入的 JSON 是 room 级别的（包含多个实例），则会显示房间包围盒，并在房间内用小球标记每个实例的中心位置。
 如果输入的是 room 级 JSON，而不是 instance 级 JSON，也会尽量把房间内的实例中心和边框显示出来。
 """
