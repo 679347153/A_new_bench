@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""用 viser 可视化 extract_room_instances.py 导出的实例点云，并支持终端交互式调参。
+"""用 viser 可视化 extract_room_instances.py 导出的实例点云，支持手动/自动/交互三种匹配模式。
 
 本文件解决的问题
 ----------------
 1) 把 instance 点云、instance 包围盒、room 包围盒放在同一 3D 视图中查看。
 2) 可选叠加 HM3D 场景网格，直观检查点云与场景是否对齐。
-3) 支持在终端中反复输入旋转参数，实时重绘 instance 相关元素，直到满意为止。
+3) 支持通过命令行参数选择匹配模式：默认手动角度，也可切换自动遍历或终端交互。
 
 输入数据约定
 -----------
@@ -22,9 +22,10 @@
 2) 启动 viser 服务器并绘制坐标轴。
 3) 可选加载场景网格（--show-scene-mesh）。
 4) 对点云应用变换后重绘：
+    - 手动模式（默认）：直接使用 --manual-rx/--manual-ry/--manual-rz。
     - 自动模式：90 度离散遍历，估计最优朝向。
-    - 手动模式：使用终端输入的角度直接旋转。
-5) 进入交互循环，你可以持续 set/step/reload/auto，观察浏览器视图变化。
+    - 交互模式：进入终端命令循环实时调参。
+5) 非交互模式下脚本仅渲染并保持服务器运行；交互模式下可持续 set/step/reload/auto。
 
 坐标变换说明
 -----------
@@ -32,9 +33,9 @@
 2) 自动对齐只遍历 rx/ry/rz in {0, 90, 180, 270}，共 64 组组合。
 3) 打分前会对点云和场景点去中心，以减少平移对朝向估计的干扰。
 
-交互命令
---------
-启动后进入 transform> 提示符，可用命令如下：
+交互命令（仅 interactive 模式）
+-----------------------------
+当 --match-mode interactive 时进入 transform> 提示符，可用命令如下：
 1) set RX RY RZ
     直接设置绝对角度（度），例如：set 0 0 180
 2) step AXIS DIR
@@ -814,9 +815,13 @@ def _print_interactive_help() -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Visualize HM3D instance point clouds with viser and interactive terminal transform tuning.",
+        description="Visualize HM3D instance point clouds with viser (manual/auto/interactive match modes).",
         epilog=(
-            "Interactive commands after startup:\n"
+            "Match modes:\n"
+            "  --match-mode manual (default): use --manual-rx/--manual-ry/--manual-rz\n"
+            "  --match-mode auto: run 90-degree discrete orientation search\n"
+            "  --match-mode interactive: terminal loop for iterative tuning\n\n"
+            "Interactive commands (interactive mode only):\n"
             "  set RX RY RZ   set absolute rotation in degrees\n"
             "  step AXIS DIR  rotate by 90 deg, AXIS in x|y|z, DIR in +|-\n"
             "  auto           run 90-degree discrete orientation search\n"
@@ -829,10 +834,19 @@ def main() -> None:
     parser.add_argument("--data-dir", default=str(Path(__file__).resolve().parent / "hm3d"), help="HM3D 数据根目录")
     parser.add_argument("--show-scene-mesh", action="store_true", help="同时显示场景网格")
     parser.add_argument(
+        "--match-mode",
+        choices=("manual", "auto", "interactive"),
+        default="manual",
+        help="匹配模式：manual(默认)/auto/interactive。manual 使用 --manual-rx/--manual-ry/--manual-rz。",
+    )
+    parser.add_argument("--manual-rx", type=float, default=90.0, help="手动模式 X 轴旋转角度（度），默认 90")
+    parser.add_argument("--manual-ry", type=float, default=0.0, help="手动模式 Y 轴旋转角度（度），默认 0")
+    parser.add_argument("--manual-rz", type=float, default=0.0, help="手动模式 Z 轴旋转角度（度），默认 0")
+    parser.add_argument(
         "--auto-align-grid",
         action=argparse.BooleanOptionalAction,
-        default=True,
-        help="是否启用遍历法自动估计点云到场景网格的变换关系（默认开启）",
+        default=False,
+        help="是否启用遍历法自动估计点云到场景网格的变换关系（默认关闭；建议用 --match-mode auto）",
     )
     parser.add_argument("--pointcloud-file", type=str, default=None, help="可选：显式指定点云文件（.ply/.xyz）")
     parser.add_argument("--port", type=int, default=8080, help="viser 服务端口，0 表示自动分配")
@@ -855,131 +869,150 @@ def main() -> None:
         print(f"[Warning] Failed to bind requested port {args.port}: {exc}. Using auto port instead.")
         server = viser.ViserServer(port=0)
 
-    result = build_visualization(
-        server=server,
-        data=data,
-        show_scene_mesh=args.show_scene_mesh,
-        data_dir=Path(args.data_dir),
-        scene_name=scene_name,
-        point_cloud_path=companion_pc,
-        auto_align_grid=args.auto_align_grid,
-        manual_angles_deg=None,
-        reset_scene=True,
-    )
-
-    current_angles = (
-        float(result.get("used_angles_deg", (0.0, 0.0, 0.0))[0]),
-        float(result.get("used_angles_deg", (0.0, 0.0, 0.0))[1]),
-        float(result.get("used_angles_deg", (0.0, 0.0, 0.0))[2]),
-    )
+    current_angles = _normalize_angles_deg(args.manual_rx, args.manual_ry, args.manual_rz)
+    requested_mode = str(args.match_mode).lower()
+    if requested_mode == "auto":
+        result = build_visualization(
+            server=server,
+            data=data,
+            show_scene_mesh=args.show_scene_mesh,
+            data_dir=Path(args.data_dir),
+            scene_name=scene_name,
+            point_cloud_path=companion_pc,
+            auto_align_grid=True,
+            manual_angles_deg=None,
+            reset_scene=True,
+        )
+        used = result.get("used_angles_deg", current_angles)
+        current_angles = _normalize_angles_deg(float(used[0]), float(used[1]), float(used[2]))
+    else:
+        build_visualization(
+            server=server,
+            data=data,
+            show_scene_mesh=args.show_scene_mesh,
+            data_dir=Path(args.data_dir),
+            scene_name=scene_name,
+            point_cloud_path=companion_pc,
+            auto_align_grid=bool(args.auto_align_grid),
+            manual_angles_deg=current_angles,
+            reset_scene=True,
+        )
 
     print("[OK] viser server started.")
     print("[OK] Open the printed URL in your browser to inspect the scene.")
     if "point_cloud_generation" in data:
         print(f"[Info] Point cloud source: {data['point_cloud_generation'].get('method', 'unknown')}")
-    print("[Info] Enter interactive mode to iteratively adjust transform.")
+    print(f"[Info] Match mode: {requested_mode}")
     print(f"[Info] Current orientation: rx={current_angles[0]:.1f}, ry={current_angles[1]:.1f}, rz={current_angles[2]:.1f}")
-    _print_interactive_help()
+    if requested_mode == "interactive":
+        print("[Info] Enter interactive mode to iteratively adjust transform.")
+        _print_interactive_help()
+    else:
+        print("[Info] Non-interactive mode. Press Ctrl+C to stop the server.")
 
     try:
-        while True:
-            command = input("transform> ").strip()
-            if not command:
-                continue
-
-            low = command.lower()
-            if low in {"quit", "q", "exit"}:
-                break
-            if low in {"help", "h", "?"}:
-                _print_interactive_help()
-                continue
-            if low == "show":
-                print(
-                    f"[Info] Current orientation: "
-                    f"rx={current_angles[0]:.1f}, ry={current_angles[1]:.1f}, rz={current_angles[2]:.1f}"
-                )
-                continue
-            if low == "auto":
-                result = build_visualization(
-                    server=server,
-                    data=data,
-                    show_scene_mesh=args.show_scene_mesh,
-                    data_dir=Path(args.data_dir),
-                    scene_name=scene_name,
-                    point_cloud_path=companion_pc,
-                    auto_align_grid=True,
-                    manual_angles_deg=None,
-                    reset_scene=True,
-                )
-                used = result.get("used_angles_deg", current_angles)
-                current_angles = _normalize_angles_deg(float(used[0]), float(used[1]), float(used[2]))
-                continue
-            if low == "reload":
-                build_visualization(
-                    server=server,
-                    data=data,
-                    show_scene_mesh=args.show_scene_mesh,
-                    data_dir=Path(args.data_dir),
-                    scene_name=scene_name,
-                    point_cloud_path=companion_pc,
-                    auto_align_grid=False,
-                    manual_angles_deg=current_angles,
-                    reset_scene=True,
-                )
-                continue
-
-            parts = command.split()
-            if len(parts) == 4 and parts[0].lower() == "set":
-                try:
-                    rx = float(parts[1])
-                    ry = float(parts[2])
-                    rz = float(parts[3])
-                except ValueError:
-                    print("[Error] Invalid numbers. Usage: set RX RY RZ")
+        if requested_mode == "interactive":
+            while True:
+                command = input("transform> ").strip()
+                if not command:
                     continue
-                current_angles = _normalize_angles_deg(rx, ry, rz)
-                build_visualization(
-                    server=server,
-                    data=data,
-                    show_scene_mesh=args.show_scene_mesh,
-                    data_dir=Path(args.data_dir),
-                    scene_name=scene_name,
-                    point_cloud_path=companion_pc,
-                    auto_align_grid=False,
-                    manual_angles_deg=current_angles,
-                    reset_scene=True,
-                )
-                continue
 
-            if len(parts) == 3 and parts[0].lower() == "step":
-                axis = parts[1].lower()
-                direction = parts[2]
-                if axis not in {"x", "y", "z"} or direction not in {"+", "-"}:
-                    print("[Error] Usage: step AXIS DIR, e.g. step z +")
+                low = command.lower()
+                if low in {"quit", "q", "exit"}:
+                    break
+                if low in {"help", "h", "?"}:
+                    _print_interactive_help()
                     continue
-                delta = 90.0 if direction == "+" else -90.0
-                rx, ry, rz = current_angles
-                if axis == "x":
-                    rx += delta
-                elif axis == "y":
-                    ry += delta
-                else:
-                    rz += delta
-                current_angles = _normalize_angles_deg(rx, ry, rz)
-                build_visualization(
-                    server=server,
-                    data=data,
-                    show_scene_mesh=args.show_scene_mesh,
-                    data_dir=Path(args.data_dir),
-                    scene_name=scene_name,
-                    point_cloud_path=companion_pc,
-                    auto_align_grid=False,
-                    manual_angles_deg=current_angles,
-                    reset_scene=True,
-                )
-                continue
+                if low == "show":
+                    print(
+                        f"[Info] Current orientation: "
+                        f"rx={current_angles[0]:.1f}, ry={current_angles[1]:.1f}, rz={current_angles[2]:.1f}"
+                    )
+                    continue
+                if low == "auto":
+                    result = build_visualization(
+                        server=server,
+                        data=data,
+                        show_scene_mesh=args.show_scene_mesh,
+                        data_dir=Path(args.data_dir),
+                        scene_name=scene_name,
+                        point_cloud_path=companion_pc,
+                        auto_align_grid=True,
+                        manual_angles_deg=None,
+                        reset_scene=True,
+                    )
+                    used = result.get("used_angles_deg", current_angles)
+                    current_angles = _normalize_angles_deg(float(used[0]), float(used[1]), float(used[2]))
+                    continue
+                if low == "reload":
+                    build_visualization(
+                        server=server,
+                        data=data,
+                        show_scene_mesh=args.show_scene_mesh,
+                        data_dir=Path(args.data_dir),
+                        scene_name=scene_name,
+                        point_cloud_path=companion_pc,
+                        auto_align_grid=False,
+                        manual_angles_deg=current_angles,
+                        reset_scene=True,
+                    )
+                    continue
 
-            print("[Error] Unknown command. Type 'help' to see supported commands.")
+                parts = command.split()
+                if len(parts) == 4 and parts[0].lower() == "set":
+                    try:
+                        rx = float(parts[1])
+                        ry = float(parts[2])
+                        rz = float(parts[3])
+                    except ValueError:
+                        print("[Error] Invalid numbers. Usage: set RX RY RZ")
+                        continue
+                    current_angles = _normalize_angles_deg(rx, ry, rz)
+                    build_visualization(
+                        server=server,
+                        data=data,
+                        show_scene_mesh=args.show_scene_mesh,
+                        data_dir=Path(args.data_dir),
+                        scene_name=scene_name,
+                        point_cloud_path=companion_pc,
+                        auto_align_grid=False,
+                        manual_angles_deg=current_angles,
+                        reset_scene=True,
+                    )
+                    continue
+
+                if len(parts) == 3 and parts[0].lower() == "step":
+                    axis = parts[1].lower()
+                    direction = parts[2]
+                    if axis not in {"x", "y", "z"} or direction not in {"+", "-"}:
+                        print("[Error] Usage: step AXIS DIR, e.g. step z +")
+                        continue
+                    delta = 90.0 if direction == "+" else -90.0
+                    rx, ry, rz = current_angles
+                    if axis == "x":
+                        rx += delta
+                    elif axis == "y":
+                        ry += delta
+                    else:
+                        rz += delta
+                    current_angles = _normalize_angles_deg(rx, ry, rz)
+                    build_visualization(
+                        server=server,
+                        data=data,
+                        show_scene_mesh=args.show_scene_mesh,
+                        data_dir=Path(args.data_dir),
+                        scene_name=scene_name,
+                        point_cloud_path=companion_pc,
+                        auto_align_grid=False,
+                        manual_angles_deg=current_angles,
+                        reset_scene=True,
+                    )
+                    continue
+
+                print("[Error] Unknown command. Type 'help' to see supported commands.")
+        else:
+            while True:
+                time.sleep(1.0)
     except KeyboardInterrupt:
         pass
 
