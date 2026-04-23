@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import json
 import time
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -200,7 +201,6 @@ def _add_bbox_lines(server: viser.ViserServer, name: str, bbox: Dict[str, Any], 
     corners, edges = _make_box_edges(min_pt, max_pt)
     # viser expects line segments with shape (N, 2, 3).
     seg_points = corners[edges]
-    seg_colors_segment = np.tile(np.asarray(color, dtype=np.uint8)[None, :], (len(edges), 1))
     seg_colors_vertex = np.tile(np.asarray(color, dtype=np.uint8)[None, None, :], (len(edges), 2, 1))
     try:
         server.scene.add_line_segments(
@@ -356,6 +356,30 @@ def _load_scene_mesh_if_available(server: viser.ViserServer, scene_name: str, da
         return False
 
 
+def _get_scene_mesh_vertices(scene_name: str, data_dir: Path) -> np.ndarray:
+    """加载用于可视化的场景网格顶点（含 stage transform）。"""
+    if trimesh is None:
+        return np.zeros((0, 3), dtype=np.float32)
+    scene_paths = resolve_scene_paths(scene_name, require_semantic=True, root=data_dir)
+    if scene_paths is None or not scene_paths.stage_glb.is_file():
+        return np.zeros((0, 3), dtype=np.float32)
+
+    try:
+        mesh = trimesh.load(scene_paths.stage_glb, force="mesh")
+        if mesh is None or not hasattr(mesh, "vertices"):
+            return np.zeros((0, 3), dtype=np.float32)
+        stage_transform = _get_habitat_stage_transform(scene_name=scene_name, data_dir=data_dir)
+        if stage_transform is not None:
+            mesh = mesh.copy()
+            mesh.apply_transform(stage_transform)
+        vertices = np.asarray(mesh.vertices, dtype=np.float32)
+        if vertices.ndim != 2 or vertices.shape[1] < 3:
+            return np.zeros((0, 3), dtype=np.float32)
+        return vertices[:, :3]
+    except Exception:
+        return np.zeros((0, 3), dtype=np.float32)
+
+
 def _get_habitat_stage_transform(scene_name: str, data_dir: Path) -> Optional[np.ndarray]:
     """尝试从 habitat-sim 读取场景舞台变换矩阵（若可用）。"""
     if habitat_sim is None:
@@ -500,6 +524,129 @@ def _add_room_instances_overview(server: viser.ViserServer, data: Dict[str, Any]
                 )
 
 
+def _rotation_y(yaw_rad: float) -> np.ndarray:
+    c = float(np.cos(yaw_rad))
+    s = float(np.sin(yaw_rad))
+    return np.asarray(
+        [
+            [c, 0.0, s],
+            [0.0, 1.0, 0.0],
+            [-s, 0.0, c],
+        ],
+        dtype=np.float32,
+    )
+
+
+def _mean_nn_distance_sq(src: np.ndarray, dst: np.ndarray, chunk: int = 256) -> float:
+    if src.size == 0 or dst.size == 0:
+        return float("inf")
+    src = np.asarray(src, dtype=np.float32)
+    dst = np.asarray(dst, dtype=np.float32)
+    d2_sum = 0.0
+    n = len(src)
+    for i in range(0, n, chunk):
+        block = src[i:i + chunk]
+        diff = block[:, None, :] - dst[None, :, :]
+        d2 = np.sum(diff * diff, axis=2)
+        d2_min = np.min(d2, axis=1)
+        d2_sum += float(np.sum(d2_min))
+    return d2_sum / float(max(n, 1))
+
+
+def _transform_points(points: np.ndarray, rot: np.ndarray, trans: np.ndarray) -> np.ndarray:
+    return (points @ rot.T) + trans[None, :]
+
+
+def _bbox_corners(bbox: Dict[str, Any]) -> np.ndarray:
+    min_pt, max_pt = _bbox_to_corners(bbox)
+    x0, y0, z0 = min_pt.tolist()
+    x1, y1, z1 = max_pt.tolist()
+    return np.asarray(
+        [
+            [x0, y0, z0], [x1, y0, z0], [x1, y1, z0], [x0, y1, z0],
+            [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1],
+        ],
+        dtype=np.float32,
+    )
+
+
+def _transform_bbox_aabb(bbox: Dict[str, Any], rot: np.ndarray, trans: np.ndarray) -> Dict[str, Any]:
+    corners = _bbox_corners(bbox)
+    tc = _transform_points(corners, rot, trans)
+    min_pt = np.min(tc, axis=0)
+    max_pt = np.max(tc, axis=0)
+    center = (min_pt + max_pt) / 2.0
+    size = max_pt - min_pt
+    return {
+        "min": [round(float(v), 4) for v in min_pt],
+        "max": [round(float(v), 4) for v in max_pt],
+        "center": [round(float(v), 4) for v in center],
+        "size": [round(float(v), 4) for v in size],
+    }
+
+
+def _estimate_transform_by_grid(
+    src_points: np.ndarray,
+    dst_points: np.ndarray,
+    rounds: int = 3,
+    yaw_range_deg: float = 180.0,
+    yaw_step_deg: float = 30.0,
+    trans_range: float = 4.0,
+    trans_step: float = 1.0,
+) -> Tuple[np.ndarray, np.ndarray, float, float]:
+    """遍历法估计 src->dst 的刚体变换（绕Y旋转 + XYZ平移）。"""
+    if src_points.size == 0 or dst_points.size == 0:
+        return np.eye(3, dtype=np.float32), np.zeros(3, dtype=np.float32), 0.0, float("inf")
+
+    rng = np.random.default_rng(0)
+    src = src_points
+    dst = dst_points
+    if len(src) > 1800:
+        src = src[rng.choice(len(src), size=1800, replace=False)]
+    if len(dst) > 12000:
+        dst = dst[rng.choice(len(dst), size=12000, replace=False)]
+
+    src_center = np.mean(src, axis=0)
+    dst_center = np.mean(dst, axis=0)
+
+    best_yaw_deg = 0.0
+    best_trans = (dst_center - src_center).astype(np.float32)
+    best_score = float("inf")
+
+    cur_yaw_range = float(yaw_range_deg)
+    cur_yaw_step = float(yaw_step_deg)
+    cur_trans_range = float(trans_range)
+    cur_trans_step = float(trans_step)
+
+    for _ in range(max(rounds, 1)):
+        yaw_values = np.arange(best_yaw_deg - cur_yaw_range, best_yaw_deg + cur_yaw_range + 1e-6, cur_yaw_step)
+        tx_values = np.arange(best_trans[0] - cur_trans_range, best_trans[0] + cur_trans_range + 1e-6, cur_trans_step)
+        ty_values = np.arange(best_trans[1] - cur_trans_range, best_trans[1] + cur_trans_range + 1e-6, cur_trans_step)
+        tz_values = np.arange(best_trans[2] - cur_trans_range, best_trans[2] + cur_trans_range + 1e-6, cur_trans_step)
+
+        for yaw_deg in yaw_values:
+            rot = _rotation_y(np.deg2rad(yaw_deg))
+            src_rot = src @ rot.T
+            for tx in tx_values:
+                for ty in ty_values:
+                    for tz in tz_values:
+                        trans = np.asarray([tx, ty, tz], dtype=np.float32)
+                        moved = src_rot + trans[None, :]
+                        score = _mean_nn_distance_sq(moved, dst)
+                        if score < best_score:
+                            best_score = score
+                            best_yaw_deg = float(yaw_deg)
+                            best_trans = trans
+
+        cur_yaw_range = max(cur_yaw_range * 0.45, 2.0)
+        cur_yaw_step = max(cur_yaw_step * 0.5, 1.0)
+        cur_trans_range = max(cur_trans_range * 0.45, 0.2)
+        cur_trans_step = max(cur_trans_step * 0.5, 0.05)
+
+    best_rot = _rotation_y(np.deg2rad(best_yaw_deg))
+    return best_rot, best_trans, best_yaw_deg, best_score
+
+
 def build_visualization(
     server: viser.ViserServer,
     data: Dict[str, Any],
@@ -507,13 +654,12 @@ def build_visualization(
     data_dir: Path,
     scene_name: Optional[str],
     point_cloud_path: Optional[Path] = None,
+    auto_align_grid: bool = False,
 ) -> None:
     _add_axes(server)
 
     if show_scene_mesh and scene_name:
         _load_scene_mesh_if_available(server, scene_name, data_dir=data_dir)
-
-    _maybe_add_room_and_instance_boxes(server, data)
 
     points = _load_point_cloud_file(point_cloud_path) if point_cloud_path is not None else np.zeros((0, 3), dtype=np.float32)
     point_source = None
@@ -524,6 +670,35 @@ def build_visualization(
         if points.size > 0:
             point_source = "json_embedded"
     if points.size > 0:
+        if auto_align_grid and scene_name:
+            mesh_vertices = _get_scene_mesh_vertices(scene_name=scene_name, data_dir=data_dir)
+            if mesh_vertices.size > 0:
+                print("[Info] Running traversal search for coordinate transform (yaw+translation)...")
+                rot, trans, yaw_deg, score = _estimate_transform_by_grid(
+                    src_points=points,
+                    dst_points=mesh_vertices,
+                )
+                points = _transform_points(points, rot, trans)
+                print(
+                    "[Info] Estimated transform: "
+                    f"yaw_deg={yaw_deg:.3f}, "
+                    f"translation=({trans[0]:.3f}, {trans[1]:.3f}, {trans[2]:.3f}), "
+                    f"mean_nn_dist={np.sqrt(max(score, 0.0)):.4f}"
+                )
+
+                # 同步变换包围盒，确保点云与框体仍一致。
+                room = data.get("room")
+                if isinstance(room, dict) and isinstance(room.get("bounding_box"), dict):
+                    room["bounding_box"] = _transform_bbox_aabb(room["bounding_box"], rot, trans)
+                instance = data.get("instance")
+                if isinstance(instance, dict) and isinstance(instance.get("aabb"), dict):
+                    instance["aabb"] = _transform_bbox_aabb(instance["aabb"], rot, trans)
+            else:
+                print("[Info] Auto-align skipped: scene mesh vertices unavailable.")
+
+        # 在 auto align 可能更新了 bbox 后再绘制包围盒。
+        _maybe_add_room_and_instance_boxes(server, data)
+
         _add_point_cloud(server, "instance_point_cloud", points, (30, 180, 255))
         server.scene.add_frame(
             "point_cloud_origin",
@@ -534,6 +709,7 @@ def build_visualization(
         if point_source:
             print(f"[Info] Loaded point cloud from: {point_source}")
     else:
+        _maybe_add_room_and_instance_boxes(server, data)
         _add_room_instances_overview(server, data)
 
 
@@ -542,6 +718,12 @@ def main() -> None:
     parser.add_argument("--input", required=True, help="导出的 instance/room JSON 文件路径")
     parser.add_argument("--data-dir", default=str(Path(__file__).resolve().parent / "hm3d"), help="HM3D 数据根目录")
     parser.add_argument("--show-scene-mesh", action="store_true", help="同时显示场景网格")
+    parser.add_argument(
+        "--auto-align-grid",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="是否启用遍历法自动估计点云到场景网格的变换关系（默认开启）",
+    )
     parser.add_argument("--pointcloud-file", type=str, default=None, help="可选：显式指定点云文件（.ply/.xyz）")
     parser.add_argument("--port", type=int, default=8080, help="viser 服务端口，0 表示自动分配")
     args = parser.parse_args()
@@ -570,6 +752,7 @@ def main() -> None:
         data_dir=Path(args.data_dir),
         scene_name=scene_name,
         point_cloud_path=companion_pc,
+        auto_align_grid=args.auto_align_grid,
     )
 
     print("[OK] viser server started.")
