@@ -167,35 +167,17 @@ def _add_bbox_lines(server: viser.ViserServer, name: str, bbox: Dict[str, Any], 
             line_width=2.0,
         )
         return
-    except (TypeError, ValueError):
-        pass
-    try:
-        server.scene.add_line_segments(
-            name=name,
-            points=seg_points,
-            colors=seg_colors_segment,
-            line_width=2.0,
-        )
-        return
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, AssertionError):
         pass
     try:
         server.scene.add_line_segments(
             name=name,
             points=seg_points,
             colors=seg_colors_vertex,
+            line_width=2.0,
         )
         return
-    except (TypeError, ValueError):
-        pass
-    try:
-        server.scene.add_line_segments(
-            name=name,
-            points=seg_points,
-            colors=seg_colors_segment,
-        )
-        return
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, AssertionError):
         pass
     # Last fallback: no color options.
     server.scene.add_line_segments(name=name, points=seg_points)
