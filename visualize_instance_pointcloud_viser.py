@@ -1,23 +1,72 @@
 #!/usr/bin/env python3
-"""用 viser 可视化 extract_room_instances.py 导出的实例点云。
+"""用 viser 可视化 extract_room_instances.py 导出的实例点云，并支持终端交互式调参。
 
-功能：
-1. 可视化单个 instance 的点云。
-2. 叠加显示该 instance 的包围盒、所属房间包围盒。
-3. 可选加载 HM3D 场景网格，辅助查看点云在场景中的位置。
+本文件解决的问题
+----------------
+1) 把 instance 点云、instance 包围盒、room 包围盒放在同一 3D 视图中查看。
+2) 可选叠加 HM3D 场景网格，直观检查点云与场景是否对齐。
+3) 支持在终端中反复输入旋转参数，实时重绘 instance 相关元素，直到满意为止。
 
-使用方式示例：
-  python visualize_instance_pointcloud_viser.py --input results/room_instances/00808-y9hTuugGdiq/room_0_instance_1.json
-  python visualize_instance_pointcloud_viser.py --input results/room_instances/00808-y9hTuugGdiq/room_0_instance_1.json --show-scene-mesh
+输入数据约定
+-----------
+1) --input 指向 extract_room_instances.py 导出的 JSON。
+2) 点云优先级：
+    - 若指定 --pointcloud-file，则优先读取该 .ply/.xyz。
+    - 否则自动查找与 JSON 同名的 .ply/.xyz。
+    - 再否则回退到 JSON 内嵌 point_cloud.points。
+3) 当输入为 room 级 JSON（包含 instances 列表）时，会显示房间框，并尽量显示实例中心标记。
 
-  python visualize_instance_pointcloud_viser.py \
-  --input results/room_instances/00808-y9hTuugGdiq/room_0_instance_1.json \
-  --pointcloud-file results/room_instances/00808-y9hTuugGdiq/room_0_instance_1.ply \
-  --show-scene-mesh \
-  --port 8080
-  
-如果输入的 JSON 是 room 级别的（包含多个实例），则会显示房间包围盒，并在房间内用小球标记每个实例的中心位置。
-如果输入的是 room 级 JSON，而不是 instance 级 JSON，也会尽量把房间内的实例中心和边框显示出来。
+核心运行流程
+-----------
+1) 解析 JSON 与可选点云文件。
+2) 启动 viser 服务器并绘制坐标轴。
+3) 可选加载场景网格（--show-scene-mesh）。
+4) 对点云应用变换后重绘：
+    - 自动模式：90 度离散遍历，估计最优朝向。
+    - 手动模式：使用终端输入的角度直接旋转。
+5) 进入交互循环，你可以持续 set/step/reload/auto，观察浏览器视图变化。
+
+坐标变换说明
+-----------
+1) 本脚本当前只做“旋转朝向”变换，不做平移偏置。
+2) 自动对齐只遍历 rx/ry/rz in {0, 90, 180, 270}，共 64 组组合。
+3) 打分前会对点云和场景点去中心，以减少平移对朝向估计的干扰。
+
+交互命令
+--------
+启动后进入 transform> 提示符，可用命令如下：
+1) set RX RY RZ
+    直接设置绝对角度（度），例如：set 0 0 180
+2) step AXIS DIR
+    按 90 度步进，AXIS 为 x|y|z，DIR 为 +|-，例如：step z +
+3) reload
+    按当前角度重新加载并重绘 instance 相关元素
+4) auto
+    重新执行 90 度离散遍历，自动估计最佳朝向
+5) show / help / quit
+
+快速示例
+--------
+1) 最小运行：
+    python visualize_instance_pointcloud_viser.py \
+      --input results/room_instances/00808-y9hTuugGdiq/room_0_instance_1.json
+
+2) 带场景网格：
+    python visualize_instance_pointcloud_viser.py \
+      --input results/room_instances/00808-y9hTuugGdiq/room_0_instance_1.json \
+      --show-scene-mesh
+
+3) 指定点云文件与端口：
+    python visualize_instance_pointcloud_viser.py \
+      --input results/room_instances/00808-y9hTuugGdiq/room_0_instance_1.json \
+      --pointcloud-file results/room_instances/00808-y9hTuugGdiq/room_0_instance_1.ply \
+      --show-scene-mesh \
+      --port 8080
+
+依赖
+----
+必需：viser, numpy
+可选：trimesh（加载场景网格/ply 时更稳定），habitat_sim（读取 stage transform）
 """
 
 from __future__ import annotations
@@ -637,6 +686,18 @@ def _estimate_rotation_by_90deg(
     return best_rot, best_angles, best_score
 
 
+def _safe_scene_reset(server: viser.ViserServer) -> None:
+    """尽量清空场景，便于同一进程内重复重绘。"""
+    try:
+        server.scene.reset()
+    except Exception as exc:
+        print(f"[Warning] Scene reset not supported in this viser version: {exc}")
+
+
+def _normalize_angles_deg(rx: float, ry: float, rz: float) -> Tuple[float, float, float]:
+    return (float(rx) % 360.0, float(ry) % 360.0, float(rz) % 360.0)
+
+
 def build_visualization(
     server: viser.ViserServer,
     data: Dict[str, Any],
@@ -645,7 +706,14 @@ def build_visualization(
     scene_name: Optional[str],
     point_cloud_path: Optional[Path] = None,
     auto_align_grid: bool = False,
-) -> None:
+    manual_angles_deg: Optional[Tuple[float, float, float]] = None,
+    reset_scene: bool = False,
+) -> Dict[str, Any]:
+    if reset_scene:
+        _safe_scene_reset(server)
+
+    render_data = deepcopy(data)
+
     _add_axes(server)
 
     if show_scene_mesh and scene_name:
@@ -656,11 +724,32 @@ def build_visualization(
     if point_cloud_path is not None and points.size > 0:
         point_source = f"file:{point_cloud_path.suffix.lower()}"
     if points.size == 0:
-        points = _extract_points(data)
+        points = _extract_points(render_data)
         if points.size > 0:
             point_source = "json_embedded"
+
+    used_angles = (0.0, 0.0, 0.0)
+    used_score = None
+    align_mode = "identity"
+
     if points.size > 0:
-        if auto_align_grid and scene_name:
+        if manual_angles_deg is not None:
+            used_angles = _normalize_angles_deg(*manual_angles_deg)
+            rot = _rotation_xyz_deg(used_angles[0], used_angles[1], used_angles[2])
+            points = _transform_points(points, rot)
+            align_mode = "manual"
+            print(
+                "[Info] Manual orientation applied: "
+                f"rx={used_angles[0]:.1f} deg, ry={used_angles[1]:.1f} deg, rz={used_angles[2]:.1f} deg"
+            )
+
+            room = render_data.get("room")
+            if isinstance(room, dict) and isinstance(room.get("bounding_box"), dict):
+                room["bounding_box"] = _transform_bbox_aabb(room["bounding_box"], rot)
+            instance = render_data.get("instance")
+            if isinstance(instance, dict) and isinstance(instance.get("aabb"), dict):
+                instance["aabb"] = _transform_bbox_aabb(instance["aabb"], rot)
+        elif auto_align_grid and scene_name:
             mesh_vertices = _get_scene_mesh_vertices(scene_name=scene_name, data_dir=data_dir)
             if mesh_vertices.size > 0:
                 print("[Info] Running orientation-only traversal (Rx/Ry/Rz in 90-degree steps)...")
@@ -669,6 +758,9 @@ def build_visualization(
                     dst_points=mesh_vertices,
                 )
                 points = _transform_points(points, rot)
+                used_angles = (float(angles[0]), float(angles[1]), float(angles[2]))
+                used_score = float(score)
+                align_mode = "auto_90deg"
                 print(
                     "[Info] Estimated orientation: "
                     f"rx={angles[0]} deg, ry={angles[1]} deg, rz={angles[2]} deg, "
@@ -676,17 +768,17 @@ def build_visualization(
                 )
 
                 # 同步旋转包围盒，确保点云与框体仍一致。
-                room = data.get("room")
+                room = render_data.get("room")
                 if isinstance(room, dict) and isinstance(room.get("bounding_box"), dict):
                     room["bounding_box"] = _transform_bbox_aabb(room["bounding_box"], rot)
-                instance = data.get("instance")
+                instance = render_data.get("instance")
                 if isinstance(instance, dict) and isinstance(instance.get("aabb"), dict):
                     instance["aabb"] = _transform_bbox_aabb(instance["aabb"], rot)
             else:
                 print("[Info] Auto-align skipped: scene mesh vertices unavailable.")
 
         # 在 auto align 可能更新了 bbox 后再绘制包围盒。
-        _maybe_add_room_and_instance_boxes(server, data)
+        _maybe_add_room_and_instance_boxes(server, render_data)
 
         _add_point_cloud(server, "instance_point_cloud", points, (30, 180, 255))
         server.scene.add_frame(
@@ -698,12 +790,41 @@ def build_visualization(
         if point_source:
             print(f"[Info] Loaded point cloud from: {point_source}")
     else:
-        _maybe_add_room_and_instance_boxes(server, data)
-        _add_room_instances_overview(server, data)
+        _maybe_add_room_and_instance_boxes(server, render_data)
+        _add_room_instances_overview(server, render_data)
+
+    return {
+        "used_angles_deg": used_angles,
+        "align_mode": align_mode,
+        "score": used_score,
+        "point_source": point_source,
+    }
+
+
+def _print_interactive_help() -> None:
+    print("[Interactive] Commands:")
+    print("  set RX RY RZ   -> 设置绝对旋转角度（单位：度）")
+    print("  step AXIS DIR  -> 按 90 度步进，AXIS:x|y|z, DIR:+|-  (例如: step z +)")
+    print("  auto           -> 重新执行 90 度遍历自动对齐")
+    print("  reload         -> 按当前角度重新加载 instance 元素")
+    print("  show           -> 显示当前角度")
+    print("  help           -> 显示帮助")
+    print("  quit           -> 退出")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Visualize exported HM3D instance point clouds with viser")
+    parser = argparse.ArgumentParser(
+        description="Visualize HM3D instance point clouds with viser and interactive terminal transform tuning.",
+        epilog=(
+            "Interactive commands after startup:\n"
+            "  set RX RY RZ   set absolute rotation in degrees\n"
+            "  step AXIS DIR  rotate by 90 deg, AXIS in x|y|z, DIR in +|-\n"
+            "  auto           run 90-degree discrete orientation search\n"
+            "  reload         redraw with current angles\n"
+            "  show/help/quit"
+        ),
+        formatter_class=argparse.RawTextHelpFormatter,
+    )
     parser.add_argument("--input", required=True, help="导出的 instance/room JSON 文件路径")
     parser.add_argument("--data-dir", default=str(Path(__file__).resolve().parent / "hm3d"), help="HM3D 数据根目录")
     parser.add_argument("--show-scene-mesh", action="store_true", help="同时显示场景网格")
@@ -734,7 +855,7 @@ def main() -> None:
         print(f"[Warning] Failed to bind requested port {args.port}: {exc}. Using auto port instead.")
         server = viser.ViserServer(port=0)
 
-    build_visualization(
+    result = build_visualization(
         server=server,
         data=data,
         show_scene_mesh=args.show_scene_mesh,
@@ -742,19 +863,127 @@ def main() -> None:
         scene_name=scene_name,
         point_cloud_path=companion_pc,
         auto_align_grid=args.auto_align_grid,
+        manual_angles_deg=None,
+        reset_scene=True,
+    )
+
+    current_angles = (
+        float(result.get("used_angles_deg", (0.0, 0.0, 0.0))[0]),
+        float(result.get("used_angles_deg", (0.0, 0.0, 0.0))[1]),
+        float(result.get("used_angles_deg", (0.0, 0.0, 0.0))[2]),
     )
 
     print("[OK] viser server started.")
     print("[OK] Open the printed URL in your browser to inspect the scene.")
     if "point_cloud_generation" in data:
         print(f"[Info] Point cloud source: {data['point_cloud_generation'].get('method', 'unknown')}")
-    print("[Info] Press Ctrl+C to stop the server.")
+    print("[Info] Enter interactive mode to iteratively adjust transform.")
+    print(f"[Info] Current orientation: rx={current_angles[0]:.1f}, ry={current_angles[1]:.1f}, rz={current_angles[2]:.1f}")
+    _print_interactive_help()
 
     try:
         while True:
-            time.sleep(1.0)
+            command = input("transform> ").strip()
+            if not command:
+                continue
+
+            low = command.lower()
+            if low in {"quit", "q", "exit"}:
+                break
+            if low in {"help", "h", "?"}:
+                _print_interactive_help()
+                continue
+            if low == "show":
+                print(
+                    f"[Info] Current orientation: "
+                    f"rx={current_angles[0]:.1f}, ry={current_angles[1]:.1f}, rz={current_angles[2]:.1f}"
+                )
+                continue
+            if low == "auto":
+                result = build_visualization(
+                    server=server,
+                    data=data,
+                    show_scene_mesh=args.show_scene_mesh,
+                    data_dir=Path(args.data_dir),
+                    scene_name=scene_name,
+                    point_cloud_path=companion_pc,
+                    auto_align_grid=True,
+                    manual_angles_deg=None,
+                    reset_scene=True,
+                )
+                used = result.get("used_angles_deg", current_angles)
+                current_angles = _normalize_angles_deg(float(used[0]), float(used[1]), float(used[2]))
+                continue
+            if low == "reload":
+                build_visualization(
+                    server=server,
+                    data=data,
+                    show_scene_mesh=args.show_scene_mesh,
+                    data_dir=Path(args.data_dir),
+                    scene_name=scene_name,
+                    point_cloud_path=companion_pc,
+                    auto_align_grid=False,
+                    manual_angles_deg=current_angles,
+                    reset_scene=True,
+                )
+                continue
+
+            parts = command.split()
+            if len(parts) == 4 and parts[0].lower() == "set":
+                try:
+                    rx = float(parts[1])
+                    ry = float(parts[2])
+                    rz = float(parts[3])
+                except ValueError:
+                    print("[Error] Invalid numbers. Usage: set RX RY RZ")
+                    continue
+                current_angles = _normalize_angles_deg(rx, ry, rz)
+                build_visualization(
+                    server=server,
+                    data=data,
+                    show_scene_mesh=args.show_scene_mesh,
+                    data_dir=Path(args.data_dir),
+                    scene_name=scene_name,
+                    point_cloud_path=companion_pc,
+                    auto_align_grid=False,
+                    manual_angles_deg=current_angles,
+                    reset_scene=True,
+                )
+                continue
+
+            if len(parts) == 3 and parts[0].lower() == "step":
+                axis = parts[1].lower()
+                direction = parts[2]
+                if axis not in {"x", "y", "z"} or direction not in {"+", "-"}:
+                    print("[Error] Usage: step AXIS DIR, e.g. step z +")
+                    continue
+                delta = 90.0 if direction == "+" else -90.0
+                rx, ry, rz = current_angles
+                if axis == "x":
+                    rx += delta
+                elif axis == "y":
+                    ry += delta
+                else:
+                    rz += delta
+                current_angles = _normalize_angles_deg(rx, ry, rz)
+                build_visualization(
+                    server=server,
+                    data=data,
+                    show_scene_mesh=args.show_scene_mesh,
+                    data_dir=Path(args.data_dir),
+                    scene_name=scene_name,
+                    point_cloud_path=companion_pc,
+                    auto_align_grid=False,
+                    manual_angles_deg=current_angles,
+                    reset_scene=True,
+                )
+                continue
+
+            print("[Error] Unknown command. Type 'help' to see supported commands.")
     except KeyboardInterrupt:
-        print("[OK] Server stopped.")
+        pass
+
+    print("[OK] Server stopped.")
 
 
 if __name__ == "__main__":
