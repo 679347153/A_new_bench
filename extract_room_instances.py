@@ -547,6 +547,41 @@ def _summarize_point_cloud(points: np.ndarray, source: str) -> Dict[str, Any]:
     }
 
 
+def _write_point_cloud_file(points: List[List[float]], output_path: Path, fmt: str = "ply") -> Path:
+    """将点云导出为常见格式文件（ply/xyz）。"""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    safe_fmt = (fmt or "ply").lower()
+
+    if safe_fmt not in {"ply", "xyz"}:
+        raise ValueError(f"Unsupported point cloud format: {fmt}")
+
+    pts = points or []
+    if safe_fmt == "xyz":
+        if output_path.suffix.lower() != ".xyz":
+            output_path = output_path.with_suffix(".xyz")
+        with open(output_path, "w", encoding="utf-8") as f:
+            for p in pts:
+                if len(p) >= 3:
+                    f.write(f"{float(p[0]):.6f} {float(p[1]):.6f} {float(p[2]):.6f}\n")
+        return output_path
+
+    if output_path.suffix.lower() != ".ply":
+        output_path = output_path.with_suffix(".ply")
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write("ply\n")
+        f.write("format ascii 1.0\n")
+        f.write(f"element vertex {len(pts)}\n")
+        f.write("property float x\n")
+        f.write("property float y\n")
+        f.write("property float z\n")
+        f.write("end_header\n")
+        for p in pts:
+            if len(p) >= 3:
+                f.write(f"{float(p[0]):.6f} {float(p[1]):.6f} {float(p[2]):.6f}\n")
+    return output_path
+
+
 def get_room_instances(
     scene_info: Dict[str, Any],
     room_id: int,
@@ -797,6 +832,9 @@ def main() -> None:
     parser.add_argument("--data-dir", type=str, default=str(DEFAULT_DATA_DIR), help="HM3D 数据根目录")
     parser.add_argument("--num-points", type=int, default=2048, help="点云采样数量（仅在没有直接点云时使用）")
     parser.add_argument("--output", type=str, default=None, help="可选：输出 JSON 文件路径")
+    parser.add_argument("--pointcloud-format", choices=["ply", "xyz"], default="ply", help="instance 查询时点云文件格式")
+    parser.add_argument("--pointcloud-output", type=str, default=None, help="可选：instance 查询时点云输出路径")
+    parser.add_argument("--print-json", action="store_true", help="可选：将 JSON 结果打印到终端（默认不打印）")
     args = parser.parse_args()
 
     result = extract_room_instances(
@@ -808,9 +846,9 @@ def main() -> None:
         num_points=args.num_points,
     )
 
-    # 标准输出便于管道处理或临时查看。
     payload = json.dumps(result, ensure_ascii=False, indent=2)
-    print(payload)
+    if args.print_json:
+        print(payload)
 
     if args.output:
         output_path = Path(args.output)
@@ -827,7 +865,20 @@ def main() -> None:
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(payload)
 
-    print(f"\n[OK] 结果已保存到: {output_path}")
+    point_cloud_saved_path = None
+    if args.instance_id is not None:
+        point_cloud = result.get("point_cloud", {}) if isinstance(result, dict) else {}
+        points = point_cloud.get("points", []) if isinstance(point_cloud, dict) else []
+        if args.pointcloud_output:
+            pc_path = Path(args.pointcloud_output)
+        else:
+            pc_ext = ".ply" if args.pointcloud_format == "ply" else ".xyz"
+            pc_path = output_path.with_suffix(pc_ext)
+        point_cloud_saved_path = _write_point_cloud_file(points, pc_path, fmt=args.pointcloud_format)
+
+    print(f"[OK] JSON 结果已保存到: {output_path}")
+    if point_cloud_saved_path is not None:
+        print(f"[OK] 点云文件已保存到: {point_cloud_saved_path}")
 
 
 if __name__ == "__main__":
