@@ -155,8 +155,10 @@ def _add_bbox_lines(server: viser.ViserServer, name: str, bbox: Dict[str, Any], 
     if np.allclose(min_pt, max_pt):
         return
     corners, edges = _make_box_edges(min_pt, max_pt)
-    seg_points = corners[edges].reshape(-1, 3)
-    seg_colors = np.tile(np.asarray(color, dtype=np.uint8)[None, :], (len(seg_points), 1))
+    # viser expects line segments with shape (N, 2, 3).
+    seg_points = corners[edges]
+    seg_colors_segment = np.tile(np.asarray(color, dtype=np.uint8)[None, :], (len(edges), 1))
+    seg_colors_vertex = np.tile(np.asarray(color, dtype=np.uint8)[None, None, :], (len(edges), 2, 1))
     try:
         server.scene.add_line_segments(
             name=name,
@@ -165,26 +167,35 @@ def _add_bbox_lines(server: viser.ViserServer, name: str, bbox: Dict[str, Any], 
             line_width=2.0,
         )
         return
-    except TypeError:
+    except (TypeError, ValueError):
         pass
     try:
         server.scene.add_line_segments(
             name=name,
             points=seg_points,
-            colors=seg_colors,
+            colors=seg_colors_segment,
             line_width=2.0,
         )
         return
-    except TypeError:
+    except (TypeError, ValueError):
         pass
     try:
         server.scene.add_line_segments(
             name=name,
             points=seg_points,
-            colors=seg_colors,
+            colors=seg_colors_vertex,
         )
         return
-    except TypeError:
+    except (TypeError, ValueError):
+        pass
+    try:
+        server.scene.add_line_segments(
+            name=name,
+            points=seg_points,
+            colors=seg_colors_segment,
+        )
+        return
+    except (TypeError, ValueError):
         pass
     # Last fallback: no color options.
     server.scene.add_line_segments(name=name, points=seg_points)
