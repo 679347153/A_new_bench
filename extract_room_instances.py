@@ -46,6 +46,7 @@ import argparse
 import csv
 import io
 import json
+import math
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -852,11 +853,102 @@ def _extract_point_cloud_from_semantic_mesh_by_bbox(
     return _sample_points_from_triangles(merged_vertices, merged_faces, num_points), stats
 
 
-def _sample_points_on_aabb(min_pt: List[float], max_pt: List[float], num_points: int) -> np.ndarray:
-    """基于 AABB 表面采样一个近似点云。
+def _convex_hull_2d(points_xy: np.ndarray) -> np.ndarray:
+    """二维点集凸包（Andrew monotone chain），返回逆时针顶点序列。"""
+    pts = np.asarray(points_xy, dtype=np.float64)
+    if pts.ndim != 2 or pts.shape[1] != 2 or len(pts) == 0:
+        return np.zeros((0, 2), dtype=np.float32)
 
-    这是点云回退策略：当无法从底层语义对象直接提取点云时，脚本会用该房间/instance
-    的包围盒表面生成一组采样点，用来提供可读、可下游处理的几何近似结果。
+    order = np.lexsort((pts[:, 1], pts[:, 0]))
+    pts = pts[order]
+
+    def cross(o: np.ndarray, a: np.ndarray, b: np.ndarray) -> float:
+        return float((a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]))
+
+    lower: List[np.ndarray] = []
+    for p in pts:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], p) <= 0.0:
+            lower.pop()
+        lower.append(p)
+
+    upper: List[np.ndarray] = []
+    for p in reversed(pts):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], p) <= 0.0:
+            upper.pop()
+        upper.append(p)
+
+    hull = np.asarray(lower[:-1] + upper[:-1], dtype=np.float32)
+    if len(hull) == 0:
+        return np.zeros((0, 2), dtype=np.float32)
+    return hull
+
+
+def _fit_weighted_plane(points: np.ndarray, weights: np.ndarray) -> Tuple[np.ndarray, float]:
+    """加权最小二乘平面拟合，返回单位法向量 n 与偏置 d（n·x + d = 0）。"""
+    pts = np.asarray(points, dtype=np.float64)
+    w = np.asarray(weights, dtype=np.float64).reshape(-1)
+    w = np.clip(w, 1e-8, None)
+    w = w / np.sum(w)
+
+    center = np.sum(pts * w[:, None], axis=0)
+    x = pts - center[None, :]
+    cov = (x * w[:, None]).T @ x
+    eigvals, eigvecs = np.linalg.eigh(cov)
+    normal = eigvecs[:, int(np.argmin(eigvals))]
+    normal = normal / max(float(np.linalg.norm(normal)), 1e-8)
+    if float(normal[1]) < 0.0:
+        normal = -normal
+    d = -float(np.dot(normal, center))
+    return normal.astype(np.float32), d
+
+
+def _sample_points_in_convex_polygon_2d(hull_xy: np.ndarray, num_points: int) -> np.ndarray:
+    """在二维凸多边形内部均匀采样。"""
+    hull = np.asarray(hull_xy, dtype=np.float32)
+    if hull.ndim != 2 or hull.shape[1] != 2 or len(hull) < 3:
+        return np.zeros((0, 2), dtype=np.float32)
+
+    center = np.mean(hull, axis=0)
+    triangles = []
+    areas = []
+    for i in range(len(hull)):
+        a = hull[i]
+        b = hull[(i + 1) % len(hull)]
+        area = abs(float((a[0] - center[0]) * (b[1] - center[1]) - (a[1] - center[1]) * (b[0] - center[0]))) * 0.5
+        if area > 1e-12:
+            triangles.append((center, a, b))
+            areas.append(area)
+
+    if not triangles:
+        return np.zeros((0, 2), dtype=np.float32)
+
+    probs = np.asarray(areas, dtype=np.float64)
+    probs = probs / np.sum(probs)
+    count = max(int(num_points), 1)
+    rng = np.random.default_rng(42)
+    tri_ids = rng.choice(len(triangles), size=count, p=probs)
+
+    out = np.zeros((count, 2), dtype=np.float32)
+    for i, tid in enumerate(tri_ids):
+        c, a, b = triangles[int(tid)]
+        r1 = float(rng.random())
+        r2 = float(rng.random())
+        s = math.sqrt(r1)
+        w0 = 1.0 - s
+        w1 = s * (1.0 - r2)
+        w2 = s * r2
+        out[i] = (w0 * c + w1 * a + w2 * b).astype(np.float32)
+    return out
+
+
+def _sample_points_on_aabb(min_pt: List[float], max_pt: List[float], num_points: int) -> np.ndarray:
+    """EM 平面检测 + ConvexProjectedHull 提取 AABB 最上层表面点。
+
+    与旧版“六面均匀采样”不同，这里只提取最上层可放置平面：
+    1) 先生成 AABB 六个面的候选点。
+    2) 用 EM 风格的加权迭代拟合“上层平面”（偏置高点、抑制侧面）。
+    3) 将 inlier 投影到该平面，计算二维凸包（逆时针）。
+    4) 在凸包内部均匀采样并回投到 3D。
     """
     min_arr = np.asarray(min_pt, dtype=np.float32)
     max_arr = np.asarray(max_pt, dtype=np.float32)
@@ -872,28 +964,88 @@ def _sample_points_on_aabb(min_pt: List[float], max_pt: List[float], num_points:
     ], dtype=np.float64)
     face_probs = face_areas / face_areas.sum()
 
+    # 候选点数量略大于目标数量，给 EM 拟合留足空间。
+    cand_count = max(int(num_points) * 6, 1200)
     rng = np.random.default_rng(42)
-    face_ids = rng.choice(6, size=max(int(num_points), 1), p=face_probs)
-    points = np.empty((len(face_ids), 3), dtype=np.float32)
+    face_ids = rng.choice(6, size=cand_count, p=face_probs)
+    candidates = np.empty((len(face_ids), 3), dtype=np.float32)
 
     for idx, face_id in enumerate(face_ids):
-        u = rng.random()
-        v = rng.random()
-
+        u = float(rng.random())
+        v = float(rng.random())
         if face_id == 0:
-            points[idx] = [min_arr[0], min_arr[1] + u * extent[1], min_arr[2] + v * extent[2]]
+            candidates[idx] = [min_arr[0], min_arr[1] + u * extent[1], min_arr[2] + v * extent[2]]
         elif face_id == 1:
-            points[idx] = [max_arr[0], min_arr[1] + u * extent[1], min_arr[2] + v * extent[2]]
+            candidates[idx] = [max_arr[0], min_arr[1] + u * extent[1], min_arr[2] + v * extent[2]]
         elif face_id == 2:
-            points[idx] = [min_arr[0] + u * extent[0], min_arr[1], min_arr[2] + v * extent[2]]
+            candidates[idx] = [min_arr[0] + u * extent[0], min_arr[1], min_arr[2] + v * extent[2]]
         elif face_id == 3:
-            points[idx] = [min_arr[0] + u * extent[0], max_arr[1], min_arr[2] + v * extent[2]]
+            candidates[idx] = [min_arr[0] + u * extent[0], max_arr[1], min_arr[2] + v * extent[2]]
         elif face_id == 4:
-            points[idx] = [min_arr[0] + u * extent[0], min_arr[1] + v * extent[1], min_arr[2]]
+            candidates[idx] = [min_arr[0] + u * extent[0], min_arr[1] + v * extent[1], min_arr[2]]
         else:
-            points[idx] = [min_arr[0] + u * extent[0], min_arr[1] + v * extent[1], max_arr[2]]
+            candidates[idx] = [min_arr[0] + u * extent[0], min_arr[1] + v * extent[1], max_arr[2]]
 
-    return np.round(points, 4)
+    # EM 风格迭代：E-step 计算权重，M-step 拟合平面。
+    normal = np.asarray([0.0, 1.0, 0.0], dtype=np.float32)
+    d = -float(np.dot(normal, np.asarray([0.0, max_arr[1], 0.0], dtype=np.float32)))
+    sigma = max(float(np.linalg.norm(extent)) * 0.04, 1e-3)
+    y_ref = float(np.percentile(candidates[:, 1], 80.0))
+    y_scale = max(float(extent[1]) * 0.25, 1e-3)
+
+    for _ in range(12):
+        signed_dist = candidates @ normal + d
+        plane_w = np.exp(-0.5 * (signed_dist / sigma) ** 2)
+        # 让更高的点权重更大，促使拟合“上层”平面。
+        top_w = 1.0 / (1.0 + np.exp(-(candidates[:, 1] - y_ref) / y_scale))
+        weights = plane_w * top_w
+        if float(np.sum(weights)) < 1e-8:
+            break
+        normal, d = _fit_weighted_plane(candidates, weights)
+        signed_dist = candidates @ normal + d
+        sigma = max(float(np.sqrt(np.sum(weights * (signed_dist ** 2)) / np.sum(weights))), 1e-4)
+
+    # 取拟合平面 inliers。
+    dist = np.abs(candidates @ normal + d)
+    inlier_th = max(float(np.linalg.norm(extent)) * 0.015, 0.004)
+    inliers = candidates[dist <= inlier_th]
+    if len(inliers) < 16:
+        # inlier 过少时回退到上表面矩形采样。
+        pts = np.empty((max(int(num_points), 1), 3), dtype=np.float32)
+        for i in range(len(pts)):
+            u = float(rng.random())
+            v = float(rng.random())
+            pts[i] = [min_arr[0] + u * extent[0], max_arr[1], min_arr[2] + v * extent[2]]
+        return np.round(pts, 4)
+
+    # 构建平面局部坐标，并投影 inliers。
+    helper = np.asarray([0.0, 0.0, 1.0], dtype=np.float32)
+    if abs(float(np.dot(helper, normal))) > 0.9:
+        helper = np.asarray([1.0, 0.0, 0.0], dtype=np.float32)
+    axis_u = np.cross(normal, helper)
+    axis_u = axis_u / max(float(np.linalg.norm(axis_u)), 1e-8)
+    axis_v = np.cross(normal, axis_u)
+    axis_v = axis_v / max(float(np.linalg.norm(axis_v)), 1e-8)
+    plane_center = np.mean(inliers, axis=0)
+
+    rel = inliers - plane_center[None, :]
+    uv = np.stack([rel @ axis_u, rel @ axis_v], axis=1).astype(np.float32)
+    hull_uv = _convex_hull_2d(uv)
+    if len(hull_uv) < 3:
+        pts = np.empty((max(int(num_points), 1), 3), dtype=np.float32)
+        for i in range(len(pts)):
+            u = float(rng.random())
+            v = float(rng.random())
+            pts[i] = [min_arr[0] + u * extent[0], max_arr[1], min_arr[2] + v * extent[2]]
+        return np.round(pts, 4)
+
+    sampled_uv = _sample_points_in_convex_polygon_2d(hull_uv, max(int(num_points), 1))
+    points = (
+        plane_center[None, :]
+        + sampled_uv[:, 0:1] * axis_u[None, :]
+        + sampled_uv[:, 1:2] * axis_v[None, :]
+    )
+    return np.round(points.astype(np.float32), 4)
 
 
 def _hex_to_rgb01(color_hex: str) -> Optional[np.ndarray]:
@@ -1318,7 +1470,7 @@ def get_instance_point_cloud(
                 max_pt = obb_fallback.get("max", max_pt)
                 points = _sample_points_on_aabb(min_pt, max_pt, num_points)
                 _warn(
-                    f"instance 的 AABB 无效，已回退为 OBB->AABB 近似采样，采样点数={int(num_points)}，"
+                    f"instance 的 AABB 无效，已回退为 OBB->AABB + EM 顶面提取采样，采样点数={int(num_points)}，"
                     "source=sampled_obb_fallback。"
                 )
                 generation_trace.append(f"fallback=sampled_obb_fallback,num_points={int(num_points)}")
@@ -1333,7 +1485,7 @@ def get_instance_point_cloud(
             # 回退到包围盒表面采样，生成一个可用的近似点云。
             points = _sample_points_on_aabb(min_pt, max_pt, num_points)
             _warn(
-                f"最终输出由 AABB 表面采样生成，采样点数={int(num_points)}，"
+                f"最终输出由 AABB + EM 顶面提取采样生成，采样点数={int(num_points)}，"
                 "source=sampled_aabb_surface。"
             )
             generation_trace.append(f"fallback=sampled_aabb_surface,num_points={int(num_points)}")
@@ -1356,9 +1508,9 @@ def get_instance_point_cloud(
                     else "sampled_aabb_surface"
                 ),
                 "details": (
-                    "fallback sampling from OBB-derived AABB because instance AABB is invalid"
+                    "fallback top-surface extraction from OBB-derived AABB by EM plane detection"
                     if any("sampled_obb_fallback" in t for t in generation_trace)
-                    else "fallback sampling from instance AABB surfaces because direct semantic point cloud is unavailable"
+                    else "fallback top-surface extraction from instance AABB by EM plane detection"
                 ),
                 "trace": generation_trace,
                 **({"mesh_crop_debug": mesh_crop_stats} if debug_mesh_crop else {}),
