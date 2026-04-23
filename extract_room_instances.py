@@ -48,6 +48,11 @@ try:
 except ImportError:
     trimesh = None
 
+try:
+    import trimesh  # type: ignore[import-not-found]
+except ImportError:
+    trimesh = None
+
 
 DEFAULT_DATA_DIR = Path(__file__).resolve().parent / "hm3d"
 DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent / "results" / "room_instances"
@@ -680,6 +685,123 @@ def _sample_points_on_aabb(min_pt: List[float], max_pt: List[float], num_points:
     return np.round(points, 4)
 
 
+def _hex_to_rgb01(color_hex: str) -> Optional[np.ndarray]:
+    """将 '#RRGGBB' 或 'RRGGBB' 转为 [0,1] 的 RGB。"""
+    if not color_hex:
+        return None
+    text = str(color_hex).strip().lstrip("#")
+    if len(text) != 6:
+        return None
+    try:
+        rgb = [int(text[i:i + 2], 16) / 255.0 for i in (0, 2, 4)]
+        return np.asarray(rgb, dtype=np.float32)
+    except Exception:
+        return None
+
+
+def _extract_instance_mesh_points_by_semantic_color(
+    scene_name: str,
+    instance: Dict[str, Any],
+    data_dir: Path,
+    num_points: int,
+) -> Optional[np.ndarray]:
+    """从 stage mesh 中按 semantic 颜色提取实例表面点云。
+
+    适用场景：habitat-sim 未暴露对象直接顶点/点云字段时，
+    通过 semantic.txt 中的 color_hex 与 mesh 面颜色匹配，提取更接近实体表面的点。
+    """
+    if trimesh is None:
+        return None
+
+    scene_paths = resolve_scene_paths(scene_name, require_semantic=True, root=data_dir)
+    if scene_paths is None or not scene_paths.stage_glb.is_file():
+        return None
+
+    color_hex = str(instance.get("color_hex", "") or "").strip()
+    target_rgb = _hex_to_rgb01(color_hex)
+    if target_rgb is None:
+        return None
+
+    try:
+        loaded = trimesh.load(scene_paths.stage_glb, force="scene")
+    except Exception:
+        return None
+
+    geometries = getattr(loaded, "geometry", None)
+    if not geometries:
+        return None
+
+    matched_meshes: List[Any] = []
+    face_counts: List[int] = []
+
+    for geom in geometries.values():
+        faces = np.asarray(getattr(geom, "faces", []), dtype=np.int64)
+        vertices = np.asarray(getattr(geom, "vertices", []), dtype=np.float32)
+        if faces.ndim != 2 or faces.shape[1] != 3 or len(faces) == 0 or len(vertices) == 0:
+            continue
+
+        visual = getattr(geom, "visual", None)
+        face_colors = None
+        if visual is not None and hasattr(visual, "face_colors"):
+            try:
+                face_colors = np.asarray(visual.face_colors, dtype=np.float32)
+            except Exception:
+                face_colors = None
+
+        if face_colors is None or face_colors.ndim != 2 or face_colors.shape[1] < 3:
+            continue
+
+        rgb = face_colors[:, :3] / 255.0
+        dist = np.linalg.norm(rgb - target_rgb[None, :], axis=1)
+        # 语义颜色通常是离散色，阈值设小一点，避免混入其他物体。
+        mask = dist <= 0.03
+        if not np.any(mask):
+            continue
+
+        selected_faces = faces[mask]
+        if len(selected_faces) == 0:
+            continue
+
+        try:
+            sub = trimesh.Trimesh(vertices=vertices, faces=selected_faces, process=False)
+        except Exception:
+            continue
+        if len(sub.faces) == 0 or len(sub.vertices) == 0:
+            continue
+
+        matched_meshes.append(sub)
+        face_counts.append(int(len(sub.faces)))
+
+    if not matched_meshes:
+        return None
+
+    total_faces = max(int(sum(face_counts)), 1)
+    sampled_chunks: List[np.ndarray] = []
+
+    for idx, sub in enumerate(matched_meshes):
+        ratio = float(face_counts[idx]) / float(total_faces)
+        k = max(int(round(ratio * float(max(num_points, 1)))), 32)
+        try:
+            pts = np.asarray(sub.sample(k), dtype=np.float32)
+        except Exception:
+            try:
+                pts = np.asarray(sub.vertices, dtype=np.float32)
+            except Exception:
+                pts = np.zeros((0, 3), dtype=np.float32)
+        if pts.ndim == 2 and pts.shape[1] >= 3 and len(pts) > 0:
+            sampled_chunks.append(pts[:, :3])
+
+    if not sampled_chunks:
+        return None
+
+    points = np.concatenate(sampled_chunks, axis=0)
+    if len(points) > max(int(num_points), 1):
+        rng = np.random.default_rng(42)
+        keep = rng.choice(len(points), size=int(num_points), replace=False)
+        points = points[keep]
+    return np.round(points, 4)
+
+
 def _summarize_point_cloud(points: np.ndarray, source: str) -> Dict[str, Any]:
     """把点云压缩成一个便于落盘和调试的摘要结构。"""
     if points.size == 0:
@@ -798,7 +920,8 @@ def get_instance_point_cloud(
     处理顺序：
     1. 从 scene_info 中定位 instance 的 AABB 和基础元数据。
     2. 如果 habitat-sim 可用，尝试从语义对象直接读取点云或顶点。
-    3. 如果直接读取失败，则用 AABB 表面采样生成近似点云。
+    3. 如果直接读取失败，尝试从 stage mesh 里按 semantic 颜色提取实例表面点云。
+    4. 如果仍失败，则用 AABB/OBB 表面采样生成近似点云。
     """
     scene_info = _load_scene_info(scene_name, data_dir)
     generation_trace: List[str] = [
@@ -879,21 +1002,46 @@ def get_instance_point_cloud(
                     }
                 _warn(
                     "habitat-sim 已定位到目标 instance，但未暴露可直接读取的点云/顶点字段，"
-                    "将回退为 AABB 表面采样点云。"
+                    "将先尝试语义 mesh 提取，再回退到包围盒采样。"
                 )
                 generation_trace.append("direct_point_cloud_unavailable")
             else:
                 _warn(
                     "habitat-sim 已初始化，但 semantic_scene.objects 中未找到目标 instance，"
-                    "将回退为 AABB 表面采样点云。"
+                    "将先尝试语义 mesh 提取，再回退到包围盒采样。"
                 )
                 generation_trace.append("semantic_object_not_found")
         else:
             _warn(
                 "habitat-sim 不可用或场景无法初始化，无法直接读取实例几何；"
-                "将回退为 AABB 表面采样点云。"
+                "将先尝试语义 mesh 提取，再回退到包围盒采样。"
             )
             generation_trace.append("simulator_unavailable")
+
+        mesh_points = _extract_instance_mesh_points_by_semantic_color(
+            scene_name=scene_name,
+            instance=instance,
+            data_dir=data_dir,
+            num_points=num_points,
+        )
+        if mesh_points is not None and len(mesh_points) > 0:
+            generation_trace.append("point_cloud_source=semantic_mesh_color")
+            _warn(
+                f"direct 点云不可用，已使用语义 mesh 颜色匹配提取实例表面点云，点数={int(len(mesh_points))}，"
+                "source=semantic_mesh_color。"
+            )
+            return {
+                "scene_name": scene_name,
+                "instance": instance,
+                "point_cloud": _summarize_point_cloud(mesh_points, "semantic_mesh_color"),
+                "point_cloud_generation": {
+                    "method": "semantic_mesh_color",
+                    "details": "instance surface points sampled from stage mesh faces matched by semantic color",
+                    "trace": generation_trace,
+                },
+            }
+
+        generation_trace.append("semantic_mesh_color_unavailable")
 
         bbox = instance.get("aabb") or {}
         min_pt = bbox.get("min", [0.0, 0.0, 0.0])
@@ -935,9 +1083,11 @@ def get_instance_point_cloud(
             "instance": instance,
             "point_cloud": _summarize_point_cloud(
                 points,
-                "sampled_obb_fallback"
-                if any("sampled_obb_fallback" in t for t in generation_trace)
-                else "sampled_aabb_surface",
+                (
+                    "sampled_obb_fallback"
+                    if any("sampled_obb_fallback" in t for t in generation_trace)
+                    else "sampled_aabb_surface"
+                ),
             ),
             "point_cloud_generation": {
                 "method": (
