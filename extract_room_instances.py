@@ -161,21 +161,75 @@ def _load_scene_info(scene_name: str, data_dir: Path, scene_info_path: Optional[
         candidates.append(scene_info_path)
 
     cwd = Path.cwd()
+    script_dir = Path(__file__).resolve().parent
+    scene_info_name = f"{scene_name}_scene_info.json"
+
+    # Common export layouts:
+    # 1) <base>/scene_info_export/<scene>_scene_info.json
+    # 2) <base>/scene_info_export/<scene>/<scene>_scene_info.json
+    # 3) <base>/results/scene_info/<scene>/<scene>_scene_info.json
+    # 4) <base>/<scene>_scene_info.json
+    bases = [
+        cwd,
+        script_dir,
+        data_dir,
+        data_dir.parent,
+        cwd / "hm3d",
+        script_dir / "hm3d",
+    ]
+
+    for base in bases:
+        candidates.extend(
+            [
+                base / scene_info_name,
+                base / "scene_info_export" / scene_info_name,
+                base / "scene_info_export" / scene_name / scene_info_name,
+                base / "results" / "scene_info" / scene_name / scene_info_name,
+                base / scene_name / scene_info_name,
+            ]
+        )
+
+    # Keep backward-compatible explicit paths.
     candidates.extend([
-        cwd / f"{scene_name}_scene_info.json",
-        cwd / "results" / "scene_info" / scene_name / f"{scene_name}_scene_info.json",
-        data_dir / "scene_info_export" / f"{scene_name}_scene_info.json",
-        data_dir / "results" / "scene_info" / scene_name / f"{scene_name}_scene_info.json",
-        data_dir / scene_name / f"{scene_name}_scene_info.json",
+        cwd / scene_info_name,
+        cwd / "results" / "scene_info" / scene_name / scene_info_name,
+        data_dir / "scene_info_export" / scene_info_name,
+        data_dir / "results" / "scene_info" / scene_name / scene_info_name,
+        data_dir / scene_name / scene_info_name,
     ])
 
+    # De-duplicate while preserving order.
+    seen = set()
+    dedup_candidates: List[Path] = []
     for candidate in candidates:
+        key = str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        dedup_candidates.append(candidate)
+
+    for candidate in dedup_candidates:
         if candidate.is_file():
             with open(candidate, "r", encoding="utf-8") as f:
                 return json.load(f)
 
+    # Last fallback: recursive search in likely roots.
+    search_roots = [cwd, script_dir, data_dir, data_dir.parent]
+    for root in search_roots:
+        if not root.exists() or not root.is_dir():
+            continue
+        for found in root.rglob(scene_info_name):
+            if found.is_file():
+                with open(found, "r", encoding="utf-8") as f:
+                    return json.load(f)
+
+    tried = "\n".join(f"  - {p}" for p in dedup_candidates)
     raise FileNotFoundError(
-        f"找不到 scene_info JSON: {scene_name}. 请用 --scene-info-path 显式指定，或先运行 export_scene_info.py。"
+        "找不到 scene_info JSON: "
+        f"{scene_name}.\n"
+        "已尝试以下路径:\n"
+        f"{tried}\n"
+        "你可以通过 --scene-info-path 显式指定，或先运行 export_scene_info.py。"
     )
 
 
