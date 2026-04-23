@@ -44,6 +44,11 @@ try:
 except ImportError:
     trimesh = None
 
+try:
+    import habitat_sim  # type: ignore[import-not-found]
+except ImportError:
+    habitat_sim = None
+
 
 def _as_list3(value: Any) -> Optional[List[float]]:
     if value is None:
@@ -63,6 +68,38 @@ def _as_np3(value: Any) -> np.ndarray:
     """将输入转为 shape=(3,) 的 float32 numpy 向量。"""
     vec = _as_list3(value) or [0.0, 0.0, 0.0]
     return np.asarray(vec, dtype=np.float32).reshape(3)
+
+
+def _get_attr_or_call(obj: Any, name: str) -> Any:
+    if obj is None or not hasattr(obj, name):
+        return None
+    val = getattr(obj, name)
+    try:
+        return val() if callable(val) else val
+    except Exception:
+        return None
+
+
+def _as_matrix4(value: Any) -> Optional[np.ndarray]:
+    if value is None:
+        return None
+    try:
+        arr = np.asarray(value, dtype=np.float32)
+        if arr.shape == (4, 4):
+            return arr
+    except Exception:
+        pass
+    try:
+        rows = []
+        for i in range(4):
+            row = [float(value[i][j]) for j in range(4)]
+            rows.append(row)
+        arr = np.asarray(rows, dtype=np.float32)
+        if arr.shape == (4, 4):
+            return arr
+    except Exception:
+        pass
+    return None
 
 
 def _bbox_to_corners(bbox: Dict[str, Any]) -> Tuple[np.ndarray, np.ndarray]:
@@ -189,6 +226,37 @@ def _add_bbox_lines(server: viser.ViserServer, name: str, bbox: Dict[str, Any], 
     server.scene.add_line_segments(name=name, points=seg_points)
 
 
+def _add_axis_lines(server: viser.ViserServer, name: str, length: float = 1.5) -> None:
+    """显式绘制 HM3D 基坐标轴线（X=红, Y=绿, Z=蓝）。"""
+    origin = np.asarray([0.0, 0.0, 0.0], dtype=np.float32)
+    x_end = np.asarray([length, 0.0, 0.0], dtype=np.float32)
+    y_end = np.asarray([0.0, length, 0.0], dtype=np.float32)
+    z_end = np.asarray([0.0, 0.0, length], dtype=np.float32)
+
+    segments = np.asarray([
+        [origin, x_end],
+        [origin, y_end],
+        [origin, z_end],
+    ], dtype=np.float32)
+    colors = np.asarray([
+        [[255, 0, 0], [255, 0, 0]],
+        [[0, 255, 0], [0, 255, 0]],
+        [[0, 0, 255], [0, 0, 255]],
+    ], dtype=np.uint8)
+
+    try:
+        server.scene.add_line_segments(name=name, points=segments, colors=colors, line_width=3.0)
+        return
+    except Exception:
+        pass
+    try:
+        server.scene.add_line_segments(name=name, points=segments, colors=colors)
+        return
+    except Exception:
+        pass
+    server.scene.add_line_segments(name=name, points=segments)
+
+
 def _add_axes(server: viser.ViserServer) -> None:
     server.scene.add_frame(
         "world_frame",
@@ -196,6 +264,14 @@ def _add_axes(server: viser.ViserServer) -> None:
         position=np.asarray([0.0, 0.0, 0.0], dtype=np.float32),
         show_axes=True,
     )
+    # 明确标注 HM3D 基坐标：默认与 world_frame 重合。
+    server.scene.add_frame(
+        "hm3d_base_frame",
+        wxyz=np.asarray([1.0, 0.0, 0.0, 0.0], dtype=np.float32),
+        position=np.asarray([0.0, 0.0, 0.0], dtype=np.float32),
+        show_axes=True,
+    )
+    _add_axis_lines(server, name="hm3d_base_axes", length=1.8)
 
 
 def _add_point_cloud(server: viser.ViserServer, name: str, points: np.ndarray, color: Tuple[int, int, int]) -> None:
@@ -242,10 +318,19 @@ def _load_scene_mesh_if_available(server: viser.ViserServer, scene_name: str, da
         print(f"[Info] Scene mesh not found: {mesh_path}")
         return False
 
+    stage_transform = _get_habitat_stage_transform(scene_name=scene_name, data_dir=data_dir)
+
     try:
         mesh = trimesh.load(mesh_path, force="mesh")
         if mesh is None:
             return False
+        if stage_transform is not None:
+            try:
+                mesh = mesh.copy()
+                mesh.apply_transform(stage_transform)
+                print("[Info] Applied habitat stage transform to scene mesh for coordinate alignment.")
+            except Exception as exc:
+                print(f"[Warning] Failed to apply stage transform: {exc}")
         try:
             server.scene.add_mesh_trimesh(
                 name="scene_mesh",
@@ -269,6 +354,59 @@ def _load_scene_mesh_if_available(server: viser.ViserServer, scene_name: str, da
     except Exception as exc:
         print(f"[Warning] Failed to load scene mesh: {exc}")
         return False
+
+
+def _get_habitat_stage_transform(scene_name: str, data_dir: Path) -> Optional[np.ndarray]:
+    """尝试从 habitat-sim 读取场景舞台变换矩阵（若可用）。"""
+    if habitat_sim is None:
+        return None
+
+    scene_paths = resolve_scene_paths(scene_name, require_semantic=True, root=data_dir)
+    if scene_paths is None:
+        return None
+
+    sim = None
+    try:
+        sim_cfg = habitat_sim.SimulatorConfiguration()
+        sim_cfg.scene_dataset_config_file = str(scene_paths.dataset_config)
+        sim_cfg.scene_id = str(scene_paths.stage_glb)
+        sim_cfg.enable_physics = False
+        sim_cfg.gpu_device_id = 0
+        sim_cfg.load_semantic_mesh = True
+
+        sensor = habitat_sim.CameraSensorSpec()
+        sensor.uuid = "color"
+        sensor.sensor_type = habitat_sim.SensorType.COLOR
+        sensor.resolution = [16, 16]
+
+        agent_cfg = habitat_sim.agent.AgentConfiguration()
+        agent_cfg.sensor_specifications = [sensor]
+
+        cfg = habitat_sim.Configuration(sim_cfg, [agent_cfg])
+        sim = habitat_sim.Simulator(cfg)
+
+        # 常见路径：scene graph root node transformation。
+        graph = _get_attr_or_call(sim, "get_active_scene_graph")
+        if graph is not None:
+            root_node = _get_attr_or_call(graph, "get_root_node")
+            if root_node is None:
+                root_node = _get_attr_or_call(graph, "root_node")
+            transform = _get_attr_or_call(root_node, "transformation")
+            mat = _as_matrix4(transform)
+            if mat is not None:
+                return mat
+
+        # 如果拿不到，返回单位阵（表示不额外变换）。
+        return np.eye(4, dtype=np.float32)
+    except Exception as exc:
+        print(f"[Info] Cannot query habitat stage transform: {exc}")
+        return None
+    finally:
+        if sim is not None:
+            try:
+                sim.close()
+            except Exception:
+                pass
 
 
 def _pick_scene_name(data: Dict[str, Any], input_path: Path) -> Optional[str]:
