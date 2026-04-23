@@ -529,6 +529,7 @@ def get_instance_point_cloud(
     instance_id: int,
     data_dir: Path = DEFAULT_DATA_DIR,
     num_points: int = 2048,
+    instance_hint: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """获取单个 instance 的点云信息。
 
@@ -544,8 +545,34 @@ def get_instance_point_cloud(
     ]
     objects = scene_info.get("objects", []) or []
     instance = next((obj for obj in objects if int(obj.get("id", -1)) == int(instance_id)), None)
+
+    # 某些 scene_info 导出版本不包含 objects，或 objects 不完整：尝试从 habitat-sim 重建后再匹配。
     if instance is None:
-        raise KeyError(f"找不到 instance_id={instance_id}")
+        rebuilt_objects = _build_scene_objects_from_sim(scene_name=scene_name, data_dir=data_dir)
+        if rebuilt_objects:
+            generation_trace.append("rebuilt_objects_from_sim")
+            instance = next((obj for obj in rebuilt_objects if int(obj.get("id", -1)) == int(instance_id)), None)
+            if instance is not None:
+                objects = rebuilt_objects
+
+    # 如果上面仍未命中，但调用方已经在 room 内匹配到了该 instance，就直接使用该提示对象。
+    if instance is None and instance_hint is not None:
+        try:
+            if int(instance_hint.get("id", -1)) == int(instance_id):
+                instance = instance_hint
+                generation_trace.append("used_instance_hint")
+        except Exception:
+            pass
+
+    if instance is None:
+        available_ids = sorted({int(obj.get("id", -1)) for obj in objects if int(obj.get("id", -1)) >= 0})
+        preview = available_ids[:30]
+        suffix = "..." if len(available_ids) > 30 else ""
+        raise KeyError(
+            "找不到 instance_id="
+            f"{instance_id}. "
+            f"当前可用 instance_id 示例: {preview}{suffix}"
+        )
 
     sim = _load_sim(scene_name, data_dir)
     try:
@@ -651,6 +678,7 @@ def extract_room_instances(
             instance_id=instance_id,
             data_dir=data_dir,
             num_points=num_points,
+            instance_hint=matched,
         )
         point_cloud_report["room"] = room_report["room"]
         return point_cloud_report
