@@ -524,17 +524,28 @@ def _add_room_instances_overview(server: viser.ViserServer, data: Dict[str, Any]
                 )
 
 
-def _rotation_y(yaw_rad: float) -> np.ndarray:
-    c = float(np.cos(yaw_rad))
-    s = float(np.sin(yaw_rad))
-    return np.asarray(
-        [
-            [c, 0.0, s],
-            [0.0, 1.0, 0.0],
-            [-s, 0.0, c],
-        ],
-        dtype=np.float32,
+def _rotation_xyz_deg(rx_deg: float, ry_deg: float, rz_deg: float) -> np.ndarray:
+    """按 XYZ 欧拉角（度）构造旋转矩阵。"""
+    rx = float(np.deg2rad(rx_deg))
+    ry = float(np.deg2rad(ry_deg))
+    rz = float(np.deg2rad(rz_deg))
+
+    cx, sx = float(np.cos(rx)), float(np.sin(rx))
+    cy, sy = float(np.cos(ry)), float(np.sin(ry))
+    cz, sz = float(np.cos(rz)), float(np.sin(rz))
+
+    rot_x = np.asarray(
+        [[1.0, 0.0, 0.0], [0.0, cx, -sx], [0.0, sx, cx]], dtype=np.float32
     )
+    rot_y = np.asarray(
+        [[cy, 0.0, sy], [0.0, 1.0, 0.0], [-sy, 0.0, cy]], dtype=np.float32
+    )
+    rot_z = np.asarray(
+        [[cz, -sz, 0.0], [sz, cz, 0.0], [0.0, 0.0, 1.0]], dtype=np.float32
+    )
+
+    # 约定按 X->Y->Z 顺序作用（右乘向量时等价于 R = Rz * Ry * Rx）。
+    return (rot_z @ rot_y @ rot_x).astype(np.float32)
 
 
 def _mean_nn_distance_sq(src: np.ndarray, dst: np.ndarray, chunk: int = 256) -> float:
@@ -553,8 +564,8 @@ def _mean_nn_distance_sq(src: np.ndarray, dst: np.ndarray, chunk: int = 256) -> 
     return d2_sum / float(max(n, 1))
 
 
-def _transform_points(points: np.ndarray, rot: np.ndarray, trans: np.ndarray) -> np.ndarray:
-    return (points @ rot.T) + trans[None, :]
+def _transform_points(points: np.ndarray, rot: np.ndarray) -> np.ndarray:
+    return points @ rot.T
 
 
 def _bbox_corners(bbox: Dict[str, Any]) -> np.ndarray:
@@ -570,9 +581,9 @@ def _bbox_corners(bbox: Dict[str, Any]) -> np.ndarray:
     )
 
 
-def _transform_bbox_aabb(bbox: Dict[str, Any], rot: np.ndarray, trans: np.ndarray) -> Dict[str, Any]:
+def _transform_bbox_aabb(bbox: Dict[str, Any], rot: np.ndarray) -> Dict[str, Any]:
     corners = _bbox_corners(bbox)
-    tc = _transform_points(corners, rot, trans)
+    tc = _transform_points(corners, rot)
     min_pt = np.min(tc, axis=0)
     max_pt = np.max(tc, axis=0)
     center = (min_pt + max_pt) / 2.0
@@ -585,18 +596,17 @@ def _transform_bbox_aabb(bbox: Dict[str, Any], rot: np.ndarray, trans: np.ndarra
     }
 
 
-def _estimate_transform_by_grid(
+def _estimate_rotation_by_90deg(
     src_points: np.ndarray,
     dst_points: np.ndarray,
-    rounds: int = 3,
-    yaw_range_deg: float = 180.0,
-    yaw_step_deg: float = 30.0,
-    trans_range: float = 4.0,
-    trans_step: float = 1.0,
-) -> Tuple[np.ndarray, np.ndarray, float, float]:
-    """遍历法估计 src->dst 的刚体变换（绕Y旋转 + XYZ平移）。"""
+) -> Tuple[np.ndarray, Tuple[int, int, int], float]:
+    """遍历法估计 src->dst 的朝向变换（仅旋转，不平移）。
+
+    遍历集合：rx, ry, rz in {0, 90, 180, 270}，共 64 组。
+    评分时先对 src/dst 去中心，避免平移影响朝向匹配。
+    """
     if src_points.size == 0 or dst_points.size == 0:
-        return np.eye(3, dtype=np.float32), np.zeros(3, dtype=np.float32), 0.0, float("inf")
+        return np.eye(3, dtype=np.float32), (0, 0, 0), float("inf")
 
     rng = np.random.default_rng(0)
     src = src_points
@@ -606,45 +616,25 @@ def _estimate_transform_by_grid(
     if len(dst) > 12000:
         dst = dst[rng.choice(len(dst), size=12000, replace=False)]
 
-    src_center = np.mean(src, axis=0)
-    dst_center = np.mean(dst, axis=0)
+    src_centered = src - np.mean(src, axis=0, keepdims=True)
+    dst_centered = dst - np.mean(dst, axis=0, keepdims=True)
 
-    best_yaw_deg = 0.0
-    best_trans = (dst_center - src_center).astype(np.float32)
+    best_rot = np.eye(3, dtype=np.float32)
+    best_angles = (0, 0, 0)
     best_score = float("inf")
 
-    cur_yaw_range = float(yaw_range_deg)
-    cur_yaw_step = float(yaw_step_deg)
-    cur_trans_range = float(trans_range)
-    cur_trans_step = float(trans_step)
+    for rx in (0, 90, 180, 270):
+        for ry in (0, 90, 180, 270):
+            for rz in (0, 90, 180, 270):
+                rot = _rotation_xyz_deg(rx, ry, rz)
+                moved = _transform_points(src_centered, rot)
+                score = _mean_nn_distance_sq(moved, dst_centered)
+                if score < best_score:
+                    best_score = score
+                    best_rot = rot
+                    best_angles = (rx, ry, rz)
 
-    for _ in range(max(rounds, 1)):
-        yaw_values = np.arange(best_yaw_deg - cur_yaw_range, best_yaw_deg + cur_yaw_range + 1e-6, cur_yaw_step)
-        tx_values = np.arange(best_trans[0] - cur_trans_range, best_trans[0] + cur_trans_range + 1e-6, cur_trans_step)
-        ty_values = np.arange(best_trans[1] - cur_trans_range, best_trans[1] + cur_trans_range + 1e-6, cur_trans_step)
-        tz_values = np.arange(best_trans[2] - cur_trans_range, best_trans[2] + cur_trans_range + 1e-6, cur_trans_step)
-
-        for yaw_deg in yaw_values:
-            rot = _rotation_y(np.deg2rad(yaw_deg))
-            src_rot = src @ rot.T
-            for tx in tx_values:
-                for ty in ty_values:
-                    for tz in tz_values:
-                        trans = np.asarray([tx, ty, tz], dtype=np.float32)
-                        moved = src_rot + trans[None, :]
-                        score = _mean_nn_distance_sq(moved, dst)
-                        if score < best_score:
-                            best_score = score
-                            best_yaw_deg = float(yaw_deg)
-                            best_trans = trans
-
-        cur_yaw_range = max(cur_yaw_range * 0.45, 2.0)
-        cur_yaw_step = max(cur_yaw_step * 0.5, 1.0)
-        cur_trans_range = max(cur_trans_range * 0.45, 0.2)
-        cur_trans_step = max(cur_trans_step * 0.5, 0.05)
-
-    best_rot = _rotation_y(np.deg2rad(best_yaw_deg))
-    return best_rot, best_trans, best_yaw_deg, best_score
+    return best_rot, best_angles, best_score
 
 
 def build_visualization(
@@ -673,26 +663,25 @@ def build_visualization(
         if auto_align_grid and scene_name:
             mesh_vertices = _get_scene_mesh_vertices(scene_name=scene_name, data_dir=data_dir)
             if mesh_vertices.size > 0:
-                print("[Info] Running traversal search for coordinate transform (yaw+translation)...")
-                rot, trans, yaw_deg, score = _estimate_transform_by_grid(
+                print("[Info] Running orientation-only traversal (Rx/Ry/Rz in 90-degree steps)...")
+                rot, angles, score = _estimate_rotation_by_90deg(
                     src_points=points,
                     dst_points=mesh_vertices,
                 )
-                points = _transform_points(points, rot, trans)
+                points = _transform_points(points, rot)
                 print(
-                    "[Info] Estimated transform: "
-                    f"yaw_deg={yaw_deg:.3f}, "
-                    f"translation=({trans[0]:.3f}, {trans[1]:.3f}, {trans[2]:.3f}), "
+                    "[Info] Estimated orientation: "
+                    f"rx={angles[0]} deg, ry={angles[1]} deg, rz={angles[2]} deg, "
                     f"mean_nn_dist={np.sqrt(max(score, 0.0)):.4f}"
                 )
 
-                # 同步变换包围盒，确保点云与框体仍一致。
+                # 同步旋转包围盒，确保点云与框体仍一致。
                 room = data.get("room")
                 if isinstance(room, dict) and isinstance(room.get("bounding_box"), dict):
-                    room["bounding_box"] = _transform_bbox_aabb(room["bounding_box"], rot, trans)
+                    room["bounding_box"] = _transform_bbox_aabb(room["bounding_box"], rot)
                 instance = data.get("instance")
                 if isinstance(instance, dict) and isinstance(instance.get("aabb"), dict):
-                    instance["aabb"] = _transform_bbox_aabb(instance["aabb"], rot, trans)
+                    instance["aabb"] = _transform_bbox_aabb(instance["aabb"], rot)
             else:
                 print("[Info] Auto-align skipped: scene mesh vertices unavailable.")
 
