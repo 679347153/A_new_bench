@@ -2,9 +2,50 @@
 from __future__ import annotations
 
 """
-Place objects on assigned receptacle instances and export layout JSON.
+Physics-aware placement on assigned receptacle instances (File2).
 
-This file is designed to be called by assign_objects_to_receptacle_instances.py.
+Overview
+--------
+This script receives object->instance assignments and executes automatic placement:
+1) Build target surface index from scene-level receptacle output.
+2) For each object, sample candidate points on target instance top surface.
+3) Spawn object at `surface_y + spawn_height` (default 0.3m).
+4) Enforce pairwise minimum distance constraint.
+5) If habitat-sim is available:
+   - instantiate rigid body from object template
+   - step physics for settling
+   - reject candidate on contact collision with already placed objects
+6) Export final layout json.
+
+Collision Policy
+----------------
+- Geometric pre-check: minimum XZ distance between object centers.
+- Physics contact check: reject candidate if new object contacts existing objects.
+- Retry policy: iterate multiple surface points per object (`max_trials_per_object`).
+
+Execution Guide
+---------------
+1) Direct invocation with prepared assignment plan:
+   python place_objects_on_instances.py \
+     --scene 00824-Dd4bFSTQ8gi \
+     --assignment-plan results/object_instance_assignments/00824-Dd4bFSTQ8gi/00824-Dd4bFSTQ8gi_object_instance_plan.json \
+     --surfaces-json results/receptacle_queries/00824-Dd4bFSTQ8gi/00824-Dd4bFSTQ8gi_receptacle_surfaces_all_rooms.json
+
+2) Stricter spacing + more retries:
+   python place_objects_on_instances.py \
+     --scene 00824-Dd4bFSTQ8gi \
+     --assignment-plan <plan_json> \
+     --surfaces-json <surfaces_json> \
+     --min-distance 0.3 \
+     --max-trials-per-object 60 \
+     --settle-steps 80
+
+3) Keep requested spawn policy explicit:
+   python place_objects_on_instances.py \
+     --scene 00824-Dd4bFSTQ8gi \
+     --assignment-plan <plan_json> \
+     --surfaces-json <surfaces_json> \
+     --spawn-height 0.3
 """
 
 import argparse
@@ -33,6 +74,7 @@ except Exception:
 
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
+    """Best-effort float conversion with deterministic fallback."""
     try:
         return float(value)
     except Exception:
@@ -40,6 +82,11 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
 
 
 def _get_profile(model_id: str) -> Dict[str, float]:
+    """
+    Resolve object collision profile from existing project heuristics.
+
+    Falls back to conservative defaults when no profile is found.
+    """
     if infer_object_profile is not None:
         try:
             profile = infer_object_profile(model_id)
@@ -54,6 +101,11 @@ def _get_profile(model_id: str) -> Dict[str, float]:
 
 
 def _resolve_template_handle(template_mgr: Any, model_id: str) -> Optional[str]:
+    """
+    Resolve habitat object template handle from flexible model id aliases.
+
+    Supports direct id, `.object_config.json`, and `_4k` variants.
+    """
     try:
         candidates = template_mgr.get_template_handles(model_id)
         if candidates:
@@ -87,6 +139,7 @@ def _resolve_template_handle(template_mgr: Any, model_id: str) -> Optional[str]:
 
 
 def _remove_object_safe(rom: Any, obj: Any) -> None:
+    """Remove a temporary/failed object instance without raising."""
     if obj is None:
         return
     object_id = getattr(obj, "object_id", None)
@@ -105,6 +158,7 @@ def _remove_object_safe(rom: Any, obj: Any) -> None:
 
 
 def _step_physics(sim: Any, steps: int) -> None:
+    """Step simulator physics multiple frames, compatible with different APIs."""
     for _ in range(max(0, int(steps))):
         try:
             sim.step_physics(1.0 / 60.0)
@@ -115,6 +169,11 @@ def _step_physics(sim: Any, steps: int) -> None:
 
 
 def _contact_with_existing(sim: Any, candidate_object_id: int, existing_ids: Sequence[int]) -> bool:
+    """
+    Detect whether candidate object physically contacts any already-placed object.
+
+    Returns True if a collision/contact is found.
+    """
     try:
         if hasattr(sim, "perform_discrete_collision_detection"):
             sim.perform_discrete_collision_detection()
@@ -151,6 +210,7 @@ def _distance_ok(
     placed: Sequence[Dict[str, Any]],
     min_distance: float,
 ) -> bool:
+    """Check pairwise minimum distance constraint on XZ plane."""
     x = _safe_float(pos[0])
     z = _safe_float(pos[2])
     for item in placed:
@@ -167,6 +227,7 @@ def _distance_ok(
 
 
 def _build_surface_index(surfaces_payload: Dict[str, Any]) -> Tuple[Dict[Tuple[int, int], Dict[str, Any]], Dict[int, Dict[str, Any]]]:
+    """Build fast lookup maps for receptacle surfaces by `(room_id, instance_id)` and `instance_id`."""
     by_room_instance: Dict[Tuple[int, int], Dict[str, Any]] = {}
     by_instance: Dict[int, Dict[str, Any]] = {}
     for room in surfaces_payload.get("rooms", []) or []:
@@ -186,6 +247,7 @@ def _choose_surface_item(
     by_room_instance: Dict[Tuple[int, int], Dict[str, Any]],
     by_instance: Dict[int, Dict[str, Any]],
 ) -> Optional[Dict[str, Any]]:
+    """Select matched surface entry for one assignment (room-aware first, global fallback)."""
     try:
         target_instance_id = int(assignment.get("target_instance_id"))
     except Exception:
@@ -202,6 +264,7 @@ def _choose_surface_item(
 
 
 def _sample_surface_points(points: List[List[float]], max_trials: int, rng: random.Random) -> List[List[float]]:
+    """Shuffle/downsample surface points so each object tries bounded candidates."""
     clean = [p for p in points if isinstance(p, list) and len(p) >= 3]
     if not clean:
         return []
@@ -214,6 +277,7 @@ def _sample_surface_points(points: List[List[float]], max_trials: int, rng: rand
 
 
 def _make_simulator(scene_name: str, data_dir: Path, enable_physics: bool = True) -> Optional[Any]:
+    """Create lightweight habitat-sim simulator for placement and contact checks."""
     if habitat_sim is None:
         return None
     scene_paths = resolve_scene_paths(scene_name, require_semantic=False, root=data_dir)
@@ -240,6 +304,7 @@ def _make_simulator(scene_name: str, data_dir: Path, enable_physics: bool = True
 
 
 def _load_templates(sim: Any, objects_dir: str) -> None:
+    """Load object template configs into simulator from local `objects/` directory."""
     if sim is None:
         return
     try:
@@ -272,6 +337,20 @@ def place_objects_on_instances(
     settle_steps: int = 45,
     seed: int = 42,
 ) -> Dict[str, Any]:
+    """
+    Core placement routine used by file1.
+
+    Input contract:
+    - `assignment_plan["assignments"]` must include `target_instance_id`.
+    - `surfaces_payload` must include `top_surface.points` for each instance.
+
+    Placement loop:
+    1) pick candidate surface points for one object
+    2) spawn at `point_y + spawn_height`
+    3) enforce minimum distance
+    4) optional habitat-sim contact validation
+    5) accept first valid candidate or mark as failed
+    """
     rng = random.Random(int(seed))
     np.random.seed(int(seed))
 
@@ -442,6 +521,7 @@ def place_objects_on_instances(
 
 
 def parse_args() -> argparse.Namespace:
+    """Define CLI for standalone file2 execution."""
     parser = argparse.ArgumentParser(description="Place objects on assigned instance top surfaces and write layout JSON.")
     parser.add_argument("--scene", required=True, help="Scene name")
     parser.add_argument("--assignment-plan", required=True, help="Assignment plan JSON from file1")
@@ -458,6 +538,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    """CLI entrypoint: load inputs, run placement, write layout JSON."""
     args = parse_args()
     try:
         assignment_plan = json.loads(Path(args.assignment_plan).read_text(encoding="utf-8"))
@@ -506,4 +587,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

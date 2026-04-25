@@ -2,13 +2,52 @@
 from __future__ import annotations
 
 """
-Query receptacle instances for one scene (all rooms by default) and extract top-surface points.
+Scene-wide receptacle discovery and top-surface extraction.
 
-Main flow:
-1. Read scene rooms and instances via extract_room_instances.py.
-2. For each room, ask LLM (or heuristic fallback) which instances are suitable for placing small objects.
-3. For each selected instance, extract instance point cloud via extract_room_instances.get_instance_point_cloud.
-4. Derive top-surface point cloud and save scene-level JSON for downstream placement.
+Overview
+--------
+This script upgrades room-level receptacle querying into a scene-level pipeline:
+1) Enumerate all rooms (or selected room ids) from scene_info.
+2) Collect room instances with `extract_room_instances(...)`.
+3) Rank receptacle candidates per room (LLM-first, heuristic fallback).
+4) Extract instance point clouds with `get_instance_point_cloud(...)`.
+5) Derive top-surface points for each accepted instance.
+6) Save one scene-level JSON used by downstream assignment/placement scripts.
+
+Primary Output
+--------------
+`results/receptacle_queries/<scene>/<scene>_receptacle_surfaces_all_rooms.json`
+with structure:
+- scene metadata
+- per-room receptacle instances
+- per-instance top-surface point cloud (points, normal, centroid, bounds)
+
+Execution Guide
+---------------
+1) Full pipeline with LLM over SSH tunnel:
+   python query_room_receptacle_objects.py \
+     --scene 00824-Dd4bFSTQ8gi \
+     --ssh-host 7.216.187.6 --ssh-port 31822 --ssh-user root --ssh-password 666666 \
+     --vllm-host 127.0.0.1 --vllm-port 8000
+
+2) Heuristic-only mode (no LLM dependency):
+   python query_room_receptacle_objects.py \
+     --scene 00824-Dd4bFSTQ8gi \
+     --disable-llm
+
+3) Process only selected rooms:
+   python query_room_receptacle_objects.py \
+     --scene 00824-Dd4bFSTQ8gi \
+     --room-id 2 --room-id 3 --room-id 5 \
+     --disable-llm
+
+4) Increase surface quality and keep more points:
+   python query_room_receptacle_objects.py \
+     --scene 00824-Dd4bFSTQ8gi \
+     --surface-points-per-instance 512 \
+     --surface-min-points 96 \
+     --instance-pointcloud-points 4096 \
+     --disable-llm
 """
 
 import argparse
@@ -79,12 +118,14 @@ Candidate instances (JSON):
 
 
 def _pick_free_local_port() -> int:
+    """Ask OS for a free local TCP port for SSH forwarding."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
         return int(sock.getsockname()[1])
 
 
 def _wait_tunnel_ready(host: str, port: int, timeout_s: float = 10.0) -> bool:
+    """Poll a forwarded local port until it becomes connectable or timeout."""
     end_time = time.time() + timeout_s
     while time.time() < end_time:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
@@ -96,6 +137,12 @@ def _wait_tunnel_ready(host: str, port: int, timeout_s: float = 10.0) -> bool:
 
 
 def _clean_model_output(text: Optional[str]) -> str:
+    """
+    Remove common `<think>` traces and normalize blank lines.
+
+    Some VLM/LLM deployments may leak reasoning tags. This cleaner keeps
+    downstream JSON parsing robust without changing semantic content.
+    """
     if not text:
         return ""
     cleaned = text
@@ -108,6 +155,13 @@ def _clean_model_output(text: Optional[str]) -> str:
 
 
 def _extract_json_block(text: str) -> Optional[Dict[str, Any]]:
+    """
+    Parse model output as a JSON object.
+
+    Strategy:
+    1) Try full-string JSON parse.
+    2) Fallback: parse the largest `{...}` block.
+    """
     if not text:
         return None
     try:
@@ -128,6 +182,8 @@ def _extract_json_block(text: str) -> Optional[Dict[str, Any]]:
 
 
 class SSHTunnel:
+    """Manage lifecycle of a local SSH tunnel to a remote OpenAI-compatible endpoint."""
+
     def __init__(
         self,
         ssh_host: str,
@@ -151,6 +207,7 @@ class SSHTunnel:
         self.base_url = f"http://127.0.0.1:{self.local_port}/v1"
 
     def start(self, timeout_s: float = 30.0) -> bool:
+        """Open the tunnel process and wait until local endpoint is ready."""
         tunnel_cmd = [
             "ssh",
             "-o",
@@ -212,6 +269,7 @@ class SSHTunnel:
         return True
 
     def close(self) -> None:
+        """Terminate tunnel process gracefully."""
         if self.proc and self.proc.poll() is None:
             self.proc.terminate()
             try:
@@ -221,6 +279,7 @@ class SSHTunnel:
 
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
+    """Best-effort float converter with explicit fallback."""
     try:
         return float(value)
     except Exception:
@@ -228,6 +287,12 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
 
 
 def _instance_size_features(instance: Dict[str, Any]) -> Tuple[float, float, float, float, float]:
+    """
+    Compute geometry features from instance AABB.
+
+    Returns:
+    `(size_x, size_y, size_z, top_area, volume)`.
+    """
     aabb = instance.get("aabb") or {}
     size = aabb.get("size") or [0.0, 0.0, 0.0]
     if not isinstance(size, list) or len(size) < 3:
@@ -239,6 +304,7 @@ def _instance_size_features(instance: Dict[str, Any]) -> Tuple[float, float, flo
 
 
 def _build_candidates(instances: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Build compact candidate payload for receptacle ranking."""
     candidates: List[Dict[str, Any]] = []
     for ins in instances:
         ins_id = int(ins.get("id", -1))
@@ -259,6 +325,13 @@ def _build_candidates(instances: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 def _heuristic_fallback(candidates: List[Dict[str, Any]], max_results: int) -> List[Dict[str, Any]]:
+    """
+    Rule-based receptacle scoring used when LLM is disabled/unavailable.
+
+    Score is based on:
+    - category priors (table/desk/cabinet etc.)
+    - top-area estimate from instance AABB
+    """
     keyword_score = {
         "table": 0.95,
         "desk": 0.92,
@@ -308,6 +381,11 @@ def _normalize_candidates(
     source_candidates: List[Dict[str, Any]],
     max_results: int,
 ) -> Tuple[List[Dict[str, Any]], str]:
+    """
+    Validate and normalize model output against room candidate whitelist.
+
+    Any invalid response is converted into deterministic heuristic output.
+    """
     src_map = {int(c["instance_id"]): c for c in source_candidates}
     if parsed is None:
         return _heuristic_fallback(source_candidates, max_results), "model_output_not_json_use_heuristic"
@@ -361,6 +439,12 @@ def query_receptacles_for_room(
     max_results: int,
     max_tokens: int,
 ) -> Tuple[str, str, Optional[Dict[str, Any]]]:
+    """
+    Query one room with text-only prompt and parse JSON response.
+
+    Returns:
+    `(raw_output, cleaned_output, parsed_json_or_none)`.
+    """
     candidates_json = json.dumps(candidates, ensure_ascii=False, indent=2)
     prompt = USER_PROMPT_TEMPLATE.format(
         scene_name=scene_name,
@@ -384,6 +468,11 @@ def query_receptacles_for_room(
 
 
 def _build_surface_from_aabb(instance: Dict[str, Any], target_points: int) -> np.ndarray:
+    """
+    Generate a top-plane point cloud from AABB as last-resort fallback.
+
+    Used only when instance point cloud is empty or too sparse.
+    """
     aabb = instance.get("aabb") or {}
     min_pt = aabb.get("min", [0.0, 0.0, 0.0])
     max_pt = aabb.get("max", [0.0, 0.0, 0.0])
@@ -401,6 +490,11 @@ def _build_surface_from_aabb(instance: Dict[str, Any], target_points: int) -> np
 
 
 def _estimate_surface_normal(points: np.ndarray) -> List[float]:
+    """
+    Estimate a stable upward normal via SVD plane fitting.
+
+    Falls back to `[0, 1, 0]` when geometry is degenerate.
+    """
     if len(points) < 3:
         return [0.0, 1.0, 0.0]
     centered = points - points.mean(axis=0, keepdims=True)
@@ -424,6 +518,15 @@ def _extract_top_surface(
     target_points: int,
     min_points: int,
 ) -> Dict[str, Any]:
+    """
+    Derive top-surface subset from raw instance points.
+
+    Method:
+    - select points in the highest Y band
+    - widen band if too sparse
+    - if still sparse, fallback to AABB top sampling
+    - cap to `target_points` with deterministic random sampling
+    """
     points = np.asarray(raw_points, dtype=np.float32)
     if points.ndim != 2 or points.shape[1] < 3 or len(points) == 0:
         points = _build_surface_from_aabb(instance, target_points)
@@ -471,6 +574,7 @@ def _resolve_room_ids(
     explicit_room_ids: Optional[List[int]],
     include_room_minus_one: bool,
 ) -> List[int]:
+    """Resolve processing room list from explicit args or scene_info rooms."""
     if explicit_room_ids:
         out = sorted({int(x) for x in explicit_room_ids})
         if not include_room_minus_one:
@@ -490,12 +594,14 @@ def _resolve_room_ids(
 
 
 def _validate_ssh_args(args: argparse.Namespace) -> bool:
+    """Check minimum SSH credentials required to enable remote LLM mode."""
     if args.ssh_host and args.ssh_user and (args.ssh_password or args.ssh_key):
         return True
     return False
 
 
 def parse_args() -> argparse.Namespace:
+    """Define CLI for scene-wide receptacle and top-surface extraction."""
     parser = argparse.ArgumentParser(
         description="Query receptacle instances for all rooms in a scene and extract top-surface point clouds."
     )
@@ -528,6 +634,15 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    """
+    Entrypoint for end-to-end extraction.
+
+    High-level stages:
+    1) load scene_info and resolve room ids
+    2) optional LLM tunnel setup
+    3) per-room candidate ranking + per-instance top-surface extraction
+    4) write scene-level JSON for downstream assignment/placement
+    """
     args = parse_args()
     data_dir = Path(args.data_dir)
     scene_info_path = Path(args.scene_info_path) if args.scene_info_path else None
