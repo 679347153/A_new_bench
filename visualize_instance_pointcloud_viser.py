@@ -217,6 +217,35 @@ def _extract_points(data: Dict[str, Any]) -> np.ndarray:
     return arr[:, :3]
 
 
+def _extract_point_cloud_path_from_json(data: Dict[str, Any], input_path: Path) -> Optional[Path]:
+    """
+    Try to resolve point cloud file path declared in JSON.
+
+    Supported keys:
+    - data["point_cloud"]["point_cloud_file"]
+    - data["point_cloud_file"]
+    """
+    candidates: List[str] = []
+    point_cloud = data.get("point_cloud", {})
+    if isinstance(point_cloud, dict):
+        v = point_cloud.get("point_cloud_file")
+        if isinstance(v, str) and v.strip():
+            candidates.append(v.strip())
+    v2 = data.get("point_cloud_file")
+    if isinstance(v2, str) and v2.strip():
+        candidates.append(v2.strip())
+
+    for raw in candidates:
+        p = Path(raw).expanduser()
+        if not p.is_absolute():
+            p = (input_path.parent / p).resolve()
+        else:
+            p = p.resolve()
+        if p.is_file():
+            return p
+    return None
+
+
 def _make_box_edges(min_pt: np.ndarray, max_pt: np.ndarray) -> np.ndarray:
     x0, y0, z0 = min_pt.tolist()
     x1, y1, z1 = max_pt.tolist()
@@ -885,9 +914,25 @@ def main() -> None:
     data = _load_export_json(input_path)
     scene_name = _pick_scene_name(data, input_path)
     explicit_pc = Path(args.pointcloud_file).expanduser().resolve() if args.pointcloud_file else None
-    companion_pc = _find_companion_point_cloud_file(input_path, explicit_pc)
-    if companion_pc is not None:
-        print(f"[Info] Point cloud file detected: {companion_pc}")
+    json_pc = _extract_point_cloud_path_from_json(data, input_path)
+    companion_pc = _find_companion_point_cloud_file(input_path, explicit_path=None)
+
+    selected_pc: Optional[Path] = None
+    selected_source = "none"
+    if explicit_pc is not None and explicit_pc.is_file():
+        selected_pc = explicit_pc
+        selected_source = "cli_explicit"
+    elif json_pc is not None:
+        selected_pc = json_pc
+        selected_source = "json_point_cloud_file"
+    elif companion_pc is not None:
+        selected_pc = companion_pc
+        selected_source = "companion_file"
+
+    if selected_pc is not None:
+        print(f"[Info] Point cloud file selected ({selected_source}): {selected_pc}")
+    else:
+        print("[Info] No external point cloud file found; fallback to embedded points if present.")
 
     try:
         server = viser.ViserServer(port=args.port if args.port >= 0 else 8080)
@@ -904,7 +949,7 @@ def main() -> None:
             show_scene_mesh=args.show_scene_mesh,
             data_dir=Path(args.data_dir),
             scene_name=scene_name,
-            point_cloud_path=companion_pc,
+            point_cloud_path=selected_pc,
             auto_align_grid=True,
             manual_angles_deg=None,
             reset_scene=True,
@@ -918,7 +963,7 @@ def main() -> None:
             show_scene_mesh=args.show_scene_mesh,
             data_dir=Path(args.data_dir),
             scene_name=scene_name,
-            point_cloud_path=companion_pc,
+            point_cloud_path=selected_pc,
             auto_align_grid=bool(args.auto_align_grid),
             manual_angles_deg=current_angles,
             reset_scene=True,
@@ -962,7 +1007,7 @@ def main() -> None:
                         show_scene_mesh=args.show_scene_mesh,
                         data_dir=Path(args.data_dir),
                         scene_name=scene_name,
-                        point_cloud_path=companion_pc,
+                        point_cloud_path=selected_pc,
                         auto_align_grid=True,
                         manual_angles_deg=None,
                         reset_scene=True,
@@ -977,7 +1022,7 @@ def main() -> None:
                         show_scene_mesh=args.show_scene_mesh,
                         data_dir=Path(args.data_dir),
                         scene_name=scene_name,
-                        point_cloud_path=companion_pc,
+                        point_cloud_path=selected_pc,
                         auto_align_grid=False,
                         manual_angles_deg=current_angles,
                         reset_scene=True,
@@ -1000,7 +1045,7 @@ def main() -> None:
                         show_scene_mesh=args.show_scene_mesh,
                         data_dir=Path(args.data_dir),
                         scene_name=scene_name,
-                        point_cloud_path=companion_pc,
+                        point_cloud_path=selected_pc,
                         auto_align_grid=False,
                         manual_angles_deg=current_angles,
                         reset_scene=True,
@@ -1028,7 +1073,7 @@ def main() -> None:
                         show_scene_mesh=args.show_scene_mesh,
                         data_dir=Path(args.data_dir),
                         scene_name=scene_name,
-                        point_cloud_path=companion_pc,
+                        point_cloud_path=selected_pc,
                         auto_align_grid=False,
                         manual_angles_deg=current_angles,
                         reset_scene=True,

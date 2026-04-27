@@ -2,51 +2,51 @@
 from __future__ import annotations
 
 """
-Room-constrained object-to-instance assignment (File1) and auto placement trigger.
+房间约束下的物体到实例分配（文件1）与自动放置触发器。
 
-Overview
+概述
+----
+本脚本连接“物体采样”和“最终布局”两个阶段：
+1) 加载采样后的物体（可读取已有 layout，也可现场采样）。
+2) 对每个物体，仅收集其所在房间内的候选可放置实例。
+3) 调用 LLM（可选带图片）选择目标实例。
+4) 严格校验模型输出是否命中房间候选 id。
+5) 生成并保存分配计划 JSON。
+6) 调用 `place_objects_on_instances.py`（文件2）执行物理放置。
+
+输入
+----
+- `--surfaces-json`：由 `query_room_receptacle_objects.py` 生成的上表面结果
+- 采样物体来源二选一：
+  - `--object-layout <layout.json>`
+  - 调用 `sample_object_positions(...)` 现场采样
+
+输出
+----
+- 分配计划 JSON（object -> target_instance_id）
+- 可选最终布局 JSON（未设置 `--skip-placement` 时）
+
+执行指引
 --------
-This script bridges object sampling and final placement:
-1) Load sampled objects (either from an existing layout json or on-the-fly sampling).
-2) For each object, collect receptacle instance candidates from the same room only.
-3) Ask LLM (optionally with object image) to choose one target instance.
-4) Validate model output strictly against in-room candidate ids.
-5) Save assignment plan json.
-6) Call `place_objects_on_instances.py` (File2) to execute physics-aware placement.
-
-Inputs
-------
-- `--surfaces-json`: output of `query_room_receptacle_objects.py`
-- sampled objects: either
-  - `--object-layout <layout.json>`, or
-  - generated with `sample_object_positions(...)`
-
-Outputs
--------
-- assignment plan json (object -> target_instance_id)
-- optional final layout json (if `--skip-placement` is not set)
-
-Execution Guide
----------------
-1) Standard pipeline (LLM assignment + auto placement):
+1) 标准流程（LLM 分配 + 自动放置）：
    python assign_objects_to_receptacle_instances.py \
      --scene 00824-Dd4bFSTQ8gi \
      --surfaces-json results/receptacle_queries/00824-Dd4bFSTQ8gi/00824-Dd4bFSTQ8gi_receptacle_surfaces_all_rooms.json \
      --ssh-host 7.216.187.6 --ssh-port 31822 --ssh-user root --ssh-password 666666
 
-2) Heuristic-only assignment (no LLM), still run placement:
+2) 仅启发式分配（不依赖 LLM），仍执行放置：
    python assign_objects_to_receptacle_instances.py \
      --scene 00824-Dd4bFSTQ8gi \
      --surfaces-json results/receptacle_queries/00824-Dd4bFSTQ8gi/00824-Dd4bFSTQ8gi_receptacle_surfaces_all_rooms.json \
      --disable-llm
 
-3) Only generate assignment plan (do not place):
+3) 只生成分配计划（不放置）：
    python assign_objects_to_receptacle_instances.py \
      --scene 00824-Dd4bFSTQ8gi \
      --surfaces-json results/receptacle_queries/00824-Dd4bFSTQ8gi/00824-Dd4bFSTQ8gi_receptacle_surfaces_all_rooms.json \
      --skip-placement --disable-llm
 
-4) Use pre-sampled object layout:
+4) 使用预采样布局：
    python assign_objects_to_receptacle_instances.py \
      --scene 00824-Dd4bFSTQ8gi \
      --surfaces-json results/receptacle_queries/00824-Dd4bFSTQ8gi/00824-Dd4bFSTQ8gi_receptacle_surfaces_all_rooms.json \
@@ -116,14 +116,14 @@ Candidate instances (JSON):
 
 
 def _pick_free_local_port() -> int:
-    """Ask OS for a free local TCP port for SSH forwarding."""
+    """向操作系统申请一个可用本地端口，用于 SSH 转发。"""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
         return int(sock.getsockname()[1])
 
 
 def _wait_tunnel_ready(host: str, port: int, timeout_s: float = 10.0) -> bool:
-    """Wait until local forwarded port accepts TCP connection."""
+    """等待本地转发端口可连接。"""
     end_time = time.time() + timeout_s
     while time.time() < end_time:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
@@ -135,7 +135,7 @@ def _wait_tunnel_ready(host: str, port: int, timeout_s: float = 10.0) -> bool:
 
 
 def _clean_model_output(text: Optional[str]) -> str:
-    """Strip `<think>` traces and normalize line breaks before JSON parse."""
+    """清理 `<think>` 推理标签并规范换行，便于 JSON 解析。"""
     if not text:
         return ""
     cleaned = text
@@ -148,7 +148,7 @@ def _clean_model_output(text: Optional[str]) -> str:
 
 
 def _extract_json_block(text: str) -> Optional[Dict[str, Any]]:
-    """Parse full text json first, fallback to largest `{...}` block."""
+    """先解析整段 JSON，失败后回退解析最大 `{...}` 区块。"""
     if not text:
         return None
     try:
@@ -169,7 +169,7 @@ def _extract_json_block(text: str) -> Optional[Dict[str, Any]]:
 
 
 class SSHTunnel:
-    """Manage SSH tunnel lifecycle for remote model endpoint."""
+    """管理远端模型 SSH 隧道的生命周期。"""
 
     def __init__(
         self,
@@ -194,7 +194,7 @@ class SSHTunnel:
         self.base_url = f"http://127.0.0.1:{self.local_port}/v1"
 
     def start(self, timeout_s: float = 30.0) -> bool:
-        """Start SSH tunnel and block until local base_url is reachable."""
+        """启动 SSH 隧道并阻塞等待本地 base_url 可访问。"""
         tunnel_cmd = [
             "ssh",
             "-o",
@@ -255,7 +255,7 @@ class SSHTunnel:
         return True
 
     def close(self) -> None:
-        """Stop SSH tunnel process."""
+        """停止 SSH 隧道进程。"""
         if self.proc and self.proc.poll() is None:
             self.proc.terminate()
             try:
@@ -265,7 +265,7 @@ class SSHTunnel:
 
 
 def _build_image_url(image_path: str) -> str:
-    """Convert local image file to data URL for OpenAI-compatible image input."""
+    """将本地图片转为 data URL，用于 OpenAI 兼容多模态输入。"""
     p = Path(image_path).expanduser().resolve()
     if not p.is_file():
         raise FileNotFoundError(f"Image path not found: {p}")
@@ -277,7 +277,7 @@ def _build_image_url(image_path: str) -> str:
 
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
-    """Best-effort cast to float with explicit fallback."""
+    """尽力转换为 float，失败返回默认值。"""
     try:
         return float(value)
     except Exception:
@@ -286,9 +286,9 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
 
 def _find_image_for_object(images_dir: str, model_id: str, name: str) -> Optional[str]:
     """
-    Resolve object image by matching filename stem to model_id/name aliases.
+    通过文件名 stem 与 model_id/name 别名匹配物体图片。
 
-    This allows visual assignment prompts without requiring strict naming format.
+    这样可在不强制命名规范的前提下为分配提示提供视觉输入。
     """
     root = Path(images_dir)
     if not root.is_dir():
@@ -323,7 +323,7 @@ def _find_image_for_object(images_dir: str, model_id: str, name: str) -> Optiona
 
 
 def _build_surface_candidates_for_room(room_entry: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Build compact per-room candidate list from top-surface extraction output."""
+    """从上表面结果构建房间内候选实例的紧凑描述。"""
     out = []
     for item in room_entry.get("receptacle_instances", []) or []:
         top = item.get("top_surface", {}) if isinstance(item, dict) else {}
@@ -347,9 +347,9 @@ def _build_surface_candidates_for_room(room_entry: Dict[str, Any]) -> List[Dict[
 
 def _heuristic_choose_instance(candidates: List[Dict[str, Any]], model_id: str) -> Dict[str, Any]:
     """
-    Heuristic selector when LLM is unavailable.
+    LLM 不可用时的启发式实例选择器。
 
-    Uses candidate confidence + surface area + light category priors.
+    依据：候选置信度 + 表面积 + 轻量类别先验。
     """
     model_key = (model_id or "").lower()
     scored = []
@@ -374,7 +374,7 @@ def _heuristic_choose_instance(candidates: List[Dict[str, Any]], model_id: str) 
 
 
 def _normalize_assignment_response(parsed: Optional[Dict[str, Any]], candidates: List[Dict[str, Any]], model_id: str) -> Dict[str, Any]:
-    """Validate assignment response against candidate whitelist and normalize fields."""
+    """按候选白名单校验分配结果并归一化字段。"""
     candidate_ids = {int(c["instance_id"]) for c in candidates if int(c.get("instance_id", -1)) >= 0}
     if parsed is None:
         return _heuristic_choose_instance(candidates, model_id)
@@ -410,16 +410,16 @@ def _normalize_assignment_response(parsed: Optional[Dict[str, Any]], candidates:
 
 
 def _validate_ssh_args(args: argparse.Namespace) -> bool:
-    """Check whether SSH credentials are sufficient for remote LLM mode."""
+    """检查是否具备远端 LLM 所需 SSH 参数。"""
     return bool(args.ssh_host and args.ssh_user and (args.ssh_password or args.ssh_key))
 
 
 def _load_or_sample_objects(args: argparse.Namespace) -> List[Dict[str, Any]]:
     """
-    Load sampled objects from layout json, or sample on the fly.
+    从布局文件加载采样物体，或现场进行采样。
 
-    Optional filter:
-    `--only-manual-fix` keeps only objects previously flagged for manual repair.
+    可选过滤：
+    `--only-manual-fix` 仅保留此前标记为需人工修复的物体。
     """
     if args.object_layout:
         payload = json.loads(Path(args.object_layout).read_text(encoding="utf-8"))
@@ -453,9 +453,9 @@ def _query_assignment_for_object(
     max_tokens: int,
 ) -> Tuple[str, str, Optional[Dict[str, Any]]]:
     """
-    Query model for one object's target instance within one room.
+    对单个物体在单个房间内发起目标实例分配查询。
 
-    If image exists, send multimodal input (image + text constraints).
+    若存在图片，则发送图文联合输入（图片 + 文本约束）。
     """
     obj_payload = {
         "object_id": object_entry.get("id"),
@@ -493,7 +493,7 @@ def _query_assignment_for_object(
 
 
 def parse_args() -> argparse.Namespace:
-    """Define CLI for assignment generation and optional placement execution."""
+    """定义分配计划生成与可选放置执行的命令行参数。"""
     parser = argparse.ArgumentParser(description="Assign sampled objects to in-room receptacle instances, then place automatically.")
     parser.add_argument("--scene", required=True, help="Scene name")
     parser.add_argument("--surfaces-json", required=True, help="Output json from query_room_receptacle_objects.py")
@@ -533,14 +533,14 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     """
-    Entrypoint for full assignment workflow.
+    完整分配流程主入口。
 
-    Stages:
-    1) load surfaces + sampled objects
-    2) optional LLM tunnel setup
-    3) per-object in-room assignment
-    4) write assignment plan
-    5) optionally call file2 for final placement/layout
+    阶段：
+    1) 加载上表面结果和采样物体
+    2) 按需初始化 LLM 隧道
+    3) 逐物体进行房间内实例分配
+    4) 写出分配计划
+    5) 按需调用文件2生成最终布局
     """
     args = parse_args()
     np.random.seed(int(args.seed))

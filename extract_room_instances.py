@@ -1197,22 +1197,13 @@ def _summarize_point_cloud(points: np.ndarray, source: str) -> Dict[str, Any]:
 
 
 def _write_point_cloud_file(points: List[List[float]], output_path: Path, fmt: str = "ply") -> Path:
-    """将点云导出为常见格式文件（ply/xyz）。"""
+    """将点云导出为 ASCII PLY 文件。"""
     output_path.parent.mkdir(parents=True, exist_ok=True)
     safe_fmt = (fmt or "ply").lower()
-
-    if safe_fmt not in {"ply", "xyz"}:
-        raise ValueError(f"Unsupported point cloud format: {fmt}")
+    if safe_fmt != "ply":
+        raise ValueError(f"Unsupported point cloud format: {fmt}. Only 'ply' is supported.")
 
     pts = points or []
-    if safe_fmt == "xyz":
-        if output_path.suffix.lower() != ".xyz":
-            output_path = output_path.with_suffix(".xyz")
-        with open(output_path, "w", encoding="utf-8") as f:
-            for p in pts:
-                if len(p) >= 3:
-                    f.write(f"{float(p[0]):.6f} {float(p[1]):.6f} {float(p[2]):.6f}\n")
-        return output_path
 
     if output_path.suffix.lower() != ".ply":
         output_path = output_path.with_suffix(".ply")
@@ -1586,7 +1577,7 @@ def main() -> None:
         help="输出 semantic mesh 空间裁剪调试统计（面片数、包围域尺寸、命中比例），并写入 JSON。",
     )
     parser.add_argument("--output", type=str, default=None, help="可选：输出 JSON 文件路径")
-    parser.add_argument("--pointcloud-format", choices=["ply", "xyz"], default="ply", help="instance 查询时点云文件格式")
+    parser.add_argument("--pointcloud-format", choices=["ply"], default="ply", help="instance 查询时点云文件格式（仅支持 ply）")
     parser.add_argument("--pointcloud-output", type=str, default=None, help="可选：instance 查询时点云输出路径")
     parser.add_argument("--print-json", action="store_true", help="可选：将 JSON 结果打印到终端（默认不打印）")
     args = parser.parse_args()
@@ -1601,10 +1592,6 @@ def main() -> None:
         debug_mesh_crop=args.debug_mesh_crop,
     )
 
-    payload = json.dumps(result, ensure_ascii=False, indent=2)
-    if args.print_json:
-        print(payload)
-
     if args.output:
         output_path = Path(args.output)
     else:
@@ -1617,8 +1604,6 @@ def main() -> None:
             output_path = output_dir / f"room_{args.room_id}_instance_{args.instance_id}.json"
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_path, "w", encoding="utf-8") as f:
-        f.write(payload)
 
     point_cloud_saved_path = None
     if args.instance_id is not None:
@@ -1627,9 +1612,20 @@ def main() -> None:
         if args.pointcloud_output:
             pc_path = Path(args.pointcloud_output)
         else:
-            pc_ext = ".ply" if args.pointcloud_format == "ply" else ".xyz"
-            pc_path = output_path.with_suffix(pc_ext)
+            pc_path = output_path.with_suffix(".ply")
         point_cloud_saved_path = _write_point_cloud_file(points, pc_path, fmt=args.pointcloud_format)
+        # JSON 中不再内嵌具体点云点集，只保留摘要与文件路径。
+        if isinstance(point_cloud, dict):
+            point_cloud["point_cloud_file"] = str(point_cloud_saved_path.resolve())
+            point_cloud["point_cloud_format"] = "ply"
+            if "points" in point_cloud:
+                del point_cloud["points"]
+
+    payload = json.dumps(result, ensure_ascii=False, indent=2)
+    if args.print_json:
+        print(payload)
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(payload)
 
     print(f"[OK] JSON 结果已保存到: {output_path}")
     if point_cloud_saved_path is not None:

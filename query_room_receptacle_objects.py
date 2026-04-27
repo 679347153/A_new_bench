@@ -2,46 +2,46 @@
 from __future__ import annotations
 
 """
-Scene-wide receptacle discovery and top-surface extraction.
+场景级可放置实例筛选与上表面点云提取。
 
-Overview
+概述
+----
+本脚本将“单房间查询”升级为“整场景流程”：
+1) 从 scene_info 枚举全部房间（或只处理指定 room_id）。
+2) 通过 `extract_room_instances(...)` 收集房间实例。
+3) 对每个房间进行可放置实例排序（优先 LLM，失败回退启发式）。
+4) 通过 `get_instance_point_cloud(...)` 提取实例点云。
+5) 从实例点云中提取上表面点集。
+6) 输出一个场景级 JSON，供后续分配/放置脚本使用。
+
+主要输出
 --------
-This script upgrades room-level receptacle querying into a scene-level pipeline:
-1) Enumerate all rooms (or selected room ids) from scene_info.
-2) Collect room instances with `extract_room_instances(...)`.
-3) Rank receptacle candidates per room (LLM-first, heuristic fallback).
-4) Extract instance point clouds with `get_instance_point_cloud(...)`.
-5) Derive top-surface points for each accepted instance.
-6) Save one scene-level JSON used by downstream assignment/placement scripts.
-
-Primary Output
---------------
 `results/receptacle_queries/<scene>/<scene>_receptacle_surfaces_all_rooms.json`
-with structure:
-- scene metadata
-- per-room receptacle instances
-- per-instance top-surface point cloud (points, normal, centroid, bounds)
+包含：
+- 场景级元信息
+- 每个房间的可放置实例列表
+- 每个实例的上表面点云（points、normal、centroid、bounds）
 
-Execution Guide
----------------
-1) Full pipeline with LLM over SSH tunnel:
+执行指引
+--------
+1) 启用 SSH + LLM 的完整流程：
    python query_room_receptacle_objects.py \
      --scene 00824-Dd4bFSTQ8gi \
      --ssh-host 7.216.187.6 --ssh-port 31822 --ssh-user root --ssh-password 666666 \
      --vllm-host 127.0.0.1 --vllm-port 8000
 
-2) Heuristic-only mode (no LLM dependency):
+2) 仅启发式模式（不依赖 LLM）：
    python query_room_receptacle_objects.py \
      --scene 00824-Dd4bFSTQ8gi \
      --disable-llm
 
-3) Process only selected rooms:
+3) 只处理指定房间：
    python query_room_receptacle_objects.py \
      --scene 00824-Dd4bFSTQ8gi \
      --room-id 2 --room-id 3 --room-id 5 \
      --disable-llm
 
-4) Increase surface quality and keep more points:
+4) 提高上表面质量并保留更多点：
    python query_room_receptacle_objects.py \
      --scene 00824-Dd4bFSTQ8gi \
      --surface-points-per-instance 512 \
@@ -118,14 +118,14 @@ Candidate instances (JSON):
 
 
 def _pick_free_local_port() -> int:
-    """Ask OS for a free local TCP port for SSH forwarding."""
+    """向操作系统申请一个可用本地端口，用于 SSH 转发。"""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
         return int(sock.getsockname()[1])
 
 
 def _wait_tunnel_ready(host: str, port: int, timeout_s: float = 10.0) -> bool:
-    """Poll a forwarded local port until it becomes connectable or timeout."""
+    """轮询本地转发端口，直到可连接或超时。"""
     end_time = time.time() + timeout_s
     while time.time() < end_time:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
@@ -138,10 +138,10 @@ def _wait_tunnel_ready(host: str, port: int, timeout_s: float = 10.0) -> bool:
 
 def _clean_model_output(text: Optional[str]) -> str:
     """
-    Remove common `<think>` traces and normalize blank lines.
+    清理模型输出中的 `<think>` 痕迹并规范空行。
 
-    Some VLM/LLM deployments may leak reasoning tags. This cleaner keeps
-    downstream JSON parsing robust without changing semantic content.
+    某些 VLM/LLM 服务会泄露推理标签，本函数在不改变语义的前提下，
+    提升后续 JSON 解析稳定性。
     """
     if not text:
         return ""
@@ -156,11 +156,11 @@ def _clean_model_output(text: Optional[str]) -> str:
 
 def _extract_json_block(text: str) -> Optional[Dict[str, Any]]:
     """
-    Parse model output as a JSON object.
+    将模型输出解析为 JSON 对象。
 
-    Strategy:
-    1) Try full-string JSON parse.
-    2) Fallback: parse the largest `{...}` block.
+    策略：
+    1) 先尝试整段文本直接 `json.loads`。
+    2) 失败后回退为解析最大 `{...}` 片段。
     """
     if not text:
         return None
@@ -182,7 +182,7 @@ def _extract_json_block(text: str) -> Optional[Dict[str, Any]]:
 
 
 class SSHTunnel:
-    """Manage lifecycle of a local SSH tunnel to a remote OpenAI-compatible endpoint."""
+    """管理本地 SSH 隧道生命周期，用于连接远端 OpenAI 兼容接口。"""
 
     def __init__(
         self,
@@ -207,7 +207,7 @@ class SSHTunnel:
         self.base_url = f"http://127.0.0.1:{self.local_port}/v1"
 
     def start(self, timeout_s: float = 30.0) -> bool:
-        """Open the tunnel process and wait until local endpoint is ready."""
+        """启动隧道进程并等待本地端点就绪。"""
         tunnel_cmd = [
             "ssh",
             "-o",
@@ -269,7 +269,7 @@ class SSHTunnel:
         return True
 
     def close(self) -> None:
-        """Terminate tunnel process gracefully."""
+        """优雅关闭隧道进程。"""
         if self.proc and self.proc.poll() is None:
             self.proc.terminate()
             try:
@@ -279,7 +279,7 @@ class SSHTunnel:
 
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
-    """Best-effort float converter with explicit fallback."""
+    """尽力转换为 float，失败时返回默认值。"""
     try:
         return float(value)
     except Exception:
@@ -288,10 +288,10 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
 
 def _instance_size_features(instance: Dict[str, Any]) -> Tuple[float, float, float, float, float]:
     """
-    Compute geometry features from instance AABB.
+    从实例 AABB 计算几何特征。
 
-    Returns:
-    `(size_x, size_y, size_z, top_area, volume)`.
+    返回：
+    `(size_x, size_y, size_z, top_area, volume)`。
     """
     aabb = instance.get("aabb") or {}
     size = aabb.get("size") or [0.0, 0.0, 0.0]
@@ -304,7 +304,7 @@ def _instance_size_features(instance: Dict[str, Any]) -> Tuple[float, float, flo
 
 
 def _build_candidates(instances: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Build compact candidate payload for receptacle ranking."""
+    """构建用于可放置实例排序的紧凑候选数据。"""
     candidates: List[Dict[str, Any]] = []
     for ins in instances:
         ins_id = int(ins.get("id", -1))
@@ -326,11 +326,11 @@ def _build_candidates(instances: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 def _heuristic_fallback(candidates: List[Dict[str, Any]], max_results: int) -> List[Dict[str, Any]]:
     """
-    Rule-based receptacle scoring used when LLM is disabled/unavailable.
+    在 LLM 不可用时使用规则打分回退。
 
-    Score is based on:
-    - category priors (table/desk/cabinet etc.)
-    - top-area estimate from instance AABB
+    打分依据：
+    - 类别先验（table/desk/cabinet 等）
+    - 基于 AABB 的上表面积估计
     """
     keyword_score = {
         "table": 0.95,
@@ -382,9 +382,9 @@ def _normalize_candidates(
     max_results: int,
 ) -> Tuple[List[Dict[str, Any]], str]:
     """
-    Validate and normalize model output against room candidate whitelist.
+    按房间候选白名单校验并归一化模型输出。
 
-    Any invalid response is converted into deterministic heuristic output.
+    只要输出不合法，就转为确定性的启发式结果。
     """
     src_map = {int(c["instance_id"]): c for c in source_candidates}
     if parsed is None:
@@ -430,6 +430,63 @@ def _normalize_candidates(
     return cleaned, str(parsed.get("overall_notes", "")).strip()
 
 
+def _infer_ranking_mode(
+    *,
+    use_llm: bool,
+    llm_attempted: bool,
+    llm_error: Optional[str],
+    parsed_output: Optional[Dict[str, Any]],
+    notes: str,
+) -> Tuple[str, str]:
+    """
+    Infer user-facing ranking mode label for logging.
+
+    Returns:
+    `(mode, reason)` where mode is one of:
+    - `llm`
+    - `heuristic`
+    - `heuristic_fallback_after_llm`
+    """
+    fallback_flag = "use_heuristic" in (notes or "")
+    if not use_llm:
+        return "heuristic", "llm_disabled_or_unavailable"
+    if llm_error:
+        return "heuristic_fallback_after_llm", f"llm_error={llm_error}"
+    if llm_attempted and fallback_flag:
+        if parsed_output is None:
+            return "heuristic_fallback_after_llm", "llm_output_not_json"
+        return "heuristic_fallback_after_llm", "llm_output_invalid_schema_or_ids"
+    if llm_attempted and parsed_output is not None:
+        return "llm", "llm_json_valid"
+    return "heuristic", "unexpected_default"
+
+
+def _print_ranking_preview(
+    room_id: int,
+    mode: str,
+    reason: str,
+    candidates: List[Dict[str, Any]],
+    max_rows: int = 8,
+) -> None:
+    """Print room ranking mode and top candidates to terminal."""
+    print(f"[Info] Room {room_id} ranking mode: {mode} ({reason})")
+    if not candidates:
+        print(f"[Info] Room {room_id} ranking result is empty.")
+        return
+    rows = candidates[: max(1, int(max_rows))]
+    for item in rows:
+        print(
+            "[Rank] room={room} rank={rank} instance={iid} category={cat} score={score:.4f} reason={reason}".format(
+                room=int(room_id),
+                rank=int(item.get("rank", -1)),
+                iid=int(item.get("instance_id", -1)),
+                cat=str(item.get("category", "unknown")),
+                score=float(item.get("confidence_score", 0.0)),
+                reason=str(item.get("reasoning", "")).strip(),
+            )
+        )
+
+
 def query_receptacles_for_room(
     client: OpenAI,
     model: str,
@@ -440,10 +497,10 @@ def query_receptacles_for_room(
     max_tokens: int,
 ) -> Tuple[str, str, Optional[Dict[str, Any]]]:
     """
-    Query one room with text-only prompt and parse JSON response.
+    对单个房间发起文本提示查询，并解析 JSON 响应。
 
-    Returns:
-    `(raw_output, cleaned_output, parsed_json_or_none)`.
+    返回：
+    `(raw_output, cleaned_output, parsed_json_or_none)`。
     """
     candidates_json = json.dumps(candidates, ensure_ascii=False, indent=2)
     prompt = USER_PROMPT_TEMPLATE.format(
@@ -469,9 +526,9 @@ def query_receptacles_for_room(
 
 def _build_surface_from_aabb(instance: Dict[str, Any], target_points: int) -> np.ndarray:
     """
-    Generate a top-plane point cloud from AABB as last-resort fallback.
+    基于 AABB 生成顶平面点云，作为最后兜底。
 
-    Used only when instance point cloud is empty or too sparse.
+    仅在实例点云为空或过稀时使用。
     """
     aabb = instance.get("aabb") or {}
     min_pt = aabb.get("min", [0.0, 0.0, 0.0])
@@ -491,9 +548,9 @@ def _build_surface_from_aabb(instance: Dict[str, Any], target_points: int) -> np
 
 def _estimate_surface_normal(points: np.ndarray) -> List[float]:
     """
-    Estimate a stable upward normal via SVD plane fitting.
+    通过 SVD 平面拟合估计稳定的向上法向。
 
-    Falls back to `[0, 1, 0]` when geometry is degenerate.
+    当几何退化时回退为 `[0, 1, 0]`。
     """
     if len(points) < 3:
         return [0.0, 1.0, 0.0]
@@ -519,13 +576,13 @@ def _extract_top_surface(
     min_points: int,
 ) -> Dict[str, Any]:
     """
-    Derive top-surface subset from raw instance points.
+    从实例原始点云中提取上表面子集。
 
-    Method:
-    - select points in the highest Y band
-    - widen band if too sparse
-    - if still sparse, fallback to AABB top sampling
-    - cap to `target_points` with deterministic random sampling
+    方法：
+    - 先选择最高 Y 区间的点
+    - 若点过少则加宽区间
+    - 若仍不足则回退为 AABB 顶面采样
+    - 最后通过确定性随机采样裁剪到 `target_points`
     """
     points = np.asarray(raw_points, dtype=np.float32)
     if points.ndim != 2 or points.shape[1] < 3 or len(points) == 0:
@@ -569,12 +626,32 @@ def _extract_top_surface(
     }
 
 
+def _write_ply_points(points: List[List[float]], output_path: Path) -> Path:
+    """Write point cloud to ASCII PLY file."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    if output_path.suffix.lower() != ".ply":
+        output_path = output_path.with_suffix(".ply")
+    pts = points or []
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write("ply\n")
+        f.write("format ascii 1.0\n")
+        f.write(f"element vertex {len(pts)}\n")
+        f.write("property float x\n")
+        f.write("property float y\n")
+        f.write("property float z\n")
+        f.write("end_header\n")
+        for p in pts:
+            if isinstance(p, list) and len(p) >= 3:
+                f.write(f"{float(p[0]):.6f} {float(p[1]):.6f} {float(p[2]):.6f}\n")
+    return output_path
+
+
 def _resolve_room_ids(
     scene_info: Dict[str, Any],
     explicit_room_ids: Optional[List[int]],
     include_room_minus_one: bool,
 ) -> List[int]:
-    """Resolve processing room list from explicit args or scene_info rooms."""
+    """根据显式参数或 scene_info 自动解析需要处理的房间列表。"""
     if explicit_room_ids:
         out = sorted({int(x) for x in explicit_room_ids})
         if not include_room_minus_one:
@@ -594,14 +671,14 @@ def _resolve_room_ids(
 
 
 def _validate_ssh_args(args: argparse.Namespace) -> bool:
-    """Check minimum SSH credentials required to enable remote LLM mode."""
+    """检查远端 LLM 模式所需的最小 SSH 凭据是否完整。"""
     if args.ssh_host and args.ssh_user and (args.ssh_password or args.ssh_key):
         return True
     return False
 
 
 def parse_args() -> argparse.Namespace:
-    """Define CLI for scene-wide receptacle and top-surface extraction."""
+    """定义场景级可放置实例与上表面提取的命令行参数。"""
     parser = argparse.ArgumentParser(
         description="Query receptacle instances for all rooms in a scene and extract top-surface point clouds."
     )
@@ -635,13 +712,13 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     """
-    Entrypoint for end-to-end extraction.
+    端到端提取主入口。
 
-    High-level stages:
-    1) load scene_info and resolve room ids
-    2) optional LLM tunnel setup
-    3) per-room candidate ranking + per-instance top-surface extraction
-    4) write scene-level JSON for downstream assignment/placement
+    高层流程：
+    1) 加载 scene_info 并解析房间列表
+    2) 按需初始化 LLM 隧道
+    3) 按房间排序候选并提取实例上表面
+    4) 写出供后续分配/放置使用的场景级 JSON
     """
     args = parse_args()
     data_dir = Path(args.data_dir)
@@ -685,6 +762,12 @@ def main() -> int:
         else:
             client = OpenAI(api_key="EMPTY", base_url=tunnel.base_url, timeout=args.timeout)
 
+    print(
+        "[Info] Global ranking mode: {}".format(
+            "llm" if use_llm else "heuristic"
+        )
+    )
+
     scene_results: List[Dict[str, Any]] = []
     processed_rooms = 0
     for room_id in room_ids:
@@ -720,9 +803,12 @@ def main() -> int:
         raw_output = ""
         cleaned_output = ""
         parsed_output: Optional[Dict[str, Any]] = None
+        llm_attempted = False
+        llm_error: Optional[str] = None
 
         if use_llm and client is not None:
             try:
+                llm_attempted = True
                 raw_output, cleaned_output, parsed_output = query_receptacles_for_room(
                     client=client,
                     model=args.model,
@@ -733,12 +819,26 @@ def main() -> int:
                     max_tokens=int(args.max_tokens),
                 )
             except Exception as exc:
+                llm_error = str(exc)
                 print(f"[Warning] LLM query failed in room {room_id}, fallback heuristic: {exc}", file=sys.stderr)
 
         final_candidates, notes = _normalize_candidates(
             parsed=parsed_output,
             source_candidates=source_candidates,
             max_results=max(1, int(args.max_results)),
+        )
+        ranking_mode, ranking_reason = _infer_ranking_mode(
+            use_llm=use_llm,
+            llm_attempted=llm_attempted,
+            llm_error=llm_error,
+            parsed_output=parsed_output,
+            notes=notes,
+        )
+        _print_ranking_preview(
+            room_id=int(room_id),
+            mode=ranking_mode,
+            reason=ranking_reason,
+            candidates=final_candidates,
         )
 
         instance_map = {}
@@ -819,6 +919,10 @@ def main() -> int:
                     "raw_output": raw_output,
                     "cleaned_output": cleaned_output,
                     "candidate_pool_size": len(source_candidates),
+                    "ranking_mode": ranking_mode,
+                    "ranking_reason": ranking_reason,
+                    "llm_attempted": bool(llm_attempted),
+                    "llm_error": llm_error or "",
                 },
             }
         )
@@ -847,6 +951,32 @@ def main() -> int:
         out_dir.mkdir(parents=True, exist_ok=True)
         suffix = "all_rooms" if args.room_id is None else "selected_rooms"
         output_path = out_dir / f"{args.scene}_receptacle_surfaces_{suffix}.json"
+
+    # Persist top-surface points to PLY and keep only file path in JSON.
+    surface_pc_dir = output_path.parent / "surface_pointclouds"
+    for room_item in scene_results:
+        room_id = int(room_item.get("room_id", -1))
+        receptacles = room_item.get("receptacle_instances", [])
+        if not isinstance(receptacles, list):
+            continue
+        for rec in receptacles:
+            if not isinstance(rec, dict):
+                continue
+            instance_id = int(rec.get("instance_id", -1))
+            top_surface = rec.get("top_surface", {})
+            if not isinstance(top_surface, dict):
+                continue
+            points = top_surface.get("points", [])
+            if not isinstance(points, list):
+                points = []
+            saved = _write_ply_points(
+                points,
+                surface_pc_dir / f"room_{room_id}_instance_{instance_id}_top_surface.ply",
+            )
+            top_surface["point_cloud_file"] = str(saved.resolve())
+            top_surface["point_cloud_format"] = "ply"
+            if "points" in top_surface:
+                del top_surface["points"]
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
