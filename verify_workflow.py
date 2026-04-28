@@ -1,254 +1,209 @@
 #!/usr/bin/env python3
 """
-验证脚本：检查两个主文件的核心逻辑完整性和数据流畅性。
+Lightweight workflow verification for the HM3D room/object pipeline.
 
-用法：
+Usage:
   python verify_workflow.py
 """
 
+from __future__ import annotations
+
+import ast
 import json
-import os
 import sys
 from pathlib import Path
+from typing import Dict, Iterable, List, Tuple
 
 
-def verify_file_existence():
-    """验证关键文件是否存在。"""
-    print("[Verify] Checking file existence...")
-    
-    required_files = [
-        "query_rooms_for_objects.py",
-        "sample_and_place_objects.py",
-        "test_layout.py",
-        "export_scene_info.py",
-        "qwen3_vl_connect.py",
-        "hm3d_paths.py",
-        "hm3d/hm3d_annotated_basis.scene_dataset_config.json",
-        "hm3d/val/hm3d_annotated_val_basis.scene_dataset_config.json",
-    ]
-    
-    missing = []
-    for f in required_files:
-        if not os.path.exists(f):
-            missing.append(f)
-    
+REQUIRED_FILES: List[str] = [
+    "export_scene_info.py",
+    "query_rooms_for_objects.py",
+    "sample_and_place_objects.py",
+    "test_layout.py",
+    "extract_room_instances.py",
+    "query_room_receptacle_objects.py",
+    "assign_objects_to_receptacle_instances.py",
+    "place_objects_on_instances.py",
+    "visualize_instance_pointcloud_viser.py",
+    "hm3d_paths.py",
+]
+
+REQUIRED_DIRS: List[str] = [
+    "results",
+    "results/scene_info",
+    "results/probabilities",
+    "results/layouts",
+]
+
+
+def _ok(msg: str) -> None:
+    print(f"[OK] {msg}")
+
+
+def _warn(msg: str) -> None:
+    print(f"[WARN] {msg}")
+
+
+def _err(msg: str) -> None:
+    print(f"[ERR] {msg}")
+
+
+def verify_file_existence() -> bool:
+    print("[Verify] File existence")
+    missing = [f for f in REQUIRED_FILES if not Path(f).exists()]
     if missing:
-        print(f"  ✗ Missing files: {missing}")
+        _err(f"Missing files: {missing}")
         return False
-    
-    print(f"  ✓ All required files exist")
+    _ok("All required files exist")
     return True
 
 
-def verify_directory_structure():
-    """验证输出目录结构。"""
-    print("[Verify] Checking directory structure...")
-    
-    required_dirs = [
-        "results",
-        "results/scene_info",
-        "results/probabilities",
-        "results/layouts",
-        "objects_images",
-        "hm3d/minival",
-        "hm3d/val",
-    ]
-    
-    all_exist = True
-    for d in required_dirs:
-        if not os.path.isdir(d):
-            print(f"  ✗ Missing directory: {d}")
-            all_exist = False
+def verify_directory_structure() -> bool:
+    print("[Verify] Directory structure")
+    ok = True
+    for d in REQUIRED_DIRS:
+        if Path(d).is_dir():
+            _ok(d)
         else:
-            print(f"  ✓ {d}")
-    
-    return all_exist
+            _err(f"Missing directory: {d}")
+            ok = False
+    return ok
 
 
-def verify_json_schema():
-    """验证JSON格式（如果有示例文件）。"""
-    print("[Verify] Checking JSON schema compatibility...")
-    
-    # 检查样例JSON是否存在
-    sample_file = "00824-Dd4bFSTQ8gi_scene_info.json"
-    if os.path.isfile(sample_file):
-        try:
-            with open(sample_file, "r") as f:
-                data = json.load(f)
-            
-            # 验证必需的顶级键
-            required_keys = ["scene_info", "categories", "rooms", "objects"]
-            missing_keys = [k for k in required_keys if k not in data]
-            
-            if missing_keys:
-                print(f"  ✗ Sample JSON missing keys: {missing_keys}")
-                return False
-            
-            print(f"  ✓ Sample scene_info JSON structure valid")
-            return True
-        except Exception as e:
-            print(f"  ✗ Failed to parse sample JSON: {e}")
-            return False
-    else:
-        print(f"  ⓘ No sample JSON found (expected: {sample_file})")
-        return True
+def _parse_file(path: Path) -> Tuple[bool, str]:
+    try:
+        ast.parse(path.read_text(encoding="utf-8"))
+        return True, ""
+    except Exception as exc:  # noqa: BLE001
+        return False, str(exc)
 
 
-def verify_python_syntax():
-    """验证两个主文件的Python语法。"""
-    print("[Verify] Checking Python syntax...")
-    
-    import ast
-    
-    files_to_check = [
-        "query_rooms_for_objects.py",
-        "sample_and_place_objects.py",
-    ]
-    
-    all_valid = True
-    for f in files_to_check:
-        try:
-            with open(f, "r", encoding="utf-8") as fp:
-                ast.parse(fp.read())
-            print(f"  ✓ {f}")
-        except SyntaxError as e:
-            print(f"  ✗ {f}: {e}")
-            all_valid = False
-        except Exception as e:
-            print(f"  ✗ {f}: {e}")
-            all_valid = False
-    
-    return all_valid
+def verify_python_syntax() -> bool:
+    print("[Verify] Python syntax")
+    files = [Path(p) for p in REQUIRED_FILES if p.endswith(".py")]
+    ok = True
+    for p in files:
+        good, msg = _parse_file(p)
+        if good:
+            _ok(str(p))
+        else:
+            _err(f"{p}: {msg}")
+            ok = False
+    return ok
 
 
-def verify_function_signatures():
-    """验证关键函数是否可被导入（通过AST分析而不执行）。"""
-    print("[Verify] Checking function signatures...")
-    
-    import ast
-    
-    files_to_check = {
-        "query_rooms_for_objects.py": [
-            "_pick_free_local_port",
-            "_wait_tunnel_ready",
-            "_build_image_url",
-            "_clean_model_output",
-            "query_qwen_for_rooms",
-            "parse_room_recommendations",
+def _collect_functions(path: Path) -> Iterable[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef):
+            yield node.name
+
+
+def verify_function_signatures() -> bool:
+    print("[Verify] Function signatures")
+    required: Dict[str, List[str]] = {
+        "query_room_receptacle_objects.py": [
+            "_resolve_room_ids",
+            "_extract_top_surface",
+            "_write_ply_points",
+            "query_receptacles_for_room",
+            "main",
         ],
-        "sample_and_place_objects.py": [
-            "generate_probabilities",
-            "load_probabilities",
-            "sample_object_positions",
-            "launch_editor",
-            "interactive_sampling_loop",
+        "assign_objects_to_receptacle_instances.py": [
+            "_load_or_sample_objects",
+            "_query_assignment_for_object",
+            "_resolve_or_generate_surfaces_json",
+            "main",
+        ],
+        "place_objects_on_instances.py": [
+            "_build_surface_index",
+            "_load_surface_points",
+            "place_objects_on_instances",
+            "main",
         ],
     }
-    
-    all_valid = True
-    for filepath, required_funcs in files_to_check.items():
-        try:
-            with open(filepath, "r", encoding="utf-8") as f:
-                tree = ast.parse(f.read())
-            
-            defined_funcs = {node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)}
-            missing = [f for f in required_funcs if f not in defined_funcs]
-            
-            if missing:
-                print(f"  ✗ {filepath} missing functions: {missing}")
-                all_valid = False
-            else:
-                print(f"  ✓ {filepath} functions OK")
-        
-        except Exception as e:
-            print(f"  ✗ {filepath}: {e}")
-            all_valid = False
-    
-    return all_valid
-
-
-def verify_data_flow():
-    """验证数据流：query输出 → sample输入。"""
-    print("[Verify] Checking data flow compatibility...")
-    
-    # 检查是否有test_layout文件以及其关键函数
-    if not os.path.isfile("test_layout.py"):
-        print(f"  ✗ test_layout.py not found")
-        return False
-    
-    try:
-        with open("test_layout.py", "r", encoding="utf-8") as f:
-            content = f.read()
-        
-        # 检查关键函数是否存在
-        key_functions = [
-            "load_layout_into_editor",
-            "save_layout",
-            "create_editor_item",
-            "make_sim_cfg",
-        ]
-        
-        missing = [func for func in key_functions if f"def {func}" not in content]
+    ok = True
+    for file_name, funcs in required.items():
+        path = Path(file_name)
+        if not path.is_file():
+            _err(f"{file_name} not found")
+            ok = False
+            continue
+        defined = set(_collect_functions(path))
+        missing = [f for f in funcs if f not in defined]
         if missing:
-            print(f"  ✗ test_layout.py missing functions: {missing}")
-            return False
-        
-        print(f"  ✓ test_layout.py has all required integration points")
+            _err(f"{file_name} missing functions: {missing}")
+            ok = False
+        else:
+            _ok(f"{file_name} signatures look good")
+    return ok
+
+
+def verify_artifact_schema_if_present() -> bool:
+    """
+    Optional schema checks:
+    - If a receptacle surfaces json exists, ensure top_surface uses point_cloud_file.
+    """
+    print("[Verify] Optional artifact schema")
+    surface_candidates = list(Path("results/receptacle_queries").glob("*/*_receptacle_surfaces_*.json"))
+    if not surface_candidates:
+        _warn("No receptacle surfaces artifacts found; skip schema check.")
         return True
-    
-    except Exception as e:
-        print(f"  ✗ Error checking test_layout.py: {e}")
+
+    target = max(surface_candidates, key=lambda p: p.stat().st_mtime)
+    try:
+        payload = json.loads(target.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        _err(f"Failed to parse {target}: {exc}")
         return False
 
+    rooms = payload.get("rooms", []) if isinstance(payload, dict) else []
+    for room in rooms:
+        for rec in room.get("receptacle_instances", []) or []:
+            top = rec.get("top_surface", {}) if isinstance(rec, dict) else {}
+            if not isinstance(top, dict):
+                continue
+            if "point_cloud_file" not in top:
+                _err(f"{target} has top_surface without point_cloud_file")
+                return False
+            if "points" in top:
+                _err(f"{target} still stores top_surface.points")
+                return False
+    _ok(f"Artifact schema looks good: {target}")
+    return True
 
-def main():
-    """运行所有验证。"""
-    print("\n" + "="*60)
-    print("AI物体房间推理系统 - 工作流验证")
-    print("="*60 + "\n")
-    
+
+def main() -> int:
     checks = [
         ("File Existence", verify_file_existence),
         ("Directory Structure", verify_directory_structure),
-        ("JSON Schema", verify_json_schema),
         ("Python Syntax", verify_python_syntax),
         ("Function Signatures", verify_function_signatures),
-        ("Data Flow Compatibility", verify_data_flow),
+        ("Artifact Schema", verify_artifact_schema_if_present),
     ]
-    
-    results = {}
-    for check_name, check_func in checks:
+
+    print("=" * 60)
+    print("Workflow Verification")
+    print("=" * 60)
+
+    results: Dict[str, bool] = {}
+    for name, fn in checks:
         try:
-            result = check_func()
-            results[check_name] = result
-            print()
-        except Exception as e:
-            print(f"  ✗ Unexpected error: {e}\n")
-            results[check_name] = False
-    
-    # Summary
-    print("="*60)
-    print("验证总结")
-    print("="*60)
-    
+            results[name] = bool(fn())
+        except Exception as exc:  # noqa: BLE001
+            _err(f"{name} raised exception: {exc}")
+            results[name] = False
+        print("")
+
     passed = sum(1 for v in results.values() if v)
     total = len(results)
-    
-    for name, result in results.items():
-        status = "✓ PASS" if result else "✗ FAIL"
-        print(f"{status}: {name}")
-    
+    print("=" * 60)
+    print("Summary")
+    print("=" * 60)
+    for name, ok in results.items():
+        print(f"[{'PASS' if ok else 'FAIL'}] {name}")
     print(f"\nTotal: {passed}/{total} passed")
-    
-    if passed == total:
-        print("\n✓ 所有验证通过！系统已准备好使用。")
-        print("\n快速开始：")
-        print("  1. query_rooms_for_objects.py --help")
-        print("  2. sample_and_place_objects.py --help")
-        return 0
-    else:
-        print(f"\n✗ 有 {total - passed} 项验证失败，请检查上述错误。")
-        return 1
+    return 0 if passed == total else 1
 
 
 if __name__ == "__main__":

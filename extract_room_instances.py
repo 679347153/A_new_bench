@@ -3,7 +3,7 @@
 
 这个脚本有两类用途：
 1) 房间级查询：输入 scene + room_id，返回该房间内全部 instance 元信息。
-2) 单实例点云：再输入 instance_id，返回该实例点云摘要并导出 ply/xyz 文件。
+2) 单实例点云：再输入 instance_id，返回该实例点云摘要并导出 ply 文件。
 
 点云获取链路（按优先级）
 ------------------------
@@ -47,6 +47,7 @@ import csv
 import io
 import json
 import math
+import os
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -1614,9 +1615,13 @@ def main() -> None:
         else:
             pc_path = output_path.with_suffix(".ply")
         point_cloud_saved_path = _write_point_cloud_file(points, pc_path, fmt=args.pointcloud_format)
-        # JSON 中不再内嵌具体点云点集，只保留摘要与文件路径。
+        # JSON no longer stores raw points; keep only summary and relative file path.
         if isinstance(point_cloud, dict):
-            point_cloud["point_cloud_file"] = str(point_cloud_saved_path.resolve())
+            try:
+                point_cloud_file_ref = os.path.relpath(point_cloud_saved_path, output_path.parent)
+            except ValueError:
+                point_cloud_file_ref = str(point_cloud_saved_path.resolve())
+            point_cloud["point_cloud_file"] = point_cloud_file_ref
             point_cloud["point_cloud_format"] = "ply"
             if "points" in point_cloud:
                 del point_cloud["points"]

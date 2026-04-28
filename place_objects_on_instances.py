@@ -339,7 +339,7 @@ def _load_point_cloud_file(path: Path) -> np.ndarray:
     return np.zeros((0, 3), dtype=np.float32)
 
 
-def _load_surface_points(surface_item: Dict[str, Any]) -> List[List[float]]:
+def _load_surface_points(surface_item: Dict[str, Any], base_dir: Optional[Path] = None) -> List[List[float]]:
     """
     Load surface points from `top_surface.point_cloud_file`.
 
@@ -352,7 +352,12 @@ def _load_surface_points(surface_item: Dict[str, Any]) -> List[List[float]]:
 
     file_path = top_surface.get("point_cloud_file")
     if isinstance(file_path, str) and file_path.strip():
-        arr = _load_point_cloud_file(Path(file_path).expanduser().resolve())
+        p = Path(file_path).expanduser()
+        if not p.is_absolute() and base_dir is not None:
+            p = (base_dir / p).resolve()
+        else:
+            p = p.resolve()
+        arr = _load_point_cloud_file(p)
         if arr.size > 0:
             return np.round(arr[:, :3], 4).tolist()
 
@@ -444,6 +449,13 @@ def place_objects_on_instances(
     scene_paths = resolve_scene_paths(scene_name, require_semantic=False, root=data_dir)
     scene_path = str(scene_paths.stage_glb) if scene_paths is not None else scene_name
     by_room_instance, by_instance = _build_surface_index(surfaces_payload)
+    surfaces_base_dir: Optional[Path] = None
+    raw_source_dir = surfaces_payload.get("_source_json_dir") if isinstance(surfaces_payload, dict) else None
+    raw_source_path = surfaces_payload.get("_source_json_path") if isinstance(surfaces_payload, dict) else None
+    if isinstance(raw_source_dir, str) and raw_source_dir.strip():
+        surfaces_base_dir = Path(raw_source_dir).expanduser().resolve()
+    elif isinstance(raw_source_path, str) and raw_source_path.strip():
+        surfaces_base_dir = Path(raw_source_path).expanduser().resolve().parent
 
     sim = _make_simulator(scene_name, data_dir=data_dir, enable_physics=True)
     if sim is not None:
@@ -482,7 +494,7 @@ def place_objects_on_instances(
             )
             continue
 
-        surface_points = _load_surface_points(surface_item)
+        surface_points = _load_surface_points(surface_item, base_dir=surfaces_base_dir)
         candidates = _sample_surface_points(surface_points, max_trials=max_trials_per_object, rng=rng)
         if not candidates:
             failed_objects.append(
@@ -634,6 +646,10 @@ def main() -> int:
         return 1
     try:
         surfaces_payload = json.loads(Path(args.surfaces_json).read_text(encoding="utf-8"))
+        if isinstance(surfaces_payload, dict):
+            src_path = Path(args.surfaces_json).expanduser().resolve()
+            surfaces_payload["_source_json_path"] = str(src_path)
+            surfaces_payload["_source_json_dir"] = str(src_path.parent)
     except Exception as exc:
         print(f"[Error] Failed to load surfaces json: {exc}", file=sys.stderr)
         return 1

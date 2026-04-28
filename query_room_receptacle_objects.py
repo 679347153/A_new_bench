@@ -20,7 +20,7 @@ from __future__ import annotations
 包含：
 - 场景级元信息
 - 每个房间的可放置实例列表
-- 每个实例的上表面点云（points、normal、centroid、bounds）
+- 每个实例的上表面摘要（normal、centroid、bounds）与 `point_cloud_file`（PLY 路径）
 
 执行指引
 --------
@@ -81,12 +81,14 @@ DEFAULT_OUTPUT_DIR = Path("./results/receptacle_queries")
 
 SYSTEM_PROMPT = (
     "You are an indoor affordance assistant. "
-    "Given room instances, identify which objects can stably support placing smaller objects on top."
+    "Given room instances, identify which objects can stably support placing smaller objects on top. "
+    "Do not automatically exclude beds: beds can be valid support surfaces for light/soft items (e.g., teddy bears)."
 )
 
 USER_PROMPT_TEMPLATE = """
 Task:
 Select objects that are suitable as receptacles/surfaces for placing smaller items (e.g., cup, book, phone, decoration).
+Also consider beds as valid receptacles when appropriate: beds can hold light/soft objects such as teddy bears.
 
 Hard constraints:
 1) You must ONLY choose instance_id values from the provided candidate list.
@@ -94,6 +96,7 @@ Hard constraints:
 3) confidence_score must be a float in [0, 1], sorted descending.
 4) Return between 1 and {max_results} objects.
 5) Reasoning must be one short sentence.
+6) Do not reject a candidate only because it is a bed; include beds when they are plausible support surfaces.
 
 Output JSON schema:
 {{
@@ -973,7 +976,11 @@ def main() -> int:
                 points,
                 surface_pc_dir / f"room_{room_id}_instance_{instance_id}_top_surface.ply",
             )
-            top_surface["point_cloud_file"] = str(saved.resolve())
+            try:
+                point_cloud_ref = os.path.relpath(saved, output_path.parent)
+            except ValueError:
+                point_cloud_ref = str(saved.resolve())
+            top_surface["point_cloud_file"] = point_cloud_ref
             top_surface["point_cloud_format"] = "ply"
             if "points" in top_surface:
                 del top_surface["points"]

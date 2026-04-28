@@ -29,8 +29,8 @@
 
 说明：
 1. 你要求的目标链路就是以上树状结构。
-2. 当前代码已具备主要节点能力，但“主干到自动放置分支”的一键式编排仍属于待完全打通状态。
-3. 目前可通过中间 JSON（如 `object_layout`、`surfaces_json`、`assignment_plan`）进行链路衔接。
+2. 当前代码已具备主要节点能力；自动分支已支持在 `assign_objects_to_receptacle_instances.py` 中缺省 `--surfaces-json` 时自动触发承载面提取。
+3. 链路通过中间 JSON（如 `object_layout`、`surfaces_json`、`assignment_plan`）进行稳定衔接。
 
 ## 3. 模块实施内容
 
@@ -76,7 +76,7 @@
    - habitat-sim 直接字段
    - stage mesh 语义颜色
    - AABB/OBB 采样回退
-4. 支持将点云导出为 `.ply/.xyz`，是自动放置分支的基础能力模块。
+4. 支持将点云导出为 `.ply`，JSON 仅保留点云文件路径字段，是自动放置分支的基础能力模块。
 
 ### 3.6 `query_room_receptacle_objects.py`：全房间可放置 instance 上表面提取
 已实现能力：
@@ -95,7 +95,7 @@
 
 ### 3.8 `place_objects_on_instances.py`：自动放置与碰撞检查
 已实现能力：
-1. 根据分配结果在目标 `top_surface.points` 上采样落点。
+1. 根据分配结果在目标 `top_surface.point_cloud_file`（PLY）上采样落点（兼容旧版 `top_surface.points`）。
 2. 使用 `spawn_height` 上抬策略（默认 `0.3m`）。
 3. 执行最小距离约束 `max(min_distance, radius_i + radius_j)`。
 4. 启用 Habitat-Sim 物理步进与接触碰撞检测。
@@ -140,7 +140,7 @@
 ### 5.2 当前实现状态
 1. 两个分支核心能力都已实现。
 2. 主干到自动分支可通过中间 JSON 衔接，语义约束可保持一致。
-3. 一键化编排与完全无缝串联仍有整合空间。
+3. 自动分支已支持“分配脚本内自动补齐承载面查询”，仍可继续完善整库级一键编排体验。
 
 ## 6. 与本次需求对照
 1. 技术报告新增 `extract_room_instances.py`：已完成。

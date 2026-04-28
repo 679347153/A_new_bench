@@ -16,7 +16,8 @@ from __future__ import annotations
 
 输入
 ----
-- `--surfaces-json`：由 `query_room_receptacle_objects.py` 生成的上表面结果
+- `--surfaces-json`（可选）：由 `query_room_receptacle_objects.py` 生成的上表面结果；
+  若不提供，本脚本会自动调用 `query_room_receptacle_objects.py` 先生成。
 - 采样物体来源二选一：
   - `--object-layout <layout.json>`
   - 调用 `sample_object_positions(...)` 现场采样
@@ -28,10 +29,9 @@ from __future__ import annotations
 
 执行指引
 --------
-1) 标准流程（LLM 分配 + 自动放置）：
+1) 标准流程（LLM 分配 + 自动放置，自动生成 surfaces）：
    python assign_objects_to_receptacle_instances.py \
      --scene 00824-Dd4bFSTQ8gi \
-     --surfaces-json results/receptacle_queries/00824-Dd4bFSTQ8gi/00824-Dd4bFSTQ8gi_receptacle_surfaces_all_rooms.json \
      --ssh-host 7.216.187.6 --ssh-port 31822 --ssh-user root --ssh-password 666666
 
 2) 仅启发式分配（不依赖 LLM），仍执行放置：
@@ -414,6 +414,123 @@ def _validate_ssh_args(args: argparse.Namespace) -> bool:
     return bool(args.ssh_host and args.ssh_user and (args.ssh_password or args.ssh_key))
 
 
+def _safe_int(value: Any, default: int = -1) -> int:
+    """Best-effort int conversion used for robust JSON inputs."""
+    try:
+        return int(value)
+    except Exception:
+        return int(default)
+
+
+def _normalize_object_id(value: Any, fallback: int) -> Any:
+    """Normalize object id for JSON safety while preserving non-numeric ids."""
+    if value is None:
+        return int(fallback)
+    if isinstance(value, bool):
+        return int(fallback)
+    if isinstance(value, int):
+        return int(value)
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return int(fallback)
+        try:
+            return int(stripped)
+        except Exception:
+            return stripped
+    try:
+        return int(value)
+    except Exception:
+        return int(fallback)
+
+
+def _resolve_or_generate_surfaces_json(args: argparse.Namespace) -> Path:
+    """
+    Resolve surfaces JSON path.
+
+    If `--surfaces-json` is omitted, auto-run `query_room_receptacle_objects.py`
+    so assignment+placement can be triggered in one command.
+    """
+    if args.surfaces_json:
+        provided = Path(args.surfaces_json).expanduser().resolve()
+        if not provided.is_file():
+            raise FileNotFoundError(f"surfaces json not found: {provided}")
+        print(f"[Info] Using existing surfaces json: {provided}")
+        return provided
+
+    if args.surfaces_output:
+        output_path = Path(args.surfaces_output).expanduser().resolve()
+    else:
+        output_path = (
+            Path("./results/receptacle_queries")
+            / str(args.scene)
+            / f"{args.scene}_receptacle_surfaces_all_rooms.json"
+        ).resolve()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    cmd: List[str] = [
+        sys.executable,
+        "query_room_receptacle_objects.py",
+        "--scene",
+        str(args.scene),
+        "--data-dir",
+        str(args.data_dir),
+        "--output",
+        str(output_path),
+        "--max-results",
+        str(max(1, int(args.surface_max_results))),
+        "--surface-points-per-instance",
+        str(max(1, int(args.surface_points_per_instance))),
+        "--surface-min-points",
+        str(max(4, int(args.surface_min_points))),
+        "--instance-pointcloud-points",
+        str(max(32, int(args.surface_instance_pointcloud_points))),
+    ]
+
+    use_surface_llm = (not args.disable_surface_llm) and _validate_ssh_args(args) and (OpenAI is not None)
+    if use_surface_llm:
+        cmd.extend(
+            [
+                "--ssh-host",
+                str(args.ssh_host),
+                "--ssh-port",
+                str(args.ssh_port),
+                "--ssh-user",
+                str(args.ssh_user),
+                "--vllm-host",
+                str(args.vllm_host),
+                "--vllm-port",
+                str(args.vllm_port),
+                "--local-port",
+                str(args.local_port),
+                "--model",
+                str(args.surface_model),
+                "--max-tokens",
+                str(max(1, int(args.surface_max_tokens))),
+                "--timeout",
+                str(max(1, int(args.timeout))),
+            ]
+        )
+        if args.ssh_password:
+            cmd.extend(["--ssh-password", str(args.ssh_password)])
+        if args.ssh_key:
+            cmd.extend(["--ssh-key", str(args.ssh_key)])
+    else:
+        cmd.append("--disable-llm")
+
+    print("[Info] surfaces-json not provided, generating it now...")
+    print(f"[Info] Running: {' '.join(cmd)}")
+    completed = subprocess.run(cmd, check=False)
+    if completed.returncode != 0:
+        raise RuntimeError(
+            f"query_room_receptacle_objects.py failed with code {completed.returncode}"
+        )
+    if not output_path.is_file():
+        raise FileNotFoundError(f"surface query did not create output: {output_path}")
+    print(f"[Info] Generated surfaces json: {output_path}")
+    return output_path
+
+
 def _load_or_sample_objects(args: argparse.Namespace) -> List[Dict[str, Any]]:
     """
     从布局文件加载采样物体，或现场进行采样。
@@ -496,7 +613,18 @@ def parse_args() -> argparse.Namespace:
     """定义分配计划生成与可选放置执行的命令行参数。"""
     parser = argparse.ArgumentParser(description="Assign sampled objects to in-room receptacle instances, then place automatically.")
     parser.add_argument("--scene", required=True, help="Scene name")
-    parser.add_argument("--surfaces-json", required=True, help="Output json from query_room_receptacle_objects.py")
+    parser.add_argument(
+        "--surfaces-json",
+        type=str,
+        default=None,
+        help="Output json from query_room_receptacle_objects.py; if omitted, this script auto-generates it.",
+    )
+    parser.add_argument(
+        "--surfaces-output",
+        type=str,
+        default=None,
+        help="When auto-generating surfaces, optional output json path.",
+    )
     parser.add_argument("--object-layout", type=str, default=None, help="Optional sampled layout json with objects + sampled_region_id")
     parser.add_argument("--images-dir", type=str, default=DEFAULT_IMAGES_DIR, help="Object images directory")
     parser.add_argument("--sampling-mode", choices=["load", "generate"], default="load", help="Sampling mode when --object-layout is absent")
@@ -517,6 +645,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
 
     parser.add_argument("--disable-llm", action="store_true", help="Use heuristic-only assignment")
+    parser.add_argument(
+        "--disable-surface-llm",
+        action="store_true",
+        help="Force heuristic-only mode when auto-generating surfaces.",
+    )
+    parser.add_argument("--surface-model", default="Qwen/Qwen3-VL-235B-A22B-Thinking", help="LLM model for auto surface query")
+    parser.add_argument("--surface-max-tokens", type=int, default=2048, help="Max response tokens for auto surface query")
+    parser.add_argument("--surface-max-results", type=int, default=10, help="Max receptacle instances per room in auto surface query")
+    parser.add_argument("--surface-instance-pointcloud-points", type=int, default=2048, help="Point count for per-instance extraction in auto surface query")
+    parser.add_argument("--surface-points-per-instance", type=int, default=256, help="Saved top-surface points per instance in auto surface query")
+    parser.add_argument("--surface-min-points", type=int, default=48, help="Minimum valid top-surface points in auto surface query")
     parser.add_argument("--ssh-host", default=None, help="SSH server host")
     parser.add_argument("--ssh-port", type=int, default=22, help="SSH server port")
     parser.add_argument("--ssh-user", default=None, help="SSH username")
@@ -546,7 +685,11 @@ def main() -> int:
     np.random.seed(int(args.seed))
 
     try:
-        surfaces_payload = json.loads(Path(args.surfaces_json).read_text(encoding="utf-8"))
+        surfaces_json_path = _resolve_or_generate_surfaces_json(args)
+        surfaces_payload = json.loads(surfaces_json_path.read_text(encoding="utf-8"))
+        if isinstance(surfaces_payload, dict):
+            surfaces_payload["_source_json_path"] = str(surfaces_json_path.resolve())
+            surfaces_payload["_source_json_dir"] = str(surfaces_json_path.resolve().parent)
     except Exception as exc:
         print(f"[Error] Failed to load surfaces json: {exc}", file=sys.stderr)
         return 1
@@ -593,7 +736,7 @@ def main() -> int:
     assignments: List[Dict[str, Any]] = []
     llm_debug: List[Dict[str, Any]] = []
     for idx, obj in enumerate(objects):
-        room_id = int(obj.get("sampled_region_id", -1))
+        room_id = _safe_int(obj.get("sampled_region_id", -1), -1)
         room_entry = room_map.get(room_id)
         if room_entry is None:
             llm_debug.append({"object_id": obj.get("id", idx), "status": "missing_room_surface"})
@@ -633,9 +776,10 @@ def main() -> int:
             llm_debug.append({"object_id": obj.get("id", idx), "status": "invalid_decision"})
             continue
 
+        object_id = _normalize_object_id(obj.get("id", idx), fallback=idx)
         assignments.append(
             {
-                "object_id": int(obj.get("id", idx)),
+                "object_id": object_id,
                 "model_id": model_id,
                 "name": name,
                 "image_path": image_path,
