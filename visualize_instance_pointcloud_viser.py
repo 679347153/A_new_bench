@@ -601,28 +601,12 @@ def _add_room_instances_overview(server: viser.ViserServer, data: Dict[str, Any]
         colors.append((hue, 255 - hue // 2, 120))
 
     for i, center in enumerate(centers):
-        center_np = _as_np3(center)
-        try:
-            server.scene.add_sphere(
-                name=f"room_instance_center_{i}",
-                radius=0.03,
-                center=center_np,
-                color=colors[i],
-            )
-        except TypeError:
-            try:
-                server.scene.add_sphere(
-                    name=f"room_instance_center_{i}",
-                    radius=0.03,
-                    position=center_np,
-                    color=colors[i],
-                )
-            except TypeError:
-                server.scene.add_sphere(
-                    name=f"room_instance_center_{i}",
-                    radius=0.03,
-                    center=center_np,
-                )
+        _add_point_marker(
+            server=server,
+            name=f"room_instance_center_{i}",
+            xyz=center,
+            color=colors[i],
+        )
 
 
 def _rotation_xyz_deg(rx_deg: float, ry_deg: float, rz_deg: float) -> np.ndarray:
@@ -921,6 +905,15 @@ def _color_by_index(idx: int) -> Tuple[int, int, int]:
 
 def _add_point_marker(server: viser.ViserServer, name: str, xyz: List[float], color: Tuple[int, int, int]) -> None:
     center_np = _as_np3(xyz)
+    # Newer/older viser builds may not expose add_sphere on SceneApi.
+    if not hasattr(server.scene, "add_sphere"):
+        _add_point_cloud(
+            server=server,
+            name=name,
+            points=center_np.reshape(1, 3),
+            color=color,
+        )
+        return
     try:
         server.scene.add_sphere(
             name=name,
@@ -928,7 +921,7 @@ def _add_point_marker(server: viser.ViserServer, name: str, xyz: List[float], co
             center=center_np,
             color=color,
         )
-    except TypeError:
+    except (TypeError, AttributeError):
         try:
             server.scene.add_sphere(
                 name=name,
@@ -936,11 +929,12 @@ def _add_point_marker(server: viser.ViserServer, name: str, xyz: List[float], co
                 position=center_np,
                 color=color,
             )
-        except TypeError:
-            server.scene.add_sphere(
+        except (TypeError, AttributeError):
+            _add_point_cloud(
+                server=server,
                 name=name,
-                radius=0.03,
-                center=center_np,
+                points=center_np.reshape(1, 3),
+                color=color,
             )
 
 
