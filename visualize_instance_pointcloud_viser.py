@@ -64,6 +64,14 @@
       --show-scene-mesh \
       --port 8080
 
+4) 浏览 query_room_receptacle_objects.py 的房间承载面结果（按房间切换）：
+    python visualize_instance_pointcloud_viser.py \
+      --input results/receptacle_queries/00800-TEEsavR23oF/00800-TEEsavR23oF_receptacle_surfaces_all_rooms.json \
+      --show-scene-mesh \
+      --receptacle-view auto
+终端按键命令切换房间：n/p、list、goto <index>、room <room_id>、show、quit
+
+
 依赖
 ----
 必需：viser, numpy
@@ -857,6 +865,239 @@ def build_visualization(
     }
 
 
+def _is_receptacle_query_payload(data: Dict[str, Any]) -> bool:
+    rooms = data.get("rooms", [])
+    if not isinstance(rooms, list) or not rooms:
+        return False
+    return any(isinstance(room, dict) and isinstance(room.get("receptacle_instances", None), list) for room in rooms)
+
+
+def _resolve_data_path(raw_path: str, input_json_path: Path) -> Optional[Path]:
+    text = (raw_path or "").strip()
+    if not text:
+        return None
+    p = Path(text).expanduser()
+    if not p.is_absolute():
+        p = (input_json_path.parent / p).resolve()
+    else:
+        p = p.resolve()
+    return p if p.is_file() else None
+
+
+def _load_receptacle_points(top_surface: Dict[str, Any], input_json_path: Path) -> np.ndarray:
+    if not isinstance(top_surface, dict):
+        return np.zeros((0, 3), dtype=np.float32)
+
+    raw_file = top_surface.get("point_cloud_file")
+    if isinstance(raw_file, str) and raw_file.strip():
+        path = _resolve_data_path(raw_file, input_json_path)
+        if path is not None:
+            arr = _load_point_cloud_file(path)
+            if arr.ndim == 2 and arr.shape[1] >= 3:
+                return arr[:, :3]
+
+    # Legacy fallback: embedded points in JSON.
+    raw_points = top_surface.get("points", [])
+    if isinstance(raw_points, list) and raw_points:
+        arr = np.asarray(raw_points, dtype=np.float32)
+        if arr.ndim == 2 and arr.shape[1] >= 3:
+            return arr[:, :3]
+    return np.zeros((0, 3), dtype=np.float32)
+
+
+def _color_by_index(idx: int) -> Tuple[int, int, int]:
+    palette = [
+        (30, 180, 255),
+        (255, 170, 30),
+        (120, 220, 120),
+        (255, 100, 170),
+        (180, 140, 255),
+        (255, 230, 80),
+        (120, 240, 220),
+        (255, 130, 90),
+    ]
+    return palette[idx % len(palette)]
+
+
+def _add_point_marker(server: viser.ViserServer, name: str, xyz: List[float], color: Tuple[int, int, int]) -> None:
+    center_np = _as_np3(xyz)
+    try:
+        server.scene.add_sphere(
+            name=name,
+            radius=0.03,
+            center=center_np,
+            color=color,
+        )
+    except TypeError:
+        try:
+            server.scene.add_sphere(
+                name=name,
+                radius=0.03,
+                position=center_np,
+                color=color,
+            )
+        except TypeError:
+            server.scene.add_sphere(
+                name=name,
+                radius=0.03,
+                center=center_np,
+            )
+
+
+def _prepare_receptacle_rooms(data: Dict[str, Any], input_json_path: Path) -> List[Dict[str, Any]]:
+    rooms_raw = data.get("rooms", [])
+    if not isinstance(rooms_raw, list):
+        return []
+
+    prepared: List[Dict[str, Any]] = []
+    for ridx, room_item in enumerate(rooms_raw):
+        if not isinstance(room_item, dict):
+            continue
+        room_id = room_item.get("room_id", ridx)
+        try:
+            room_id = int(room_id)
+        except Exception:
+            room_id = ridx
+
+        room_meta = room_item.get("room", {})
+        room_bbox = room_meta.get("bounding_box") if isinstance(room_meta, dict) else None
+        if not isinstance(room_bbox, dict):
+            room_bbox = None
+
+        receptacles: List[Dict[str, Any]] = []
+        rec_list = room_item.get("receptacle_instances", [])
+        if isinstance(rec_list, list):
+            for rec_idx, rec in enumerate(rec_list):
+                if not isinstance(rec, dict):
+                    continue
+                instance = rec.get("instance", {}) if isinstance(rec.get("instance", {}), dict) else {}
+                top_surface = rec.get("top_surface", {}) if isinstance(rec.get("top_surface", {}), dict) else {}
+
+                instance_id = rec.get("instance_id", instance.get("id", -1))
+                try:
+                    instance_id = int(instance_id)
+                except Exception:
+                    instance_id = -1
+
+                rank = rec.get("rank", rec_idx + 1)
+                try:
+                    rank = int(rank)
+                except Exception:
+                    rank = rec_idx + 1
+
+                confidence = rec.get("confidence_score", 0.0)
+                try:
+                    confidence = float(confidence)
+                except Exception:
+                    confidence = 0.0
+
+                category = str(rec.get("category", instance.get("category", "unknown")))
+                points = _load_receptacle_points(top_surface, input_json_path)
+                top_bbox = top_surface.get("bounds", {}) if isinstance(top_surface.get("bounds", {}), dict) else {}
+                top_bbox = top_bbox if isinstance(top_bbox, dict) else {}
+                centroid = _as_list3(top_surface.get("centroid"))
+                instance_bbox = instance.get("aabb", {}) if isinstance(instance.get("aabb", {}), dict) else {}
+
+                receptacles.append(
+                    {
+                        "rank": rank,
+                        "instance_id": instance_id,
+                        "category": category,
+                        "confidence_score": confidence,
+                        "points": points,
+                        "top_bbox": top_bbox,
+                        "instance_bbox": instance_bbox,
+                        "centroid": centroid,
+                        "point_count": int(points.shape[0]) if points.ndim == 2 else 0,
+                    }
+                )
+
+        receptacles.sort(key=lambda x: int(x.get("rank", 999999)))
+        prepared.append(
+            {
+                "room_id": room_id,
+                "room_bbox": room_bbox,
+                "receptacles": receptacles,
+                "room_object_count": int(room_item.get("room_object_count", 0)),
+                "receptacle_instance_count": int(room_item.get("receptacle_instance_count", len(receptacles))),
+            }
+        )
+
+    prepared.sort(key=lambda x: int(x.get("room_id", 0)))
+    return prepared
+
+
+def _print_room_switch_help() -> None:
+    print("[RoomView] Commands:")
+    print("  n / next       -> switch to next room")
+    print("  p / prev       -> switch to previous room")
+    print("  list           -> list room index and room_id")
+    print("  show           -> show current room summary")
+    print("  goto <index>   -> jump by room index")
+    print("  room <room_id> -> jump by room_id")
+    print("  help           -> show help")
+    print("  quit           -> exit")
+
+
+def _print_room_summary(room_view: Dict[str, Any], idx: int, total: int) -> None:
+    room_id = int(room_view.get("room_id", -1))
+    receptacles = room_view.get("receptacles", []) if isinstance(room_view.get("receptacles", []), list) else []
+    print(
+        f"[RoomView] room_index={idx}/{max(total - 1, 0)} room_id={room_id} "
+        f"receptacles={len(receptacles)}"
+    )
+    for rec in receptacles:
+        print(
+            "  [Rec] rank={rank} instance={iid} cat={cat} score={score:.3f} points={pts}".format(
+                rank=int(rec.get("rank", -1)),
+                iid=int(rec.get("instance_id", -1)),
+                cat=str(rec.get("category", "unknown")),
+                score=float(rec.get("confidence_score", 0.0)),
+                pts=int(rec.get("point_count", 0)),
+            )
+        )
+
+
+def _render_receptacle_room(
+    server: viser.ViserServer,
+    room_view: Dict[str, Any],
+    show_scene_mesh: bool,
+    scene_name: Optional[str],
+    data_dir: Path,
+    reset_scene: bool = True,
+) -> None:
+    if reset_scene:
+        _safe_scene_reset(server)
+    _add_axes(server)
+
+    if show_scene_mesh and scene_name:
+        _load_scene_mesh_if_available(server, scene_name, data_dir=data_dir)
+
+    room_bbox = room_view.get("room_bbox")
+    if isinstance(room_bbox, dict):
+        _add_bbox_lines(server, "room_bbox", room_bbox, (255, 180, 0))
+
+    receptacles = room_view.get("receptacles", []) if isinstance(room_view.get("receptacles", []), list) else []
+    for i, rec in enumerate(receptacles):
+        color = _color_by_index(i)
+        pts = rec.get("points", np.zeros((0, 3), dtype=np.float32))
+        if isinstance(pts, np.ndarray) and pts.ndim == 2 and pts.shape[1] >= 3 and pts.shape[0] > 0:
+            _add_point_cloud(server, f"receptacle_surface_pc_{i}", pts[:, :3], color)
+
+        top_bbox = rec.get("top_bbox")
+        if isinstance(top_bbox, dict):
+            _add_bbox_lines(server, f"receptacle_surface_bbox_{i}", top_bbox, color)
+
+        instance_bbox = rec.get("instance_bbox")
+        if isinstance(instance_bbox, dict):
+            dim = (max(30, color[0] // 2), max(30, color[1] // 2), max(30, color[2] // 2))
+            _add_bbox_lines(server, f"receptacle_instance_bbox_{i}", instance_bbox, dim)
+
+        centroid = rec.get("centroid")
+        if isinstance(centroid, list) and len(centroid) >= 3:
+            _add_point_marker(server, f"receptacle_centroid_{i}", centroid, color)
+
+
 def _print_interactive_help() -> None:
     print("[Interactive] Commands:")
     print("  set RX RY RZ   -> 设置绝对旋转角度（单位：度）")
@@ -905,6 +1146,12 @@ def main() -> None:
     )
     parser.add_argument("--pointcloud-file", type=str, default=None, help="可选：显式指定点云文件（.ply/.xyz）")
     parser.add_argument("--port", type=int, default=8080, help="viser 服务端口，0 表示自动分配")
+    parser.add_argument(
+        "--receptacle-view",
+        choices=("auto", "on", "off"),
+        default="auto",
+        help="Whether to enable room-by-room receptacle visualization for query_room_receptacle_objects output.",
+    )
     args = parser.parse_args()
 
     input_path = Path(args.input).expanduser().resolve()
@@ -913,6 +1160,15 @@ def main() -> None:
 
     data = _load_export_json(input_path)
     scene_name = _pick_scene_name(data, input_path)
+    data_dir = Path(args.data_dir)
+    receptacle_payload = _is_receptacle_query_payload(data)
+    use_receptacle_view = (
+        (args.receptacle_view == "on")
+        or (args.receptacle_view == "auto" and receptacle_payload)
+    )
+    if args.receptacle_view == "on" and not receptacle_payload:
+        raise ValueError("--receptacle-view on was requested, but input JSON is not a receptacle query payload.")
+
     explicit_pc = Path(args.pointcloud_file).expanduser().resolve() if args.pointcloud_file else None
     json_pc = _extract_point_cloud_path_from_json(data, input_path)
     companion_pc = _find_companion_point_cloud_file(input_path, explicit_path=None)
@@ -940,6 +1196,110 @@ def main() -> None:
         print(f"[Warning] Failed to bind requested port {args.port}: {exc}. Using auto port instead.")
         server = viser.ViserServer(port=0)
 
+    if use_receptacle_view:
+        room_views = _prepare_receptacle_rooms(data, input_path)
+        if not room_views:
+            raise RuntimeError("No valid room/receptacle entries found in input JSON.")
+
+        current_idx = 0
+        _render_receptacle_room(
+            server=server,
+            room_view=room_views[current_idx],
+            show_scene_mesh=bool(args.show_scene_mesh),
+            scene_name=scene_name,
+            data_dir=data_dir,
+            reset_scene=True,
+        )
+
+        print("[OK] viser server started.")
+        print("[OK] Open the printed URL in your browser to inspect the scene.")
+        print("[Info] Receptacle room view mode enabled.")
+        _print_room_summary(room_views[current_idx], current_idx, len(room_views))
+        _print_room_switch_help()
+
+        try:
+            while True:
+                command = input("room-view> ").strip()
+                if not command:
+                    continue
+
+                low = command.lower()
+                if low in {"quit", "q", "exit"}:
+                    break
+                if low in {"help", "h", "?"}:
+                    _print_room_switch_help()
+                    continue
+                if low in {"show", "s"}:
+                    _print_room_summary(room_views[current_idx], current_idx, len(room_views))
+                    continue
+                if low in {"list", "ls"}:
+                    for i, room_view in enumerate(room_views):
+                        print(
+                            "[Room] index={idx} room_id={rid} receptacles={cnt}".format(
+                                idx=i,
+                                rid=int(room_view.get("room_id", -1)),
+                                cnt=len(room_view.get("receptacles", [])),
+                            )
+                        )
+                    continue
+
+                next_idx = current_idx
+                if low in {"n", "next"}:
+                    next_idx = (current_idx + 1) % len(room_views)
+                elif low in {"p", "prev", "previous"}:
+                    next_idx = (current_idx - 1) % len(room_views)
+                else:
+                    parts = command.split()
+                    if low.isdigit():
+                        val = int(low)
+                        if 0 <= val < len(room_views):
+                            next_idx = val
+                        else:
+                            print(f"[Error] Room index out of range: {val}")
+                            continue
+                    elif len(parts) == 2 and parts[0].lower() == "goto":
+                        try:
+                            val = int(parts[1])
+                        except ValueError:
+                            print("[Error] Usage: goto <index>")
+                            continue
+                        if 0 <= val < len(room_views):
+                            next_idx = val
+                        else:
+                            print(f"[Error] Room index out of range: {val}")
+                            continue
+                    elif len(parts) == 2 and parts[0].lower() == "room":
+                        try:
+                            rid = int(parts[1])
+                        except ValueError:
+                            print("[Error] Usage: room <room_id>")
+                            continue
+                        matches = [i for i, rv in enumerate(room_views) if int(rv.get("room_id", -1)) == rid]
+                        if not matches:
+                            print(f"[Error] room_id not found: {rid}")
+                            continue
+                        next_idx = matches[0]
+                    else:
+                        print("[Error] Unknown command. Type 'help' to see supported commands.")
+                        continue
+
+                if next_idx != current_idx:
+                    current_idx = next_idx
+                    _render_receptacle_room(
+                        server=server,
+                        room_view=room_views[current_idx],
+                        show_scene_mesh=bool(args.show_scene_mesh),
+                        scene_name=scene_name,
+                        data_dir=data_dir,
+                        reset_scene=True,
+                    )
+                _print_room_summary(room_views[current_idx], current_idx, len(room_views))
+        except KeyboardInterrupt:
+            pass
+
+        print("[OK] Server stopped.")
+        return
+
     current_angles = _normalize_angles_deg(args.manual_rx, args.manual_ry, args.manual_rz)
     requested_mode = str(args.match_mode).lower()
     if requested_mode == "auto":
@@ -947,7 +1307,7 @@ def main() -> None:
             server=server,
             data=data,
             show_scene_mesh=args.show_scene_mesh,
-            data_dir=Path(args.data_dir),
+            data_dir=data_dir,
             scene_name=scene_name,
             point_cloud_path=selected_pc,
             auto_align_grid=True,
@@ -961,7 +1321,7 @@ def main() -> None:
             server=server,
             data=data,
             show_scene_mesh=args.show_scene_mesh,
-            data_dir=Path(args.data_dir),
+            data_dir=data_dir,
             scene_name=scene_name,
             point_cloud_path=selected_pc,
             auto_align_grid=bool(args.auto_align_grid),
@@ -1005,7 +1365,7 @@ def main() -> None:
                         server=server,
                         data=data,
                         show_scene_mesh=args.show_scene_mesh,
-                        data_dir=Path(args.data_dir),
+                        data_dir=data_dir,
                         scene_name=scene_name,
                         point_cloud_path=selected_pc,
                         auto_align_grid=True,
@@ -1020,7 +1380,7 @@ def main() -> None:
                         server=server,
                         data=data,
                         show_scene_mesh=args.show_scene_mesh,
-                        data_dir=Path(args.data_dir),
+                        data_dir=data_dir,
                         scene_name=scene_name,
                         point_cloud_path=selected_pc,
                         auto_align_grid=False,
@@ -1043,7 +1403,7 @@ def main() -> None:
                         server=server,
                         data=data,
                         show_scene_mesh=args.show_scene_mesh,
-                        data_dir=Path(args.data_dir),
+                        data_dir=data_dir,
                         scene_name=scene_name,
                         point_cloud_path=selected_pc,
                         auto_align_grid=False,
@@ -1071,7 +1431,7 @@ def main() -> None:
                         server=server,
                         data=data,
                         show_scene_mesh=args.show_scene_mesh,
-                        data_dir=Path(args.data_dir),
+                        data_dir=data_dir,
                         scene_name=scene_name,
                         point_cloud_path=selected_pc,
                         auto_align_grid=False,
