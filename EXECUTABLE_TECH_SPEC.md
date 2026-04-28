@@ -12,6 +12,7 @@
   - `assign_objects_to_receptacle_instances.py`
   - `place_objects_on_instances.py`
   - `visualize_instance_pointcloud_viser.py`
+  - `log_filter.py`
 
 ## 2. 全链路概览（树状）
 ```text
@@ -112,6 +113,26 @@
 4. 支持从 `.ply/.xyz` 或 JSON 内嵌点云读取。
 5. 用于自动分支调试、对齐校验与可视化验收。
 
+### 3.10 `log_filter.py`：终端日志噪声过滤
+已实现能力：
+1. 过滤 Habitat/HM3D 高频噪声告警（如 `Metadata ... No Glob path result found ... unable to load templates ...`）。
+2. 支持“管道模式”：从 stdin 读取日志并输出清洗结果。
+3. 支持“包裹命令模式”：直接运行目标命令并实时过滤输出。
+4. 支持用户自定义抑制规则（`--drop-regex`，可重复）。
+5. 在 stderr 输出过滤统计（输入行数、输出行数、抑制行数、按规则计数）。
+
+执行指引：
+1. 管道过滤（已有日志文件）：
+   - `python log_filter.py < raw.log > clean.log`
+2. 实时过滤（包裹脚本运行）：
+   - `python log_filter.py --run "python query_room_receptacle_objects.py --scene 00824-Dd4bFSTQ8gi --disable-llm"`
+3. 额外添加自定义噪声规则：
+   - `python log_filter.py --run "python your_script.py" --drop-regex "some noisy regex"`
+4. 关闭内置规则，仅使用自定义规则：
+   - `python log_filter.py --no-default-rules --drop-regex "regex1" < raw.log > clean.log`
+5. 不输出统计摘要：
+   - `python log_filter.py --run "python your_script.py" --no-summary`
+
 ## 4. 数据流与产物
 
 ### 4.1 主干产物
@@ -128,6 +149,10 @@
    - 承载面结果：`results/receptacle_queries/<scene>/*_receptacle_surfaces_*.json`
    - 分配计划：`results/object_instance_assignments/<scene>/*_object_instance_plan.json`
    - 自动布局：`results/layouts/<scene>/*assigned_instance_layout*.json`
+
+### 4.3 终端输出治理产物
+1. 日志清洗脚本：`log_filter.py`
+2. 可选清洗输出：用户可自行重定向为 `clean.log`（例如 `python log_filter.py < raw.log > clean.log`）
 
 ## 5. 工作流状态（现状与目标）
 
