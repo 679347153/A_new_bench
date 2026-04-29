@@ -167,6 +167,104 @@ def _bbox_to_corners(bbox: Dict[str, Any]) -> Tuple[np.ndarray, np.ndarray]:
     return min_pt, max_pt
 
 
+def _normalize_bbox_aabb(bbox: Any) -> Optional[Dict[str, List[float]]]:
+    """Normalize arbitrary AABB-like dict to {min,max,center,size}."""
+    if not isinstance(bbox, dict):
+        return None
+    min_vec = _as_list3(bbox.get("min"))
+    max_vec = _as_list3(bbox.get("max"))
+    if min_vec is None or max_vec is None:
+        return None
+    lo = [min(float(min_vec[i]), float(max_vec[i])) for i in range(3)]
+    hi = [max(float(min_vec[i]), float(max_vec[i])) for i in range(3)]
+    center = [round((lo[i] + hi[i]) / 2.0, 4) for i in range(3)]
+    size = [round(hi[i] - lo[i], 4) for i in range(3)]
+    return {
+        "min": [round(lo[i], 4) for i in range(3)],
+        "max": [round(hi[i], 4) for i in range(3)],
+        "center": center,
+        "size": size,
+    }
+
+
+def _bbox_has_extent(bbox: Any, eps: float = 1e-6) -> bool:
+    norm = _normalize_bbox_aabb(bbox)
+    if norm is None:
+        return False
+    size = norm.get("size", [0.0, 0.0, 0.0])
+    return any(abs(float(v)) > float(eps) for v in size)
+
+
+def _obb_to_aabb_bbox(obb: Any) -> Tuple[Optional[Dict[str, List[float]]], str]:
+    """
+    Approximate OBB as axis-aligned bbox using center and half-extents.
+    Rotation is intentionally ignored in this fallback path.
+    """
+    if not isinstance(obb, dict):
+        return None, "instance.obb missing or invalid"
+
+    center = _as_list3(obb.get("center"))
+    half = _as_list3(obb.get("half_extents")) or _as_list3(obb.get("halfExtents"))
+    if half is None:
+        size = _as_list3(obb.get("size")) or _as_list3(obb.get("extents"))
+        if size is not None:
+            half = [float(size[i]) * 0.5 for i in range(3)]
+    if center is None:
+        return None, "instance.obb.center missing"
+    if half is None:
+        return None, "instance.obb half extents/size missing"
+
+    half = [abs(float(v)) for v in half]
+    if not any(v > 1e-6 for v in half):
+        return None, "instance.obb extents are near zero"
+
+    min_pt = [float(center[i]) - half[i] for i in range(3)]
+    max_pt = [float(center[i]) + half[i] for i in range(3)]
+    return (
+        {
+            "min": [round(min_pt[i], 4) for i in range(3)],
+            "max": [round(max_pt[i], 4) for i in range(3)],
+            "center": [round(float(center[i]), 4) for i in range(3)],
+            "size": [round(2.0 * half[i], 4) for i in range(3)],
+        },
+        "obb->aabb fallback (rotation ignored)",
+    )
+
+
+def _resolve_receptacle_instance_bbox(
+    instance: Dict[str, Any],
+    top_bbox: Dict[str, Any],
+) -> Tuple[Optional[Dict[str, List[float]]], str, str]:
+    """
+    Resolve receptacle bbox with fallback chain:
+    instance.aabb -> instance.obb -> top_surface.bounds.
+    Returns (bbox_or_none, source, detail_reason).
+    """
+    reasons: List[str] = []
+
+    aabb_raw = instance.get("aabb")
+    aabb_norm = _normalize_bbox_aabb(aabb_raw)
+    if aabb_norm is not None and _bbox_has_extent(aabb_norm):
+        return aabb_norm, "instance.aabb", ""
+    if isinstance(aabb_raw, dict):
+        reasons.append("instance.aabb has no valid extent")
+    else:
+        reasons.append("instance.aabb missing")
+
+    obb_raw = instance.get("obb")
+    obb_bbox, obb_reason = _obb_to_aabb_bbox(obb_raw)
+    if obb_bbox is not None and _bbox_has_extent(obb_bbox):
+        return obb_bbox, "instance.obb", obb_reason
+    reasons.append(obb_reason)
+
+    top_norm = _normalize_bbox_aabb(top_bbox)
+    if top_norm is not None and _bbox_has_extent(top_norm):
+        return top_norm, "top_surface.bounds", "fallback to top surface bounds"
+    reasons.append("top_surface.bounds missing or no valid extent")
+
+    return None, "none", "; ".join(reasons)
+
+
 def _load_export_json(path: Path) -> Dict[str, Any]:
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
@@ -1004,7 +1102,7 @@ def _prepare_receptacle_rooms(data: Dict[str, Any], input_json_path: Path) -> Li
                 top_bbox = top_surface.get("bounds", {}) if isinstance(top_surface.get("bounds", {}), dict) else {}
                 top_bbox = top_bbox if isinstance(top_bbox, dict) else {}
                 centroid = _as_list3(top_surface.get("centroid"))
-                instance_bbox = instance.get("aabb", {}) if isinstance(instance.get("aabb", {}), dict) else {}
+                resolved_bbox, bbox_source, bbox_reason = _resolve_receptacle_instance_bbox(instance, top_bbox)
 
                 receptacles.append(
                     {
@@ -1014,7 +1112,9 @@ def _prepare_receptacle_rooms(data: Dict[str, Any], input_json_path: Path) -> Li
                         "confidence_score": confidence,
                         "points": points,
                         "top_bbox": top_bbox,
-                        "instance_bbox": instance_bbox,
+                        "instance_bbox": resolved_bbox,
+                        "instance_bbox_source": bbox_source,
+                        "instance_bbox_reason": bbox_reason,
                         "centroid": centroid,
                         "point_count": int(points.shape[0]) if points.ndim == 2 else 0,
                     }
@@ -1118,6 +1218,7 @@ def _render_receptacle_room(
     if isinstance(room_bbox, dict):
         _add_bbox_lines(server, "room_bbox", room_bbox, (255, 180, 0))
 
+    room_id = int(render_room.get("room_id", -1))
     receptacles = render_room.get("receptacles", []) if isinstance(render_room.get("receptacles", []), list) else []
     for i, rec in enumerate(receptacles):
         color = _color_by_index(i)
@@ -1130,8 +1231,30 @@ def _render_receptacle_room(
 
         # Show only full receptacle instance bbox (not top-surface bbox / centroid marker).
         instance_bbox = rec.get("instance_bbox")
-        if isinstance(instance_bbox, dict):
+        bbox_source = str(rec.get("instance_bbox_source", "unknown"))
+        bbox_reason = str(rec.get("instance_bbox_reason", "")).strip()
+        if not isinstance(instance_bbox, dict):
+            print(
+                "[Warning] Receptacle bbox not rendered: "
+                f"room_id={room_id}, instance_id={instance_id}, category={category}, "
+                f"reason=instance_bbox missing after fallback chain, source={bbox_source}, detail={bbox_reason or 'n/a'}"
+            )
+            continue
+        if not _bbox_has_extent(instance_bbox):
+            print(
+                "[Warning] Receptacle bbox not rendered: "
+                f"room_id={room_id}, instance_id={instance_id}, category={category}, "
+                f"reason=instance_bbox has zero/invalid extent, source={bbox_source}, detail={bbox_reason or 'n/a'}"
+            )
+            continue
+        try:
             _add_bbox_lines(server, f"{node_base}_instance_bbox", instance_bbox, color)
+        except Exception as exc:
+            print(
+                "[Warning] Receptacle bbox not rendered: "
+                f"room_id={room_id}, instance_id={instance_id}, category={category}, "
+                f"reason=viser draw error ({exc}), source={bbox_source}, detail={bbox_reason or 'n/a'}"
+            )
 
 
 def _print_interactive_help() -> None:

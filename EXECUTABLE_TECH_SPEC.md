@@ -81,11 +81,44 @@
 
 ### 3.6 `query_room_receptacle_objects.py`：全房间可放置 instance 上表面提取
 已实现能力：
-1. 默认遍历全房间（不依赖单房间硬编码）。
-2. 结合 LLM/启发式筛选可作为承载面的 instance。
-3. 调用 `get_instance_point_cloud(...)` 获取实例点云。
-4. 提取 top-surface 点云，必要时回退 AABB 顶面采样。
-5. 输出房间级 `receptacle_instances` 与场景汇总统计。
+1. 默认遍历全房间（不依赖单房间硬编码），支持 `--room-id` 局部处理。
+2. 结合 LLM/启发式筛选可作为承载面的 instance，支持床和地面作为可放置承载体。
+3. 调用 `get_instance_point_cloud(...)` 获取实例点云（上游含多级回退）。
+4. 从实例点云提取 top-surface 点云；点云不足时回退 AABB 顶面采样。
+5. 对上表面进行面积与尺寸有效性过滤，确保结果“可用优先、数量可降”。
+6. 将上表面点云落盘为 `.ply`，JSON 中仅保留路径与摘要字段。
+7. 输出房间级 `receptacle_instances` 与场景汇总统计，供后续分配/放置模块使用。
+
+上表面点云提取逻辑（当前实现）：
+1. 房间遍历与实例收集：按 `scene_info.rooms` 解析 `room_id` 列表，逐房间调用 `extract_room_instances(...)` 获取 `instances`。
+2. 候选预过滤：对每个 instance 计算 AABB 几何特征 `(size_x, size_y, size_z, top_area_est, volume_est)`；剔除明显无效类别（如 `wall/ceiling/window/door/tap/faucet/shower/...`）与估计顶面积过小样本（`top_area_est < --candidate-min-top-area-est`，默认 `0.03 m^2`）。
+3. 排序阶段：优先 LLM，失败则启发式回退；启发式使用类别先验分数 + `top_area_est` 加分，且支持输出空集合（0 到 `--max-results`），避免“硬凑”无效承载体。
+4. 实例点云获取：对入选候选调用 `get_instance_point_cloud(...)`，取 `point_cloud.points` 作为原始点集。
+5. 顶面提取（Top-band）：
+   - 若原始点云为空/非法，直接执行 `aabb_top_fallback`：在 AABB 顶平面 `y=max_y` 上均匀采样。
+   - 若点云有效，先取最高 `Y` 带宽内点集：`band = max(0.02, y_range * 0.08)`。
+   - 若点数不足，再扩大到 `wider_band = max(0.03, y_range * 0.18)`。
+   - 若仍不足，则回退 AABB 顶平面采样。
+   - 最终将点数裁剪到 `--surface-points-per-instance`（默认 `256`）。
+6. 顶面几何摘要：
+   - 统计 `point_count`、`centroid`、`bounds(min/max)`、`plane_height`。
+   - 用 SVD 拟合估计法向 `normal`；若退化或朝向不稳定则回退 `[0,1,0]`。
+7. 有效性过滤（关键质量门）：
+   - 点数门限：`point_count >= --surface-min-points`（默认 `48`）。
+   - 可用面积门限：由 `bounds` 估计 `usable_area_est = span_x * span_z`，要求 `usable_area_est >= --surface-min-area`（默认 `0.05 m^2`）。
+   - 最小跨度门限：要求 `min(span_x, span_z) >= --surface-min-span`（默认 `0.12 m`）。
+   - 任何一项不满足均丢弃，并在终端输出 `[Filter]` 原因日志。
+8. 结果持久化：
+   - 每个有效顶面写入 `surface_pointclouds/room_<room_id>_instance_<instance_id>_top_surface.ply`。
+   - JSON 删除内嵌 `top_surface.points`，仅保留 `point_cloud_file`、`point_cloud_format=ply`、几何摘要与调试字段。
+9. 产物接口：输出 `*_receptacle_surfaces_*.json`，下游 `assign_objects_to_receptacle_instances.py` 与 `place_objects_on_instances.py` 直接消费该结构。
+
+关键参数（默认值）：
+1. `--surface-points-per-instance=256`：每个上表面保存点数上限。
+2. `--surface-min-points=48`：上表面最少点数要求。
+3. `--surface-min-area=0.05`：上表面估计可用面积下限（平方米）。
+4. `--surface-min-span=0.12`：上表面最小边跨度下限（米）。
+5. `--candidate-min-top-area-est=0.03`：候选预筛顶面积下限（平方米）。
 
 ### 3.7 `assign_objects_to_receptacle_instances.py`：物体到 instance 分配
 已实现能力：
