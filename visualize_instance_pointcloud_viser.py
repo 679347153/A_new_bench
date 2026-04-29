@@ -903,6 +903,20 @@ def _color_by_index(idx: int) -> Tuple[int, int, int]:
     return palette[idx % len(palette)]
 
 
+def _sanitize_scene_node_name(text: str) -> str:
+    raw = (text or "").strip().lower()
+    if not raw:
+        return "object"
+    out = []
+    for ch in raw:
+        if ch.isalnum() or ch in {"_", "-"}:
+            out.append(ch)
+        elif ch in {" ", "/", "\\", ".", ":"}:
+            out.append("_")
+    safe = "".join(out).strip("_")
+    return safe or "object"
+
+
 def _add_point_marker(server: viser.ViserServer, name: str, xyz: List[float], color: Tuple[int, int, int]) -> None:
     center_np = _as_np3(xyz)
     # Newer/older viser builds may not expose add_sphere on SceneApi.
@@ -1107,22 +1121,17 @@ def _render_receptacle_room(
     receptacles = render_room.get("receptacles", []) if isinstance(render_room.get("receptacles", []), list) else []
     for i, rec in enumerate(receptacles):
         color = _color_by_index(i)
+        category = str(rec.get("category", "object"))
+        instance_id = int(rec.get("instance_id", -1))
+        node_base = f"{_sanitize_scene_node_name(category)}_{instance_id}"
         pts = rec.get("points", np.zeros((0, 3), dtype=np.float32))
         if isinstance(pts, np.ndarray) and pts.ndim == 2 and pts.shape[1] >= 3 and pts.shape[0] > 0:
-            _add_point_cloud(server, f"receptacle_surface_pc_{i}", pts[:, :3], color)
+            _add_point_cloud(server, f"{node_base}_surface_pc", pts[:, :3], color)
 
-        top_bbox = rec.get("top_bbox")
-        if isinstance(top_bbox, dict):
-            _add_bbox_lines(server, f"receptacle_surface_bbox_{i}", top_bbox, color)
-
+        # Show only full receptacle instance bbox (not top-surface bbox / centroid marker).
         instance_bbox = rec.get("instance_bbox")
         if isinstance(instance_bbox, dict):
-            dim = (max(30, color[0] // 2), max(30, color[1] // 2), max(30, color[2] // 2))
-            _add_bbox_lines(server, f"receptacle_instance_bbox_{i}", instance_bbox, dim)
-
-        centroid = rec.get("centroid")
-        if isinstance(centroid, list) and len(centroid) >= 3:
-            _add_point_marker(server, f"receptacle_centroid_{i}", centroid, color)
+            _add_bbox_lines(server, f"{node_base}_instance_bbox", instance_bbox, color)
 
 
 def _print_interactive_help() -> None:
