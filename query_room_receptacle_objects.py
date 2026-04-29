@@ -89,14 +89,16 @@ USER_PROMPT_TEMPLATE = """
 Task:
 Select objects that are suitable as receptacles/surfaces for placing smaller items (e.g., cup, book, phone, decoration).
 Also consider beds as valid receptacles when appropriate: beds can hold light/soft objects such as teddy bears.
+The floor is also a valid receptacle for placing objects.
 
 Hard constraints:
 1) You must ONLY choose instance_id values from the provided candidate list.
 2) Return ONLY JSON, no markdown and no extra text.
 3) confidence_score must be a float in [0, 1], sorted descending.
-4) Return between 1 and {max_results} objects.
+4) Return between 0 and {max_results} objects. If no valid object exists, return an empty list.
 5) Reasoning must be one short sentence.
 6) Do not reject a candidate only because it is a bed; include beds when they are plausible support surfaces.
+7) Never select clear non-receptacle categories such as wall/ceiling/window/door/tap/faucet/shower.
 
 Output JSON schema:
 {{
@@ -306,7 +308,36 @@ def _instance_size_features(instance: Dict[str, Any]) -> Tuple[float, float, flo
     return sx, sy, sz, top_area, volume
 
 
-def _build_candidates(instances: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _normalize_category(category: Any) -> str:
+    """Normalize category text for robust keyword checks."""
+    return str(category or "").strip().lower()
+
+
+def _is_excluded_receptacle_category(category: Any) -> bool:
+    """Exclude classes that are typically not placeable support surfaces."""
+    cat = _normalize_category(category)
+    if not cat or cat == "unknown":
+        return True
+    excluded_keywords = (
+        "wall",
+        "ceiling",
+        "window",
+        "door",
+        "tap",
+        "faucet",
+        "shower",
+        "curtain",
+        "blind",
+        "pipe",
+        "vent",
+        "switch",
+        "socket",
+        "railing",
+    )
+    return any(k in cat for k in excluded_keywords)
+
+
+def _build_candidates(instances: List[Dict[str, Any]], min_top_area_est: float) -> List[Dict[str, Any]]:
     """构建用于可放置实例排序的紧凑候选数据。"""
     candidates: List[Dict[str, Any]] = []
     for ins in instances:
@@ -314,7 +345,11 @@ def _build_candidates(instances: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         if ins_id < 0:
             continue
         category = str(ins.get("category", "unknown"))
+        if _is_excluded_receptacle_category(category):
+            continue
         sx, sy, sz, top_area, volume = _instance_size_features(ins)
+        if top_area < float(min_top_area_est):
+            continue
         candidates.append(
             {
                 "instance_id": ins_id,
@@ -336,6 +371,7 @@ def _heuristic_fallback(candidates: List[Dict[str, Any]], max_results: int) -> L
     - 基于 AABB 的上表面积估计
     """
     keyword_score = {
+        "floor": 0.9,
         "table": 0.95,
         "desk": 0.92,
         "counter": 0.9,
@@ -364,7 +400,7 @@ def _heuristic_fallback(candidates: List[Dict[str, Any]], max_results: int) -> L
         scored.append((score, c))
 
     scored.sort(key=lambda x: x[0], reverse=True)
-    chosen = scored[: max(1, max_results)]
+    chosen = scored[: max(0, int(max_results))]
     output = []
     for i, (score, c) in enumerate(chosen, start=1):
         output.append(
@@ -629,6 +665,22 @@ def _extract_top_surface(
     }
 
 
+def _top_surface_footprint(top_surface: Dict[str, Any]) -> Tuple[float, float, float]:
+    """
+    Estimate usable footprint on XZ plane from extracted top-surface bounds.
+    Returns `(span_x, span_z, area)`.
+    """
+    bounds = top_surface.get("bounds", {}) if isinstance(top_surface, dict) else {}
+    bmin = bounds.get("min", [0.0, 0.0, 0.0]) if isinstance(bounds, dict) else [0.0, 0.0, 0.0]
+    bmax = bounds.get("max", [0.0, 0.0, 0.0]) if isinstance(bounds, dict) else [0.0, 0.0, 0.0]
+    if not (isinstance(bmin, list) and isinstance(bmax, list) and len(bmin) >= 3 and len(bmax) >= 3):
+        return 0.0, 0.0, 0.0
+    span_x = max(0.0, abs(float(bmax[0]) - float(bmin[0])))
+    span_z = max(0.0, abs(float(bmax[2]) - float(bmin[2])))
+    area = max(0.0, span_x * span_z)
+    return span_x, span_z, area
+
+
 def _write_ply_points(points: List[List[float]], output_path: Path) -> Path:
     """Write point cloud to ASCII PLY file."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -696,6 +748,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--instance-pointcloud-points", type=int, default=2048, help="Point count for per-instance extraction")
     parser.add_argument("--surface-points-per-instance", type=int, default=256, help="Saved top-surface points per instance")
     parser.add_argument("--surface-min-points", type=int, default=48, help="Minimum points required for a valid top surface")
+    parser.add_argument("--surface-min-area", type=float, default=0.05, help="Minimum usable top-surface area in m^2")
+    parser.add_argument("--surface-min-span", type=float, default=0.12, help="Minimum X/Z footprint span in meters")
+    parser.add_argument("--candidate-min-top-area-est", type=float, default=0.03, help="Candidate pre-filter AABB top-area estimate in m^2")
     parser.add_argument("--debug-mesh-crop", action="store_true", help="Pass-through debug flag to point cloud extraction")
     parser.add_argument("--disable-llm", action="store_true", help="Use heuristic-only mode")
 
@@ -802,7 +857,33 @@ def main() -> int:
             processed_rooms += 1
             continue
 
-        source_candidates = _build_candidates(instances)
+        source_candidates = _build_candidates(
+            instances,
+            min_top_area_est=max(0.0, float(args.candidate_min_top_area_est)),
+        )
+        if not source_candidates:
+            print(f"[Info] Room {room_id} has no valid receptacle candidates after pre-filter.")
+            scene_results.append(
+                {
+                    "room_id": int(room_id),
+                    "room": room_report.get("room", {}) if isinstance(room_report, dict) else {},
+                    "room_object_count": int(len(instances)),
+                    "receptacle_instance_count": 0,
+                    "receptacle_instances": [],
+                    "overall_notes": "no_valid_candidates_after_prefilter",
+                    "debug": {
+                        "raw_output": "",
+                        "cleaned_output": "",
+                        "candidate_pool_size": 0,
+                        "ranking_mode": "heuristic",
+                        "ranking_reason": "candidate_prefilter_empty",
+                        "llm_attempted": False,
+                        "llm_error": "",
+                    },
+                }
+            )
+            processed_rooms += 1
+            continue
         raw_output = ""
         cleaned_output = ""
         parsed_output: Optional[Dict[str, Any]] = None
@@ -818,7 +899,7 @@ def main() -> int:
                     scene_name=args.scene,
                     room_id=int(room_id),
                     candidates=source_candidates,
-                    max_results=max(1, int(args.max_results)),
+                    max_results=max(0, int(args.max_results)),
                     max_tokens=int(args.max_tokens),
                 )
             except Exception as exc:
@@ -828,7 +909,7 @@ def main() -> int:
         final_candidates, notes = _normalize_candidates(
             parsed=parsed_output,
             source_candidates=source_candidates,
-            max_results=max(1, int(args.max_results)),
+            max_results=max(0, int(args.max_results)),
         )
         ranking_mode, ranking_reason = _infer_ranking_mode(
             use_llm=use_llm,
@@ -857,6 +938,12 @@ def main() -> int:
             ins_hint = instance_map.get(instance_id)
             if ins_hint is None:
                 continue
+            category_name = str(ins_hint.get("category", "unknown"))
+            if _is_excluded_receptacle_category(category_name):
+                print(
+                    f"[Filter] Skip instance={instance_id} category={category_name}: excluded non-receptacle category."
+                )
+                continue
             point_cloud_report = {}
             try:
                 point_cloud_report = get_instance_point_cloud(
@@ -883,13 +970,32 @@ def main() -> int:
                 min_points=max(4, int(args.surface_min_points)),
             )
             if int(top_surface.get("point_count", 0)) < max(1, int(args.surface_min_points)):
+                print(
+                    f"[Filter] Skip instance={instance_id} category={category_name}: "
+                    f"top surface points={int(top_surface.get('point_count', 0))} < min={int(args.surface_min_points)}"
+                )
+                continue
+            span_x, span_z, surface_area = _top_surface_footprint(top_surface)
+            top_surface["footprint_size"] = [round(span_x, 4), round(span_z, 4)]
+            top_surface["usable_area_est"] = round(surface_area, 4)
+            if surface_area < max(0.0, float(args.surface_min_area)):
+                print(
+                    f"[Filter] Skip instance={instance_id} category={category_name}: "
+                    f"usable_area={surface_area:.4f} < min_area={float(args.surface_min_area):.4f}"
+                )
+                continue
+            if min(span_x, span_z) < max(0.0, float(args.surface_min_span)):
+                print(
+                    f"[Filter] Skip instance={instance_id} category={category_name}: "
+                    f"footprint_span=({span_x:.4f},{span_z:.4f}) has min span < {float(args.surface_min_span):.4f}"
+                )
                 continue
 
             receptacle_entries.append(
                 {
                     "rank": int(row.get("rank", len(receptacle_entries) + 1)),
                     "instance_id": instance_id,
-                    "category": str(row.get("category", ins_hint.get("category", "unknown"))),
+                    "category": str(row.get("category", category_name)),
                     "confidence_score": float(row.get("confidence_score", 0.5)),
                     "reasoning": str(row.get("reasoning", "")),
                     "instance": {
@@ -941,6 +1047,9 @@ def main() -> int:
         "query_model": args.model if use_llm else "heuristic_only",
         "surface_points_per_instance": int(args.surface_points_per_instance),
         "surface_min_points": int(args.surface_min_points),
+        "surface_min_area": float(args.surface_min_area),
+        "surface_min_span": float(args.surface_min_span),
+        "candidate_min_top_area_est": float(args.candidate_min_top_area_est),
         "rooms_processed": processed_rooms,
         "rooms_requested": len(room_ids),
         "total_receptacle_instances": total_receptacles,
