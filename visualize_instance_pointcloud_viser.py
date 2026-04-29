@@ -1058,6 +1058,7 @@ def _render_receptacle_room(
     show_scene_mesh: bool,
     scene_name: Optional[str],
     data_dir: Path,
+    manual_angles_deg: Optional[Tuple[float, float, float]] = None,
     reset_scene: bool = True,
 ) -> None:
     if reset_scene:
@@ -1067,11 +1068,43 @@ def _render_receptacle_room(
     if show_scene_mesh and scene_name:
         _load_scene_mesh_if_available(server, scene_name, data_dir=data_dir)
 
-    room_bbox = room_view.get("room_bbox")
+    render_room = deepcopy(room_view)
+    if manual_angles_deg is not None:
+        used_angles = _normalize_angles_deg(*manual_angles_deg)
+        rot = _rotation_xyz_deg(used_angles[0], used_angles[1], used_angles[2])
+        print(
+            "[Info] Manual orientation applied: "
+            f"rx={used_angles[0]:.1f} deg, ry={used_angles[1]:.1f} deg, rz={used_angles[2]:.1f} deg"
+        )
+        rb = render_room.get("room_bbox")
+        if isinstance(rb, dict):
+            render_room["room_bbox"] = _transform_bbox_aabb(rb, rot)
+
+        rec_list = render_room.get("receptacles", [])
+        if isinstance(rec_list, list):
+            for rec in rec_list:
+                if not isinstance(rec, dict):
+                    continue
+                pts = rec.get("points")
+                if isinstance(pts, np.ndarray) and pts.ndim == 2 and pts.shape[1] >= 3 and pts.shape[0] > 0:
+                    rec["points"] = _transform_points(pts[:, :3], rot)
+                tb = rec.get("top_bbox")
+                if isinstance(tb, dict):
+                    rec["top_bbox"] = _transform_bbox_aabb(tb, rot)
+                ib = rec.get("instance_bbox")
+                if isinstance(ib, dict):
+                    rec["instance_bbox"] = _transform_bbox_aabb(ib, rot)
+                centroid = rec.get("centroid")
+                if isinstance(centroid, list) and len(centroid) >= 3:
+                    c = np.asarray([float(centroid[0]), float(centroid[1]), float(centroid[2])], dtype=np.float32).reshape(1, 3)
+                    tc = _transform_points(c, rot)[0]
+                    rec["centroid"] = [round(float(tc[0]), 4), round(float(tc[1]), 4), round(float(tc[2]), 4)]
+
+    room_bbox = render_room.get("room_bbox")
     if isinstance(room_bbox, dict):
         _add_bbox_lines(server, "room_bbox", room_bbox, (255, 180, 0))
 
-    receptacles = room_view.get("receptacles", []) if isinstance(room_view.get("receptacles", []), list) else []
+    receptacles = render_room.get("receptacles", []) if isinstance(render_room.get("receptacles", []), list) else []
     for i, rec in enumerate(receptacles):
         color = _color_by_index(i)
         pts = rec.get("points", np.zeros((0, 3), dtype=np.float32))
@@ -1190,6 +1223,8 @@ def main() -> None:
         print(f"[Warning] Failed to bind requested port {args.port}: {exc}. Using auto port instead.")
         server = viser.ViserServer(port=0)
 
+    current_angles = _normalize_angles_deg(args.manual_rx, args.manual_ry, args.manual_rz)
+
     if use_receptacle_view:
         room_views = _prepare_receptacle_rooms(data, input_path)
         if not room_views:
@@ -1202,6 +1237,7 @@ def main() -> None:
             show_scene_mesh=bool(args.show_scene_mesh),
             scene_name=scene_name,
             data_dir=data_dir,
+            manual_angles_deg=current_angles,
             reset_scene=True,
         )
 
@@ -1285,6 +1321,7 @@ def main() -> None:
                         show_scene_mesh=bool(args.show_scene_mesh),
                         scene_name=scene_name,
                         data_dir=data_dir,
+                        manual_angles_deg=current_angles,
                         reset_scene=True,
                     )
                 _print_room_summary(room_views[current_idx], current_idx, len(room_views))
@@ -1294,7 +1331,6 @@ def main() -> None:
         print("[OK] Server stopped.")
         return
 
-    current_angles = _normalize_angles_deg(args.manual_rx, args.manual_ry, args.manual_rz)
     requested_mode = str(args.match_mode).lower()
     if requested_mode == "auto":
         result = build_visualization(
