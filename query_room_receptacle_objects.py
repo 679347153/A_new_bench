@@ -452,28 +452,28 @@ def _is_semantically_plausible_receptacle(category: Any, area: float, span_x: fl
     return False, "unknown_category_and_geometry_weak"
 
 
-def _build_candidates(instances: List[Dict[str, Any]], min_top_area_est: float) -> List[Dict[str, Any]]:
+def _build_candidates(instances: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """构建用于可放置实例排序的紧凑候选数据。"""
     candidates: List[Dict[str, Any]] = []
     for ins in instances:
-        ins_id = int(ins.get("id", -1))
+        try:
+            ins_id = int(ins.get("id", -1))
+        except Exception:
+            continue
         if ins_id < 0:
             continue
         category = str(ins.get("category", "unknown"))
-        if _is_excluded_receptacle_category(category):
-            continue
         sx, sy, sz, top_area, volume = _instance_size_features(ins)
-        if top_area < float(min_top_area_est):
-            continue
-        candidates.append(
-            {
-                "instance_id": ins_id,
-                "category": category,
-                "aabb_size": [round(sx, 4), round(sy, 4), round(sz, 4)],
-                "top_area_est": round(top_area, 4),
-                "volume_est": round(volume, 4),
-            }
-        )
+        candidate = {
+            "instance_id": ins_id,
+            "category": category,
+            "aabb_size": [round(sx, 4), round(sy, 4), round(sz, 4)],
+            "top_area_est": round(top_area, 4),
+            "volume_est": round(volume, 4),
+        }
+        if ins.get("synthetic_type"):
+            candidate["synthetic_type"] = str(ins.get("synthetic_type"))
+        candidates.append(candidate)
     return candidates
 
 
