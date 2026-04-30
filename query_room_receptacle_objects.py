@@ -48,6 +48,14 @@ from __future__ import annotations
      --surface-min-points 96 \
      --instance-pointcloud-points 4096 \
      --disable-llm
+
+新增过滤参数
+--------
+- `--candidate-min-top-area-est`：候选预过滤阈值，按实例 AABB 的 XZ 顶面积估计过滤过小的非地面候选；默认较宽松，floor/carpet/rug 不受此项排除。
+- `--surface-min-area`：上表面提取后的可用 XZ 面积下限，用于过滤碎片、小边缘等不适合放置物体的面。
+- `--surface-min-span`：上表面提取后的最小 X/Z 跨度下限，用于避免很窄的线状表面被当作可放置面。
+
+这三个参数共同保证结果优先合理：wall、tap 等明显非承载类会先被剔除；房间中没有足够候选时，结果数量可以少于 `--max-results`，但保留至少一个合理候选（通常包括地面或合成 room_floor）。
 """
 
 import argparse
@@ -60,7 +68,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 
@@ -78,17 +86,70 @@ except ImportError:
 
 
 DEFAULT_OUTPUT_DIR = Path("./results/receptacle_queries")
+DEFAULT_CANDIDATE_MIN_TOP_AREA_EST = 0.03
+DEFAULT_SURFACE_MIN_AREA = 0.02
+DEFAULT_SURFACE_MIN_SPAN = 0.05
+SYNTHETIC_FLOOR_ID_BASE = 900_000_000
+
+FLOOR_CATEGORY_KEYWORDS = {
+    "floor",
+    "ground",
+    "carpet",
+    "rug",
+}
+
+NON_RECEPTACLE_CATEGORY_KEYWORDS = {
+    "wall",
+    "ceiling",
+    "roof",
+    "window",
+    "door",
+    "tap",
+    "faucet",
+    "shower",
+    "toilet",
+    "bathtub",
+    "bath",
+    "curtain",
+    "blind",
+    "blinds",
+    "mirror",
+    "picture",
+    "painting",
+    "poster",
+    "frame",
+    "pipe",
+    "railing",
+    "rail",
+    "banister",
+    "column",
+    "beam",
+    "stair",
+    "stairs",
+    "switch",
+    "outlet",
+    "socket",
+    "vent",
+    "drain",
+    "lamp",
+    "light",
+    "plant",
+}
 
 SYSTEM_PROMPT = (
     "You are an indoor affordance assistant. "
     "Given room instances, identify which objects can stably support placing smaller objects on top. "
-    "Do not automatically exclude beds: beds can be valid support surfaces for light/soft items (e.g., teddy bears)."
+    "Floors are valid placement surfaces. "
+    "Do not automatically exclude beds: beds can be valid support surfaces for light/soft items (e.g., teddy bears). "
+    "Never select walls, ceilings, doors, windows, taps, faucets, or similar non-support fixtures."
 )
 
 USER_PROMPT_TEMPLATE = """
 Task:
-Select objects that are suitable as receptacles/surfaces for placing smaller items (e.g., cup, book, phone, decoration).
-Also consider beds as valid receptacles when appropriate: beds can hold light/soft objects such as teddy bears.
+Select objects or room floor surfaces that are suitable as receptacles/surfaces for placing smaller items
+(e.g., cup, book, phone, decoration).
+Also consider floors and beds as valid receptacles when appropriate: floors can hold objects directly,
+and beds can hold light/soft objects such as teddy bears.
 
 Hard constraints:
 1) You must ONLY choose instance_id values from the provided candidate list.
@@ -96,7 +157,8 @@ Hard constraints:
 3) confidence_score must be a float in [0, 1], sorted descending.
 4) Return between 1 and {max_results} objects.
 5) Reasoning must be one short sentence.
-6) Do not reject a candidate only because it is a bed; include beds when they are plausible support surfaces.
+6) Do not reject a candidate only because it is a floor or bed; include them when they are plausible support surfaces.
+7) Do not select walls, ceilings, doors, windows, taps, faucets, shower parts, pipes, mirrors, pictures, or other vertical/non-support fixtures.
 
 Output JSON schema:
 {{
@@ -289,6 +351,26 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def _normalized_category_tokens(category: Any) -> List[str]:
+    """Return lower-case category tokens for robust affordance filtering."""
+    text = str(category or "").lower()
+    normalized = re.sub(r"[^a-z0-9]+", " ", text)
+    return [token for token in normalized.split() if token]
+
+
+def _category_has_any(category: Any, keywords: Set[str]) -> bool:
+    tokens = set(_normalized_category_tokens(category))
+    return any(keyword in tokens for keyword in keywords)
+
+
+def _is_floor_like_category(category: Any) -> bool:
+    return _category_has_any(category, FLOOR_CATEGORY_KEYWORDS)
+
+
+def _is_excluded_receptacle_category(category: Any) -> bool:
+    return _category_has_any(category, NON_RECEPTACLE_CATEGORY_KEYWORDS)
+
+
 def _instance_size_features(instance: Dict[str, Any]) -> Tuple[float, float, float, float, float]:
     """
     从实例 AABB 计算几何特征。
@@ -327,6 +409,82 @@ def _build_candidates(instances: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return candidates
 
 
+def _room_floor_instance_id(room_id: int) -> int:
+    """Build a stable positive id for synthetic room-floor surfaces."""
+    return SYNTHETIC_FLOOR_ID_BASE + max(0, int(room_id) + 10_000)
+
+
+def _build_synthetic_room_floor(room: Dict[str, Any], room_id: int, instances: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Create a floor support surface from room bounds when no floor instance exists."""
+    if any(_is_floor_like_category(ins.get("category", "")) for ins in instances):
+        return None
+
+    bbox = room.get("bounding_box") or room.get("aabb") or {}
+    min_pt = bbox.get("min", [0.0, 0.0, 0.0])
+    max_pt = bbox.get("max", [0.0, 0.0, 0.0])
+    if not isinstance(min_pt, list) or not isinstance(max_pt, list) or len(min_pt) < 3 or len(max_pt) < 3:
+        return None
+
+    x0, y0, z0 = _safe_float(min_pt[0]), _safe_float(min_pt[1]), _safe_float(min_pt[2])
+    x1, _, z1 = _safe_float(max_pt[0]), _safe_float(max_pt[1]), _safe_float(max_pt[2])
+    sx = max(0.0, x1 - x0)
+    sz = max(0.0, z1 - z0)
+    if sx * sz < DEFAULT_CANDIDATE_MIN_TOP_AREA_EST:
+        return None
+
+    return {
+        "id": _room_floor_instance_id(room_id),
+        "category": "room_floor",
+        "region_id": int(room_id),
+        "synthetic_type": "room_floor",
+        "bbox_source": "room_bounding_box_floor",
+        "aabb": {
+            "min": [round(x0, 4), round(y0, 4), round(z0, 4)],
+            "max": [round(x1, 4), round(y0, 4), round(z1, 4)],
+            "center": [round((x0 + x1) / 2.0, 4), round(y0, 4), round((z0 + z1) / 2.0, 4)],
+            "size": [round(sx, 4), 0.0, round(sz, 4)],
+        },
+        "obb": {},
+    }
+
+
+def _candidate_rejection_reason(candidate: Dict[str, Any], min_top_area_est: float) -> str:
+    category = str(candidate.get("category", "unknown"))
+    if _is_excluded_receptacle_category(category):
+        return "excluded_non_support_category"
+    if _is_floor_like_category(category):
+        return ""
+    if _safe_float(candidate.get("top_area_est"), 0.0) < max(0.0, float(min_top_area_est)):
+        return "top_area_too_small"
+    return ""
+
+
+def _build_filtered_candidates(
+    instances: List[Dict[str, Any]],
+    min_top_area_est: float = DEFAULT_CANDIDATE_MIN_TOP_AREA_EST,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Build candidates after dropping obviously invalid support categories."""
+    raw_candidates = _build_candidates(instances)
+    candidates: List[Dict[str, Any]] = []
+    rejected: List[Dict[str, Any]] = []
+    instance_by_id: Dict[int, Dict[str, Any]] = {}
+    for item in instances:
+        try:
+            instance_by_id[int(item.get("id", -1))] = item
+        except Exception:
+            continue
+    for candidate in raw_candidates:
+        ins = instance_by_id.get(int(candidate.get("instance_id", -2)), {})
+        if isinstance(ins, dict) and ins.get("synthetic_type"):
+            candidate["synthetic_type"] = str(ins.get("synthetic_type"))
+        reason = _candidate_rejection_reason(candidate, min_top_area_est)
+        if reason:
+            rejected.append({**candidate, "filter_reason": reason})
+            continue
+        candidates.append(candidate)
+    return candidates, rejected
+
+
 def _heuristic_fallback(candidates: List[Dict[str, Any]], max_results: int) -> List[Dict[str, Any]]:
     """
     在 LLM 不可用时使用规则打分回退。
@@ -345,6 +503,10 @@ def _heuristic_fallback(candidates: List[Dict[str, Any]], max_results: int) -> L
         "cabinet": 0.85,
         "bench": 0.82,
         "bed": 0.8,
+        "floor": 0.78,
+        "room_floor": 0.78,
+        "carpet": 0.7,
+        "rug": 0.7,
         "sofa": 0.72,
         "chair": 0.6,
     }
@@ -629,6 +791,28 @@ def _extract_top_surface(
     }
 
 
+def _validate_top_surface(
+    top_surface: Dict[str, Any],
+    min_area: float,
+    min_span: float,
+) -> Tuple[bool, str, float, float]:
+    """Check that a candidate top surface is large enough for a small object."""
+    bounds = top_surface.get("bounds", {}) if isinstance(top_surface, dict) else {}
+    bmin = bounds.get("min", [0.0, 0.0, 0.0]) if isinstance(bounds, dict) else [0.0, 0.0, 0.0]
+    bmax = bounds.get("max", [0.0, 0.0, 0.0]) if isinstance(bounds, dict) else [0.0, 0.0, 0.0]
+    if not isinstance(bmin, list) or not isinstance(bmax, list) or len(bmin) < 3 or len(bmax) < 3:
+        return False, "invalid_surface_bounds", 0.0, 0.0
+    span_x = max(0.0, _safe_float(bmax[0]) - _safe_float(bmin[0]))
+    span_z = max(0.0, _safe_float(bmax[2]) - _safe_float(bmin[2]))
+    area = span_x * span_z
+    narrow_span = min(span_x, span_z)
+    if area < max(0.0, float(min_area)):
+        return False, "surface_area_too_small", area, narrow_span
+    if narrow_span < max(0.0, float(min_span)):
+        return False, "surface_span_too_small", area, narrow_span
+    return True, "", area, narrow_span
+
+
 def _write_ply_points(points: List[List[float]], output_path: Path) -> Path:
     """Write point cloud to ASCII PLY file."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -693,9 +877,27 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=str, default=None, help="Optional output JSON path")
 
     parser.add_argument("--max-results", type=int, default=10, help="Max receptacle instances per room")
+    parser.add_argument(
+        "--candidate-min-top-area-est",
+        type=float,
+        default=DEFAULT_CANDIDATE_MIN_TOP_AREA_EST,
+        help="Minimum AABB XZ top-area estimate for non-floor candidates before LLM/ranking",
+    )
     parser.add_argument("--instance-pointcloud-points", type=int, default=2048, help="Point count for per-instance extraction")
     parser.add_argument("--surface-points-per-instance", type=int, default=256, help="Saved top-surface points per instance")
     parser.add_argument("--surface-min-points", type=int, default=48, help="Minimum points required for a valid top surface")
+    parser.add_argument(
+        "--surface-min-area",
+        type=float,
+        default=DEFAULT_SURFACE_MIN_AREA,
+        help="Minimum extracted XZ surface area for a usable receptacle",
+    )
+    parser.add_argument(
+        "--surface-min-span",
+        type=float,
+        default=DEFAULT_SURFACE_MIN_SPAN,
+        help="Minimum extracted X/Z span for a usable receptacle",
+    )
     parser.add_argument("--debug-mesh-crop", action="store_true", help="Pass-through debug flag to point cloud extraction")
     parser.add_argument("--disable-llm", action="store_true", help="Use heuristic-only mode")
 
@@ -788,28 +990,45 @@ def main() -> int:
             continue
 
         instances = room_report.get("instances", []) if isinstance(room_report, dict) else []
-        if not isinstance(instances, list) or not instances:
-            scene_results.append(
-                {
-                    "room_id": int(room_id),
-                    "room": room_report.get("room", {}) if isinstance(room_report, dict) else {},
-                    "room_object_count": 0,
-                    "receptacle_instances": [],
-                    "overall_notes": "no_instances",
-                    "debug": {},
-                }
-            )
-            processed_rooms += 1
-            continue
+        if not isinstance(instances, list):
+            instances = []
 
-        source_candidates = _build_candidates(instances)
+        candidate_instances = list(instances)
+        synthetic_floor = _build_synthetic_room_floor(
+            room=room_report.get("room", {}) if isinstance(room_report, dict) else {},
+            room_id=int(room_id),
+            instances=candidate_instances,
+        )
+        if synthetic_floor is not None:
+            candidate_instances.append(synthetic_floor)
+
+        source_candidates, rejected_candidates = _build_filtered_candidates(
+            candidate_instances,
+            min_top_area_est=max(0.0, float(args.candidate_min_top_area_est)),
+        )
+        if rejected_candidates:
+            preview = rejected_candidates[:5]
+            print(
+                "[Info] Room {room} filtered non-receptacle candidates: {count} preview={preview}".format(
+                    room=int(room_id),
+                    count=len(rejected_candidates),
+                    preview=[
+                        {
+                            "instance_id": item.get("instance_id"),
+                            "category": item.get("category"),
+                            "reason": item.get("filter_reason"),
+                        }
+                        for item in preview
+                    ],
+                )
+            )
         raw_output = ""
         cleaned_output = ""
         parsed_output: Optional[Dict[str, Any]] = None
         llm_attempted = False
         llm_error: Optional[str] = None
 
-        if use_llm and client is not None:
+        if use_llm and client is not None and source_candidates:
             try:
                 llm_attempted = True
                 raw_output, cleaned_output, parsed_output = query_receptacles_for_room(
@@ -830,6 +1049,22 @@ def main() -> int:
             source_candidates=source_candidates,
             max_results=max(1, int(args.max_results)),
         )
+        backup_added = 0
+        if source_candidates and len(final_candidates) < max(1, int(args.max_results)):
+            seen_ids = {int(item.get("instance_id", -1)) for item in final_candidates}
+            for backup in _heuristic_fallback(source_candidates, max(1, int(args.max_results))):
+                backup_id = int(backup.get("instance_id", -1))
+                if backup_id < 0 or backup_id in seen_ids:
+                    continue
+                seen_ids.add(backup_id)
+                final_candidates.append(backup)
+                backup_added += 1
+                if len(final_candidates) >= max(1, int(args.max_results)):
+                    break
+        final_candidates.sort(key=lambda x: float(x.get("confidence_score", 0.0)), reverse=True)
+        for rank_idx, item in enumerate(final_candidates, start=1):
+            item["rank"] = rank_idx
+
         ranking_mode, ranking_reason = _infer_ranking_mode(
             use_llm=use_llm,
             llm_attempted=llm_attempted,
@@ -845,7 +1080,7 @@ def main() -> int:
         )
 
         instance_map = {}
-        for ins in instances:
+        for ins in candidate_instances:
             try:
                 instance_map[int(ins.get("id", -1))] = ins
             except Exception:
@@ -858,17 +1093,25 @@ def main() -> int:
             if ins_hint is None:
                 continue
             point_cloud_report = {}
-            try:
-                point_cloud_report = get_instance_point_cloud(
-                    scene_name=args.scene,
-                    instance_id=instance_id,
-                    data_dir=data_dir,
-                    num_points=max(int(args.instance_pointcloud_points), int(args.surface_points_per_instance)),
-                    instance_hint=ins_hint,
-                    debug_mesh_crop=args.debug_mesh_crop,
-                )
-            except Exception as exc:
-                print(f"[Warning] Point cloud extraction failed instance={instance_id}: {exc}", file=sys.stderr)
+            if str(ins_hint.get("synthetic_type", "")) == "room_floor":
+                point_cloud_report = {
+                    "point_cloud_generation": {
+                        "method": "synthetic_room_floor",
+                        "details": "sampled from room bounding box floor plane",
+                    }
+                }
+            else:
+                try:
+                    point_cloud_report = get_instance_point_cloud(
+                        scene_name=args.scene,
+                        instance_id=instance_id,
+                        data_dir=data_dir,
+                        num_points=max(int(args.instance_pointcloud_points), int(args.surface_points_per_instance)),
+                        instance_hint=ins_hint,
+                        debug_mesh_crop=args.debug_mesh_crop,
+                    )
+                except Exception as exc:
+                    print(f"[Warning] Point cloud extraction failed instance={instance_id}: {exc}", file=sys.stderr)
 
             raw_points = []
             if isinstance(point_cloud_report, dict):
@@ -883,6 +1126,24 @@ def main() -> int:
                 min_points=max(4, int(args.surface_min_points)),
             )
             if int(top_surface.get("point_count", 0)) < max(1, int(args.surface_min_points)):
+                print(
+                    f"[Filter] room={int(room_id)} instance={instance_id} category={row.get('category')} "
+                    f"reason=surface_point_count_too_small count={int(top_surface.get('point_count', 0))}"
+                )
+                continue
+
+            valid_surface, surface_reason, usable_area, min_span = _validate_top_surface(
+                top_surface=top_surface,
+                min_area=max(0.0, float(args.surface_min_area)),
+                min_span=max(0.0, float(args.surface_min_span)),
+            )
+            top_surface["usable_area_est"] = round(float(usable_area), 4)
+            top_surface["min_span_est"] = round(float(min_span), 4)
+            if not valid_surface:
+                print(
+                    f"[Filter] room={int(room_id)} instance={instance_id} category={row.get('category')} "
+                    f"reason={surface_reason} area={usable_area:.4f} min_span={min_span:.4f}"
+                )
                 continue
 
             receptacle_entries.append(
@@ -898,6 +1159,8 @@ def main() -> int:
                         "region_id": int(ins_hint.get("region_id", room_id)),
                         "aabb": ins_hint.get("aabb", {}),
                         "obb": ins_hint.get("obb", {}),
+                        "synthetic_type": ins_hint.get("synthetic_type", ""),
+                        "bbox_source": ins_hint.get("bbox_source", ""),
                     },
                     "point_cloud_generation": (
                         point_cloud_report.get("point_cloud_generation", {}) if isinstance(point_cloud_report, dict) else {}
@@ -922,6 +1185,10 @@ def main() -> int:
                     "raw_output": raw_output,
                     "cleaned_output": cleaned_output,
                     "candidate_pool_size": len(source_candidates),
+                    "candidate_rejected_count": len(rejected_candidates),
+                    "candidate_rejected_preview": rejected_candidates[:20],
+                    "backup_candidates_added": backup_added,
+                    "synthetic_floor_added": synthetic_floor is not None,
                     "ranking_mode": ranking_mode,
                     "ranking_reason": ranking_reason,
                     "llm_attempted": bool(llm_attempted),
