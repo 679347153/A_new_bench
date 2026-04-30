@@ -51,9 +51,9 @@ from __future__ import annotations
 
 新增过滤参数
 --------
-- `--candidate-min-top-area-est`：候选预过滤阈值，按实例 AABB 的 XZ 顶面积估计过滤过小的非地面候选；默认较宽松，floor/carpet/rug 不受此项排除。
-- `--surface-min-area`：上表面提取后的可用 XZ 面积下限，用于过滤碎片、小边缘等不适合放置物体的面。
-- `--surface-min-span`：上表面提取后的最小 X/Z 跨度下限，用于避免很窄的线状表面被当作可放置面。
+- `--candidate-min-top-area-est`：候选预过滤阈值，默认 `0.005`；只用于未知/非典型类别，table/shelf/cabinet/bed/chair/floor 等已知承载类不会因 AABB 顶面积估计偏小被提前剔除。
+- `--surface-min-area`：上表面提取后的可用 XZ 面积下限，默认 `0.005`；用于过滤极小碎片。
+- `--surface-min-span`：上表面提取后的最小 X/Z 跨度下限，默认 `0.02`；用于过滤极窄线状表面。
 
 这三个参数共同保证结果优先合理：wall、tap 等明显非承载类会先被剔除；房间中没有足够候选时，结果数量可以少于 `--max-results`，但保留至少一个合理候选（通常包括地面或合成 room_floor）。
 """
@@ -86,12 +86,38 @@ except ImportError:
 
 
 DEFAULT_OUTPUT_DIR = Path("./results/receptacle_queries")
-DEFAULT_CANDIDATE_MIN_TOP_AREA_EST = 0.03
-DEFAULT_SURFACE_MIN_AREA = 0.02
-DEFAULT_SURFACE_MIN_SPAN = 0.05
+DEFAULT_CANDIDATE_MIN_TOP_AREA_EST = 0.005
+DEFAULT_SURFACE_MIN_AREA = 0.005
+DEFAULT_SURFACE_MIN_SPAN = 0.02
 SYNTHETIC_FLOOR_ID_BASE = 900_000_000
 
 FLOOR_CATEGORY_KEYWORDS = {
+    "floor",
+    "ground",
+    "carpet",
+    "rug",
+}
+
+RECEPTACLE_CATEGORY_KEYWORDS = {
+    "table",
+    "desk",
+    "counter",
+    "countertop",
+    "nightstand",
+    "dresser",
+    "shelf",
+    "cabinet",
+    "bench",
+    "bed",
+    "sofa",
+    "couch",
+    "chair",
+    "stool",
+    "ottoman",
+    "stand",
+    "rack",
+    "cart",
+    "island",
     "floor",
     "ground",
     "carpet",
@@ -521,6 +547,8 @@ def _candidate_rejection_reason(candidate: Dict[str, Any], min_top_area_est: flo
     if _is_excluded_receptacle_category(category):
         return "excluded_non_support_category"
     if _is_floor_like_category(category):
+        return ""
+    if _category_has_any(category, RECEPTACLE_CATEGORY_KEYWORDS):
         return ""
     if _safe_float(candidate.get("top_area_est"), 0.0) < max(0.0, float(min_top_area_est)):
         return "top_area_too_small"
