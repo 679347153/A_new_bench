@@ -155,7 +155,7 @@ Hard constraints:
 1) You must ONLY choose instance_id values from the provided candidate list.
 2) Return ONLY JSON, no markdown and no extra text.
 3) confidence_score must be a float in [0, 1], sorted descending.
-4) Return between 1 and {max_results} objects.
+4) Return between 0 and {max_results} objects. If no valid object exists, return an empty list.
 5) Reasoning must be one short sentence.
 6) Do not reject a candidate only because it is a floor or bed; include them when they are plausible support surfaces.
 7) Do not select walls, ceilings, doors, windows, taps, faucets, shower parts, pipes, mirrors, pictures, or other vertical/non-support fixtures.
@@ -388,7 +388,71 @@ def _instance_size_features(instance: Dict[str, Any]) -> Tuple[float, float, flo
     return sx, sy, sz, top_area, volume
 
 
-def _build_candidates(instances: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _normalize_category(category: Any) -> str:
+    return str(category or "").strip().lower()
+
+
+def _category_tokens(category: Any) -> List[str]:
+    cat = _normalize_category(category)
+    if not cat:
+        return []
+    return re.findall(r"[a-z0-9]+", cat)
+
+
+def _is_excluded_receptacle_category(category: Any) -> bool:
+    """
+    Exclude obvious non-support classes, while avoiding false positives such as "wall cabinet".
+    """
+    cat = _normalize_category(category)
+    if not cat:
+        return True
+
+    tokens = set(_category_tokens(cat))
+    support_tokens = {
+        "table", "desk", "counter", "nightstand", "dresser", "shelf",
+        "cabinet", "bench", "bed", "sofa", "chair", "floor",
+    }
+    blocked_tokens = {
+        "wall", "ceiling", "window", "door", "tap", "faucet", "shower",
+        "curtain", "blind", "pipe", "vent", "switch", "socket", "outlet", "railing",
+    }
+
+    if cat in blocked_tokens:
+        return True
+    blocked_phrases = ("light switch", "power outlet", "wall socket", "shower head")
+    if any(p in cat for p in blocked_phrases):
+        return True
+    if (tokens & blocked_tokens) and not (tokens & support_tokens):
+        return True
+    return False
+
+
+def _is_semantically_plausible_receptacle(category: Any, area: float, span_x: float, span_z: float) -> Tuple[bool, str]:
+    """
+    Keep only semantically reasonable supports when the room has few candidates.
+    """
+    cat = _normalize_category(category)
+    if _is_excluded_receptacle_category(cat):
+        return False, "excluded_category"
+    tokens = set(_category_tokens(cat))
+    strong_support = {"table", "desk", "counter", "nightstand", "dresser", "shelf", "cabinet", "bench"}
+    weak_support = {"bed", "sofa", "chair", "floor"}
+    weak_negative = {"picture", "painting", "poster", "lamp", "tv", "monitor", "mirror", "toilet"}
+
+    if tokens & strong_support:
+        return True, "strong_support_category"
+    if tokens & weak_support:
+        if area >= 0.02 and min(span_x, span_z) >= 0.07:
+            return True, "weak_support_with_enough_area"
+        return False, "weak_support_but_too_small"
+    if tokens & weak_negative:
+        return False, "non_support_category"
+    if area >= 0.08 and min(span_x, span_z) >= 0.12:
+        return True, "unknown_category_but_geometry_strong"
+    return False, "unknown_category_and_geometry_weak"
+
+
+def _build_candidates(instances: List[Dict[str, Any]], min_top_area_est: float) -> List[Dict[str, Any]]:
     """构建用于可放置实例排序的紧凑候选数据。"""
     candidates: List[Dict[str, Any]] = []
     for ins in instances:
@@ -396,7 +460,11 @@ def _build_candidates(instances: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         if ins_id < 0:
             continue
         category = str(ins.get("category", "unknown"))
+        if _is_excluded_receptacle_category(category):
+            continue
         sx, sy, sz, top_area, volume = _instance_size_features(ins)
+        if top_area < float(min_top_area_est):
+            continue
         candidates.append(
             {
                 "instance_id": ins_id,
@@ -494,6 +562,7 @@ def _heuristic_fallback(candidates: List[Dict[str, Any]], max_results: int) -> L
     - 基于 AABB 的上表面积估计
     """
     keyword_score = {
+        "floor": 0.9,
         "table": 0.95,
         "desk": 0.92,
         "counter": 0.9,
@@ -526,7 +595,7 @@ def _heuristic_fallback(candidates: List[Dict[str, Any]], max_results: int) -> L
         scored.append((score, c))
 
     scored.sort(key=lambda x: x[0], reverse=True)
-    chosen = scored[: max(1, max_results)]
+    chosen = scored[: max(0, int(max_results))]
     output = []
     for i, (score, c) in enumerate(chosen, start=1):
         output.append(
@@ -1037,7 +1106,7 @@ def main() -> int:
                     scene_name=args.scene,
                     room_id=int(room_id),
                     candidates=source_candidates,
-                    max_results=max(1, int(args.max_results)),
+                    max_results=max(0, int(args.max_results)),
                     max_tokens=int(args.max_tokens),
                 )
             except Exception as exc:
@@ -1091,6 +1160,12 @@ def main() -> int:
             instance_id = int(row["instance_id"])
             ins_hint = instance_map.get(instance_id)
             if ins_hint is None:
+                continue
+            category_name = str(ins_hint.get("category", "unknown"))
+            if _is_excluded_receptacle_category(category_name):
+                print(
+                    f"[Filter] Skip instance={instance_id} category={category_name}: excluded non-receptacle category."
+                )
                 continue
             point_cloud_report = {}
             if str(ins_hint.get("synthetic_type", "")) == "room_floor":
@@ -1150,7 +1225,7 @@ def main() -> int:
                 {
                     "rank": int(row.get("rank", len(receptacle_entries) + 1)),
                     "instance_id": instance_id,
-                    "category": str(row.get("category", ins_hint.get("category", "unknown"))),
+                    "category": str(row.get("category", category_name)),
                     "confidence_score": float(row.get("confidence_score", 0.5)),
                     "reasoning": str(row.get("reasoning", "")),
                     "instance": {
@@ -1208,6 +1283,9 @@ def main() -> int:
         "query_model": args.model if use_llm else "heuristic_only",
         "surface_points_per_instance": int(args.surface_points_per_instance),
         "surface_min_points": int(args.surface_min_points),
+        "surface_min_area": float(args.surface_min_area),
+        "surface_min_span": float(args.surface_min_span),
+        "candidate_min_top_area_est": float(args.candidate_min_top_area_est),
         "rooms_processed": processed_rooms,
         "rooms_requested": len(room_ids),
         "total_receptacle_instances": total_receptacles,
