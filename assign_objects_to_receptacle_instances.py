@@ -67,6 +67,8 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import numpy as np
+
 from extract_room_instances import DEFAULT_DATA_DIR
 from place_objects_on_instances import place_objects_on_instances
 from sample_and_place_objects import (

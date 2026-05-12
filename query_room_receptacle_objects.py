@@ -166,16 +166,16 @@ SYSTEM_PROMPT = (
     "You are an indoor affordance assistant. "
     "Given room instances, identify which objects can stably support placing smaller objects on top. "
     "Floors are valid placement surfaces. "
-    "Do not automatically exclude beds: beds can be valid support surfaces for light/soft items (e.g., teddy bears). "
-    "Never select walls, ceilings, doors, windows, taps, faucets, or similar non-support fixtures."
+    "Do not automatically exclude beds, couches, or sofas when they are plausible support surfaces. "
+    "Never select table lamps, walls, ceilings, doors, windows, taps, faucets, or similar non-support fixtures."
 )
 
 USER_PROMPT_TEMPLATE = """
 Task:
 Select objects or room floor surfaces that are suitable as receptacles/surfaces for placing smaller items
 (e.g., cup, book, phone, decoration).
-Also consider floors and beds as valid receptacles when appropriate: floors can hold objects directly,
-and beds can hold light/soft objects such as teddy bears.
+Also consider floors, beds, couches, and sofas as valid receptacles when appropriate: floors can hold objects directly,
+and beds/couches/sofas can hold light/soft objects such as teddy bears.
 
 Hard constraints:
 1) You must ONLY choose instance_id values from the provided candidate list.
@@ -183,8 +183,8 @@ Hard constraints:
 3) confidence_score must be a float in [0, 1], sorted descending.
 4) Return between 0 and {max_results} objects. If no valid object exists, return an empty list.
 5) Reasoning must be one short sentence.
-6) Do not reject a candidate only because it is a floor or bed; include them when they are plausible support surfaces.
-7) Do not select walls, ceilings, doors, windows, taps, faucets, shower parts, pipes, mirrors, pictures, or other vertical/non-support fixtures.
+6) Do not reject a candidate only because it is a floor, bed, couch, or sofa; include them when they are plausible support surfaces.
+7) Do not select table_lamp/table lamp, walls, ceilings, doors, windows, taps, faucets, shower parts, pipes, mirrors, pictures, or other vertical/non-support fixtures.
 
 Output JSON schema:
 {{
@@ -436,14 +436,17 @@ def _is_excluded_receptacle_category(category: Any) -> bool:
     tokens = set(_category_tokens(cat))
     support_tokens = {
         "table", "desk", "counter", "nightstand", "dresser", "shelf",
-        "cabinet", "bench", "bed", "sofa", "chair", "floor",
+        "cabinet", "bench", "bed", "sofa", "couch", "chair", "floor",
     }
     blocked_tokens = {
         "wall", "ceiling", "window", "door", "tap", "faucet", "shower",
         "curtain", "blind", "pipe", "vent", "switch", "socket", "outlet", "railing",
     }
+    blocked_lamp_phrases = ("table_lamp", "table lamp", "desk_lamp", "desk lamp")
 
     if cat in blocked_tokens:
+        return True
+    if any(p in cat for p in blocked_lamp_phrases):
         return True
     blocked_phrases = ("light switch", "power outlet", "wall socket", "shower head")
     if any(p in cat for p in blocked_phrases):
@@ -462,7 +465,7 @@ def _is_semantically_plausible_receptacle(category: Any, area: float, span_x: fl
         return False, "excluded_category"
     tokens = set(_category_tokens(cat))
     strong_support = {"table", "desk", "counter", "nightstand", "dresser", "shelf", "cabinet", "bench"}
-    weak_support = {"bed", "sofa", "chair", "floor"}
+    weak_support = {"bed", "sofa", "couch", "chair", "floor"}
     weak_negative = {"picture", "painting", "poster", "lamp", "tv", "monitor", "mirror", "toilet"}
 
     if tokens & strong_support:
@@ -590,7 +593,6 @@ def _heuristic_fallback(candidates: List[Dict[str, Any]], max_results: int) -> L
     - 基于 AABB 的上表面积估计
     """
     keyword_score = {
-        "floor": 0.9,
         "table": 0.95,
         "desk": 0.92,
         "counter": 0.9,
@@ -605,6 +607,7 @@ def _heuristic_fallback(candidates: List[Dict[str, Any]], max_results: int) -> L
         "carpet": 0.7,
         "rug": 0.7,
         "sofa": 0.72,
+        "couch": 0.72,
         "chair": 0.6,
     }
     scored = []
