@@ -316,6 +316,180 @@ def _focus_object(item: Dict[str, Any]) -> Tuple[np.ndarray, float, float]:
     return camera_pos, yaw, pitch
 
 
+def _build_hud(
+    scene_name: str,
+    layout_path: Path,
+    loaded_items: Sequence[Dict[str, Any]],
+    object_count: int,
+    skipped: int,
+    selected_idx: int,
+    camera_pos: np.ndarray,
+    yaw: float,
+    pitch: float,
+) -> List[str]:
+    return [
+        f"Scene: {scene_name}",
+        f"Layout: {layout_path.name}",
+        f"Objects loaded: {len(loaded_items)}/{object_count} skipped={skipped}",
+        f"Selected: {_selected_label(loaded_items, selected_idx)}",
+        f"Camera: ({camera_pos[0]:.2f},{camera_pos[1]:.2f},{camera_pos[2]:.2f}) yaw={yaw:.1f} pitch={pitch:.1f}",
+    ]
+
+
+def _render_frame(
+    sim: habitat_sim.Simulator,
+    scene_name: str,
+    layout_path: Path,
+    loaded_items: Sequence[Dict[str, Any]],
+    object_count: int,
+    skipped: int,
+    selected_idx: int,
+    camera_pos: np.ndarray,
+    yaw: float,
+    pitch: float,
+    width: int,
+    height: int,
+    show_help: bool,
+    help_lines: Sequence[str],
+) -> np.ndarray:
+    try:
+        rgb = _set_camera(sim, camera_pos, yaw, pitch)
+        frame = cv2.cvtColor(rgb.astype(np.uint8), cv2.COLOR_RGB2BGR)
+    except Exception as exc:
+        frame = np.zeros((int(height), int(width), 3), dtype=np.uint8)
+        _draw_text(frame, [f"Render error: {exc}"], 20, 60, (80, 80, 255))
+
+    hud = _build_hud(
+        scene_name=scene_name,
+        layout_path=layout_path,
+        loaded_items=loaded_items,
+        object_count=object_count,
+        skipped=skipped,
+        selected_idx=selected_idx,
+        camera_pos=camera_pos,
+        yaw=yaw,
+        pitch=pitch,
+    )
+    _draw_text(frame, hud, 10, 24, (80, 255, 255))
+    if show_help:
+        y0 = int(height) - len(help_lines) * 22 - 16
+        _draw_text(frame, help_lines, 10, max(24, y0), (80, 255, 80))
+    return frame
+
+
+def _save_headless_snapshots(
+    sim: habitat_sim.Simulator,
+    scene_name: str,
+    layout_path: Path,
+    loaded_items: Sequence[Dict[str, Any]],
+    object_count: int,
+    skipped: int,
+    screenshot_dir: Path,
+    width: int,
+    height: int,
+    max_focus: int,
+    help_lines: Sequence[str],
+) -> List[Path]:
+    screenshot_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = int(time.time())
+    saved: List[Path] = []
+
+    camera_pos, yaw, pitch = _reset_camera(loaded_items)
+    overview = _render_frame(
+        sim=sim,
+        scene_name=scene_name,
+        layout_path=layout_path,
+        loaded_items=loaded_items,
+        object_count=object_count,
+        skipped=skipped,
+        selected_idx=0,
+        camera_pos=camera_pos,
+        yaw=yaw,
+        pitch=pitch,
+        width=width,
+        height=height,
+        show_help=False,
+        help_lines=help_lines,
+    )
+    overview_path = screenshot_dir / f"{scene_name}_overview_{timestamp}.png"
+    cv2.imwrite(str(overview_path), overview)
+    saved.append(overview_path)
+
+    for idx, item in enumerate(loaded_items[: max(0, int(max_focus))]):
+        camera_pos, yaw, pitch = _focus_object(item)
+        frame = _render_frame(
+            sim=sim,
+            scene_name=scene_name,
+            layout_path=layout_path,
+            loaded_items=loaded_items,
+            object_count=object_count,
+            skipped=skipped,
+            selected_idx=idx,
+            camera_pos=camera_pos,
+            yaw=yaw,
+            pitch=pitch,
+            width=width,
+            height=height,
+            show_help=False,
+            help_lines=help_lines,
+        )
+        safe_model = str(item.get("model_id", f"object_{idx}")).replace("/", "_")
+        out_path = screenshot_dir / f"{scene_name}_focus_{idx + 1:02d}_{safe_model}_{timestamp}.png"
+        cv2.imwrite(str(out_path), frame)
+        saved.append(out_path)
+    return saved
+
+
+def _opencv_gui_diagnostics(exc: Exception) -> List[str]:
+    lines = [
+        "[Error] OpenCV HighGUI window creation failed.",
+        f"[Error] cv2 exception: {exc}",
+    ]
+    if cv2 is not None:
+        lines.append(f"[Diag] cv2 version: {getattr(cv2, '__version__', 'unknown')}")
+        lines.append(f"[Diag] cv2 module: {getattr(cv2, '__file__', 'unknown')}")
+        try:
+            build_info = cv2.getBuildInformation()
+        except Exception as build_exc:
+            build_info = ""
+            lines.append(f"[Diag] cv2.getBuildInformation() failed: {build_exc}")
+        if build_info:
+            gui_lines = []
+            capture = False
+            for raw_line in build_info.splitlines():
+                text = raw_line.strip()
+                if text.startswith("GUI:"):
+                    capture = True
+                    gui_lines.append(text)
+                    continue
+                if capture:
+                    if not text:
+                        break
+                    if (
+                        text.startswith("QT:")
+                        or text.startswith("GTK")
+                        or text.startswith("Win32 UI:")
+                        or text.startswith("Cocoa:")
+                        or text.startswith("VTK")
+                    ):
+                        gui_lines.append(text)
+            if gui_lines:
+                lines.append("[Diag] OpenCV GUI build info:")
+                lines.extend(f"  {line}" for line in gui_lines)
+    lines.append(f"[Diag] DISPLAY={os.environ.get('DISPLAY', '')!r}")
+    lines.append(f"[Diag] WAYLAND_DISPLAY={os.environ.get('WAYLAND_DISPLAY', '')!r}")
+    lines.extend(
+        [
+            "[Hint] This is not a Habitat scene-loading failure; the scene and objects may have loaded before HighGUI failed.",
+            "[Hint] If GUI build info says GUI: NONE, your environment likely uses opencv-python-headless or a no-GUI OpenCV build.",
+            "[Hint] Fix options: install a GUI-enabled OpenCV build in the habitat env, or run with --headless explicitly to save snapshots.",
+            "[Hint] For conda, try: conda install -c conda-forge opencv pyqt",
+            "[Hint] For pip, try removing opencv-python-headless and installing opencv-python, then ensure a display/X forwarding is available.",
+        ]
+    )
+    return lines
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Visualize a placed Habitat layout JSON.")
     parser.add_argument("layout", help="已放置 layout JSON 路径")
@@ -325,6 +499,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--width", type=int, default=DISPLAY_WIDTH, help="窗口宽度")
     parser.add_argument("--height", type=int, default=DISPLAY_HEIGHT, help="窗口高度")
     parser.add_argument("--screenshot-dir", default="./results/visual_checks", help="截图输出目录")
+    parser.add_argument("--headless", action="store_true", help="不打开窗口，直接保存总览和物体聚焦截图")
+    parser.add_argument("--headless-max-focus", type=int, default=12, help="headless 模式最多保存多少张物体聚焦图")
     return parser.parse_args()
 
 
@@ -373,9 +549,6 @@ def main() -> int:
     last_frame: Optional[np.ndarray] = None
 
     window = "Placed Layout Viewer  [H]Help  [P]Screenshot  [ESC/Q]Quit"
-    cv2.namedWindow(window, cv2.WINDOW_NORMAL)
-    cv2.resizeWindow(window, int(args.width), int(args.height))
-
     help_lines = [
         "W/S A/D E/C: move camera",
         "I/K J/L: pitch / yaw",
@@ -384,7 +557,44 @@ def main() -> int:
         "H: help   P: screenshot   ESC/Q: quit",
     ]
 
+    window_opened = False
     try:
+        if args.headless:
+            saved = _save_headless_snapshots(
+                sim=sim,
+                scene_name=scene_name,
+                layout_path=layout_path,
+                loaded_items=loaded_items,
+                object_count=len(objects),
+                skipped=skipped,
+                screenshot_dir=Path(args.screenshot_dir),
+                width=int(args.width),
+                height=int(args.height),
+                max_focus=int(args.headless_max_focus),
+                help_lines=help_lines,
+            )
+            print(f"[OK] Headless snapshots saved: {len(saved)}")
+            for path in saved:
+                print(f"  - {path}")
+            return 0
+
+        try:
+            cv2.namedWindow(window, cv2.WINDOW_NORMAL)
+            cv2.resizeWindow(window, int(args.width), int(args.height))
+            window_opened = True
+        except Exception as exc:
+            for line in _opencv_gui_diagnostics(exc):
+                print(line, file=sys.stderr)
+            return 1
+
+        if window_opened:
+            try:
+                visible = cv2.getWindowProperty(window, cv2.WND_PROP_VISIBLE)
+                if visible < 1:
+                    print("[Warning] OpenCV created the window, but it is not visible yet.")
+            except Exception:
+                pass
+
         while True:
             forward, right = _camera_vectors(yaw)
             raw_key = cv2.waitKeyEx(30)
@@ -430,29 +640,31 @@ def main() -> int:
             if key == ord("c"):
                 camera_pos[1] -= CAMERA_MOVE_SPEED
 
-            try:
-                rgb = _set_camera(sim, camera_pos, yaw, pitch)
-                frame = cv2.cvtColor(rgb.astype(np.uint8), cv2.COLOR_RGB2BGR)
-            except Exception as exc:
-                frame = np.zeros((int(args.height), int(args.width), 3), dtype=np.uint8)
-                _draw_text(frame, [f"Render error: {exc}"], 20, 60, (80, 80, 255))
-
-            hud = [
-                f"Scene: {scene_name}",
-                f"Layout: {layout_path.name}",
-                f"Objects loaded: {len(loaded_items)}/{len(objects)} skipped={skipped}",
-                f"Selected: {_selected_label(loaded_items, selected_idx)}",
-                f"Camera: ({camera_pos[0]:.2f},{camera_pos[1]:.2f},{camera_pos[2]:.2f}) yaw={yaw:.1f} pitch={pitch:.1f}",
-            ]
-            _draw_text(frame, hud, 10, 24, (80, 255, 255))
-            if show_help:
-                y0 = int(args.height) - len(help_lines) * 22 - 16
-                _draw_text(frame, help_lines, 10, max(24, y0), (80, 255, 80))
+            frame = _render_frame(
+                sim=sim,
+                scene_name=scene_name,
+                layout_path=layout_path,
+                loaded_items=loaded_items,
+                object_count=len(objects),
+                skipped=skipped,
+                selected_idx=selected_idx,
+                camera_pos=camera_pos,
+                yaw=yaw,
+                pitch=pitch,
+                width=int(args.width),
+                height=int(args.height),
+                show_help=show_help,
+                help_lines=help_lines,
+            )
             last_frame = frame
             cv2.imshow(window, frame)
     finally:
         sim.close()
-        cv2.destroyAllWindows()
+        if window_opened:
+            try:
+                cv2.destroyAllWindows()
+            except Exception:
+                pass
 
     return 0
 
