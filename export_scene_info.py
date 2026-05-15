@@ -421,6 +421,7 @@ def export_scene(scene_name, data_dir, dataset_config, output_dir):
         rooms_list.append({
             "region_id": rid,
             "object_count": len(room_objs),
+            "object_ids": [int(o["id"]) for o in room_objs],               # zean avoid warning 
             "categories": room_cats,
             "room_center": room_center,
             "room_bbox_source": room_bbox_source,
@@ -460,6 +461,7 @@ def export_scene(scene_name, data_dir, dataset_config, output_dir):
             {"name": name, "count": count} for name, count in categories_sorted
         ],
         "rooms": rooms_list,
+        "objects": objects_list,        # zean avoid warning 
     }
 
     # 显式关闭 Simulator，避免批量导出时资源占用累积。

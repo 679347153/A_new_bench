@@ -861,6 +861,36 @@ def main() -> int:
             int(stats.get("failed_count", 0)),
         )
     )
+    failed_objects = stats.get("failed_objects", [])
+    if not isinstance(failed_objects, list):
+        failed_objects = []
+    if failed_objects:
+        failed_by_reason = stats.get("failed_by_reason", {})
+        if not isinstance(failed_by_reason, dict):
+            failed_by_reason = {}
+            for item in failed_objects:
+                if isinstance(item, dict):
+                    reason = str(item.get("reason", "unknown"))
+                    failed_by_reason[reason] = failed_by_reason.get(reason, 0) + 1
+        reason_summary = ", ".join(
+            f"{reason}={count}" for reason, count in sorted(failed_by_reason.items())
+        )
+        print(f"[Diag] Placement failed by reason: {reason_summary}")
+        for idx, item in enumerate(failed_objects, start=1):
+            if not isinstance(item, dict):
+                continue
+            print(
+                "[Diag] Failed#{idx}: object_id={object_id} model={model_id} "
+                "target_instance={target_instance_id} reason={reason}".format(
+                    idx=idx,
+                    object_id=item.get("object_id", "?"),
+                    model_id=item.get("model_id", "?"),
+                    target_instance_id=item.get("target_instance_id", "?"),
+                    reason=item.get("reason", "unknown"),
+                )
+            )
+    else:
+        print("[OK] Placement failure reasons: none")
     return 0
 
 

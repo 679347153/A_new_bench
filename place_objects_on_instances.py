@@ -598,6 +598,11 @@ def place_objects_on_instances(
         except Exception:
             pass
 
+    failed_by_reason: Dict[str, int] = {}
+    for item in failed_objects:
+        reason = str(item.get("reason", "unknown"))
+        failed_by_reason[reason] = failed_by_reason.get(reason, 0) + 1
+
     return {
         "scene": scene_path,
         "timestamp": time.time(),
@@ -614,6 +619,7 @@ def place_objects_on_instances(
             "placed_count": int(len(placed_layout_objects)),
             "failed_count": int(len(failed_objects)),
             "habitat_sim_used": bool(sim is not None),
+            "failed_by_reason": failed_by_reason,
             "failed_objects": failed_objects,
         },
     }
