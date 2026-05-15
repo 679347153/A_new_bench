@@ -47,6 +47,11 @@ except ImportError:
     cv2 = None  # type: ignore[assignment]
 
 try:
+    import pygame  # type: ignore[import-not-found]
+except ImportError:
+    pygame = None  # type: ignore[assignment]
+
+try:
     import habitat_sim  # type: ignore[import-not-found]
     import habitat_sim.utils.common as utils  # type: ignore[import-not-found]
     import magnum as mn  # type: ignore[import-not-found]
@@ -108,6 +113,34 @@ def _normalize_key(raw_key: int) -> int:
     if raw_key < 0:
         return raw_key
     return raw_key & 0xFF
+
+
+def _normalize_pygame_key(key: int) -> int:
+    if pygame is None:
+        return -1
+    mapping = {
+        pygame.K_ESCAPE: 27,
+        pygame.K_q: ord("q"),
+        pygame.K_h: ord("h"),
+        pygame.K_r: ord("r"),
+        pygame.K_f: ord("f"),
+        pygame.K_p: ord("p"),
+        pygame.K_w: ord("w"),
+        pygame.K_s: ord("s"),
+        pygame.K_a: ord("a"),
+        pygame.K_d: ord("d"),
+        pygame.K_e: ord("e"),
+        pygame.K_c: ord("c"),
+        pygame.K_i: ord("i"),
+        pygame.K_k: ord("k"),
+        pygame.K_j: ord("j"),
+        pygame.K_l: ord("l"),
+        pygame.K_LEFTBRACKET: ord("["),
+        pygame.K_RIGHTBRACKET: ord("]"),
+        pygame.K_9: ord("9"),
+        pygame.K_0: ord("0"),
+    }
+    return mapping.get(key, -1)
 
 
 def _layout_objects(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -377,6 +410,226 @@ def _render_frame(
     return frame
 
 
+def _apply_viewer_key(
+    key: int,
+    state: Dict[str, Any],
+    sim: habitat_sim.Simulator,
+    loaded_items: Sequence[Dict[str, Any]],
+    screenshot_dir: Path,
+    scene_name: str,
+) -> bool:
+    if key < 0:
+        return False
+    if key in (27, ord("q")):
+        state["quit"] = True
+        return True
+    if key == ord("h"):
+        state["show_help"] = not bool(state.get("show_help", True))
+    if key == ord("r"):
+        camera_pos, yaw, pitch = _reset_camera(loaded_items)
+        state["camera_pos"] = camera_pos
+        state["yaw"] = yaw
+        state["pitch"] = pitch
+    if key in (ord("["), ord("9")) and loaded_items:
+        state["selected_idx"] = (int(state.get("selected_idx", 0)) - 1) % len(loaded_items)
+    if key in (ord("]"), ord("0")) and loaded_items:
+        state["selected_idx"] = (int(state.get("selected_idx", 0)) + 1) % len(loaded_items)
+    if key == ord("f") and loaded_items:
+        camera_pos, yaw, pitch = _focus_object(loaded_items[int(state.get("selected_idx", 0))])
+        state["camera_pos"] = camera_pos
+        state["yaw"] = yaw
+        state["pitch"] = pitch
+    if key == ord("p") and state.get("last_frame") is not None:
+        screenshot_dir.mkdir(parents=True, exist_ok=True)
+        out_path = screenshot_dir / f"{scene_name}_layout_view_{int(time.time())}.png"
+        cv2.imwrite(str(out_path), state["last_frame"])
+        print(f"[OK] Screenshot saved: {out_path}")
+
+    yaw = float(state.get("yaw", 0.0))
+    pitch = float(state.get("pitch", 0.0))
+    camera_pos = np.asarray(state.get("camera_pos", np.zeros(3)), dtype=np.float32)
+    forward, right = _camera_vectors(yaw)
+
+    if key == ord("j"):
+        yaw += ROTATE_SPEED
+    if key == ord("l"):
+        yaw -= ROTATE_SPEED
+    if key == ord("i"):
+        pitch = min(pitch + ROTATE_SPEED, PITCH_LIMIT)
+    if key == ord("k"):
+        pitch = max(pitch - ROTATE_SPEED, -PITCH_LIMIT)
+    if key == ord("w"):
+        camera_pos += forward * CAMERA_MOVE_SPEED
+    if key == ord("s"):
+        camera_pos -= forward * CAMERA_MOVE_SPEED
+    if key == ord("a"):
+        camera_pos -= right * CAMERA_MOVE_SPEED
+    if key == ord("d"):
+        camera_pos += right * CAMERA_MOVE_SPEED
+    if key == ord("e"):
+        camera_pos[1] += CAMERA_MOVE_SPEED
+    if key == ord("c"):
+        camera_pos[1] -= CAMERA_MOVE_SPEED
+
+    state["camera_pos"] = camera_pos
+    state["yaw"] = yaw
+    state["pitch"] = pitch
+    return False
+
+
+def _render_current_state(
+    sim: habitat_sim.Simulator,
+    scene_name: str,
+    layout_path: Path,
+    loaded_items: Sequence[Dict[str, Any]],
+    object_count: int,
+    skipped: int,
+    state: Dict[str, Any],
+    width: int,
+    height: int,
+    help_lines: Sequence[str],
+) -> np.ndarray:
+    return _render_frame(
+        sim=sim,
+        scene_name=scene_name,
+        layout_path=layout_path,
+        loaded_items=loaded_items,
+        object_count=object_count,
+        skipped=skipped,
+        selected_idx=int(state.get("selected_idx", 0)),
+        camera_pos=np.asarray(state.get("camera_pos", np.zeros(3)), dtype=np.float32),
+        yaw=float(state.get("yaw", 0.0)),
+        pitch=float(state.get("pitch", 0.0)),
+        width=width,
+        height=height,
+        show_help=bool(state.get("show_help", True)),
+        help_lines=help_lines,
+    )
+
+
+def _opencv_gui_available() -> bool:
+    if cv2 is None:
+        return False
+    try:
+        build_info = cv2.getBuildInformation()
+    except Exception:
+        return True
+    for raw_line in build_info.splitlines():
+        text = raw_line.strip()
+        if text.startswith("GUI:"):
+            return not text.endswith("NONE")
+    return True
+
+
+def _run_pygame_viewer(
+    sim: habitat_sim.Simulator,
+    scene_name: str,
+    layout_path: Path,
+    loaded_items: Sequence[Dict[str, Any]],
+    object_count: int,
+    skipped: int,
+    state: Dict[str, Any],
+    width: int,
+    height: int,
+    screenshot_dir: Path,
+    help_lines: Sequence[str],
+) -> int:
+    if pygame is None:
+        print(
+            "[Error] cv2 HighGUI is unavailable and pygame is not installed. "
+            "Install pygame or use a GUI-enabled OpenCV build.",
+            file=sys.stderr,
+        )
+        return 1
+
+    pygame.init()
+    screen = pygame.display.set_mode((int(width), int(height)))
+    pygame.display.set_caption("Placed Layout Viewer  [H]Help  [P]Screenshot  [ESC/Q]Quit")
+    clock = pygame.time.Clock()
+    print("[Info] Using pygame window backend because OpenCV HighGUI is unavailable.")
+
+    try:
+        while not bool(state.get("quit", False)):
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    state["quit"] = True
+                elif event.type == pygame.KEYDOWN:
+                    _apply_viewer_key(
+                        _normalize_pygame_key(event.key),
+                        state,
+                        sim,
+                        loaded_items,
+                        screenshot_dir,
+                        scene_name,
+                    )
+
+            frame_bgr = _render_current_state(
+                sim=sim,
+                scene_name=scene_name,
+                layout_path=layout_path,
+                loaded_items=loaded_items,
+                object_count=object_count,
+                skipped=skipped,
+                state=state,
+                width=width,
+                height=height,
+                help_lines=help_lines,
+            )
+            state["last_frame"] = frame_bgr
+            frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+            surface = pygame.surfarray.make_surface(np.transpose(frame_rgb, (1, 0, 2)))
+            screen.blit(surface, (0, 0))
+            pygame.display.flip()
+            clock.tick(30)
+    finally:
+        pygame.quit()
+    return 0
+
+
+def _run_cv2_viewer(
+    sim: habitat_sim.Simulator,
+    scene_name: str,
+    layout_path: Path,
+    loaded_items: Sequence[Dict[str, Any]],
+    object_count: int,
+    skipped: int,
+    state: Dict[str, Any],
+    width: int,
+    height: int,
+    screenshot_dir: Path,
+    help_lines: Sequence[str],
+) -> int:
+    window = "Placed Layout Viewer  [H]Help  [P]Screenshot  [ESC/Q]Quit"
+    cv2.namedWindow(window, cv2.WINDOW_NORMAL)
+    cv2.resizeWindow(window, int(width), int(height))
+
+    try:
+        while not bool(state.get("quit", False)):
+            raw_key = cv2.waitKeyEx(30)
+            key = _normalize_key(raw_key)
+            _apply_viewer_key(key, state, sim, loaded_items, screenshot_dir, scene_name)
+            frame = _render_current_state(
+                sim=sim,
+                scene_name=scene_name,
+                layout_path=layout_path,
+                loaded_items=loaded_items,
+                object_count=object_count,
+                skipped=skipped,
+                state=state,
+                width=width,
+                height=height,
+                help_lines=help_lines,
+            )
+            state["last_frame"] = frame
+            cv2.imshow(window, frame)
+    finally:
+        try:
+            cv2.destroyAllWindows()
+        except Exception:
+            pass
+    return 0
+
+
 def _save_headless_snapshots(
     sim: habitat_sim.Simulator,
     scene_name: str,
@@ -499,6 +752,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--width", type=int, default=DISPLAY_WIDTH, help="窗口宽度")
     parser.add_argument("--height", type=int, default=DISPLAY_HEIGHT, help="窗口高度")
     parser.add_argument("--screenshot-dir", default="./results/visual_checks", help="截图输出目录")
+    parser.add_argument(
+        "--window-backend",
+        choices=["auto", "cv2", "pygame"],
+        default="auto",
+        help="窗口后端；auto 会优先使用 cv2，cv2 无 GUI 时改用 pygame",
+    )
     parser.add_argument("--headless", action="store_true", help="不打开窗口，直接保存总览和物体聚焦截图")
     parser.add_argument("--headless-max-focus", type=int, default=12, help="headless 模式最多保存多少张物体聚焦图")
     return parser.parse_args()
@@ -544,11 +803,16 @@ def main() -> int:
             print(f"[Info] Failed objects recorded in layout: {stats.get('failed_objects')}")
 
     camera_pos, yaw, pitch = _reset_camera(loaded_items)
-    selected_idx = 0
-    show_help = True
-    last_frame: Optional[np.ndarray] = None
+    state: Dict[str, Any] = {
+        "camera_pos": camera_pos,
+        "yaw": yaw,
+        "pitch": pitch,
+        "selected_idx": 0,
+        "show_help": True,
+        "last_frame": None,
+        "quit": False,
+    }
 
-    window = "Placed Layout Viewer  [H]Help  [P]Screenshot  [ESC/Q]Quit"
     help_lines = [
         "W/S A/D E/C: move camera",
         "I/K J/L: pitch / yaw",
@@ -557,7 +821,6 @@ def main() -> int:
         "H: help   P: screenshot   ESC/Q: quit",
     ]
 
-    window_opened = False
     try:
         if args.headless:
             saved = _save_headless_snapshots(
@@ -578,93 +841,54 @@ def main() -> int:
                 print(f"  - {path}")
             return 0
 
-        try:
-            cv2.namedWindow(window, cv2.WINDOW_NORMAL)
-            cv2.resizeWindow(window, int(args.width), int(args.height))
-            window_opened = True
-        except Exception as exc:
-            for line in _opencv_gui_diagnostics(exc):
-                print(line, file=sys.stderr)
-            return 1
+        backend = str(args.window_backend)
+        if backend == "auto":
+            backend = "cv2" if _opencv_gui_available() else "pygame"
 
-        if window_opened:
+        if backend == "cv2":
             try:
-                visible = cv2.getWindowProperty(window, cv2.WND_PROP_VISIBLE)
-                if visible < 1:
-                    print("[Warning] OpenCV created the window, but it is not visible yet.")
-            except Exception:
-                pass
+                return _run_cv2_viewer(
+                    sim=sim,
+                    scene_name=scene_name,
+                    layout_path=layout_path,
+                    loaded_items=loaded_items,
+                    object_count=len(objects),
+                    skipped=skipped,
+                    state=state,
+                    width=int(args.width),
+                    height=int(args.height),
+                    screenshot_dir=Path(args.screenshot_dir),
+                    help_lines=help_lines,
+                )
+            except Exception as exc:
+                if args.window_backend == "cv2":
+                    for line in _opencv_gui_diagnostics(exc):
+                        print(line, file=sys.stderr)
+                    return 1
+                print("[Warning] OpenCV window backend failed; trying pygame instead.", file=sys.stderr)
+                for line in _opencv_gui_diagnostics(exc):
+                    print(line, file=sys.stderr)
+                backend = "pygame"
 
-        while True:
-            forward, right = _camera_vectors(yaw)
-            raw_key = cv2.waitKeyEx(30)
-            key = _normalize_key(raw_key)
-
-            if key in (27, ord("q")):
-                break
-            if key == ord("h"):
-                show_help = not show_help
-            if key == ord("r"):
-                camera_pos, yaw, pitch = _reset_camera(loaded_items)
-            if key in (ord("["), ord("9")) and loaded_items:
-                selected_idx = (selected_idx - 1) % len(loaded_items)
-            if key in (ord("]"), ord("0")) and loaded_items:
-                selected_idx = (selected_idx + 1) % len(loaded_items)
-            if key == ord("f") and loaded_items:
-                camera_pos, yaw, pitch = _focus_object(loaded_items[selected_idx])
-            if key == ord("p") and last_frame is not None:
-                out_dir = Path(args.screenshot_dir)
-                out_dir.mkdir(parents=True, exist_ok=True)
-                out_path = out_dir / f"{scene_name}_layout_view_{int(time.time())}.png"
-                cv2.imwrite(str(out_path), last_frame)
-                print(f"[OK] Screenshot saved: {out_path}")
-
-            if key == ord("j"):
-                yaw += ROTATE_SPEED
-            if key == ord("l"):
-                yaw -= ROTATE_SPEED
-            if key == ord("i"):
-                pitch = min(pitch + ROTATE_SPEED, PITCH_LIMIT)
-            if key == ord("k"):
-                pitch = max(pitch - ROTATE_SPEED, -PITCH_LIMIT)
-            if key == ord("w"):
-                camera_pos += forward * CAMERA_MOVE_SPEED
-            if key == ord("s"):
-                camera_pos -= forward * CAMERA_MOVE_SPEED
-            if key == ord("a"):
-                camera_pos -= right * CAMERA_MOVE_SPEED
-            if key == ord("d"):
-                camera_pos += right * CAMERA_MOVE_SPEED
-            if key == ord("e"):
-                camera_pos[1] += CAMERA_MOVE_SPEED
-            if key == ord("c"):
-                camera_pos[1] -= CAMERA_MOVE_SPEED
-
-            frame = _render_frame(
+        if backend == "pygame":
+            return _run_pygame_viewer(
                 sim=sim,
                 scene_name=scene_name,
                 layout_path=layout_path,
                 loaded_items=loaded_items,
                 object_count=len(objects),
                 skipped=skipped,
-                selected_idx=selected_idx,
-                camera_pos=camera_pos,
-                yaw=yaw,
-                pitch=pitch,
+                state=state,
                 width=int(args.width),
                 height=int(args.height),
-                show_help=show_help,
+                screenshot_dir=Path(args.screenshot_dir),
                 help_lines=help_lines,
             )
-            last_frame = frame
-            cv2.imshow(window, frame)
+
+        print(f"[Error] Unknown window backend: {backend}", file=sys.stderr)
+        return 1
     finally:
         sim.close()
-        if window_opened:
-            try:
-                cv2.destroyAllWindows()
-            except Exception:
-                pass
 
     return 0
 
