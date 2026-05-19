@@ -24,10 +24,10 @@ from __future__ import annotations
 
 执行指引
 --------
-1) 启用 SSH + LLM 的完整流程：
+1) 启用 SSH 密钥隧道 + LLM 的完整流程：
    python query_room_receptacle_objects.py \
      --scene 00800-TEEsavR23oF \
-     --ssh-host 7.216.187.6 --ssh-port 31822 --ssh-user root --ssh-password 666666 \
+     --ssh-key /home/yuhang/Desktop/zw_B200.txt \
      --vllm-host 127.0.0.1 --vllm-port 8000
 
 2) 仅启发式模式（不依赖 LLM）：
@@ -89,6 +89,10 @@ DEFAULT_OUTPUT_DIR = Path("./results/receptacle_queries")
 DEFAULT_CANDIDATE_MIN_TOP_AREA_EST = 0.005
 DEFAULT_SURFACE_MIN_AREA = 0.005
 DEFAULT_SURFACE_MIN_SPAN = 0.02
+DEFAULT_SSH_HOST = "7.216.187.6"
+DEFAULT_SSH_PORT = 31023
+DEFAULT_SSH_USER = "root"
+DEFAULT_SSH_KEY = "/home/yuhang/Desktop/zw_B200.txt"
 SYNTHETIC_FLOOR_ID_BASE = 900_000_000
 
 FLOOR_CATEGORY_KEYWORDS = {
@@ -319,9 +323,15 @@ class SSHTunnel:
         cmd_for_run = tunnel_cmd
         env = os.environ.copy()
 
-        if self.ssh_password:
+        if self.ssh_key:
+            ssh_key_path = os.path.expanduser(self.ssh_key)
+            if not os.path.exists(ssh_key_path):
+                print(f"[Error] SSH key not found: {ssh_key_path}", file=sys.stderr)
+                return False
+            tunnel_cmd[1:1] = ["-i", ssh_key_path]
+        elif self.ssh_password:
             if shutil.which("sshpass") is None:
-                print("[Error] sshpass not found. Install with: sudo apt-get install -y sshpass", file=sys.stderr)
+                print("[Error] sshpass not found for legacy password fallback. Prefer --ssh-key /home/yuhang/Desktop/zw_B200.txt", file=sys.stderr)
                 return False
             tunnel_cmd[1:1] = [
                 "-o",
@@ -333,14 +343,8 @@ class SSHTunnel:
             ]
             env["SSHPASS"] = self.ssh_password
             cmd_for_run = ["sshpass", "-e", *tunnel_cmd]
-        elif self.ssh_key:
-            ssh_key_path = os.path.expanduser(self.ssh_key)
-            if not os.path.exists(ssh_key_path):
-                print(f"[Error] SSH key not found: {ssh_key_path}", file=sys.stderr)
-                return False
-            tunnel_cmd[1:1] = ["-i", ssh_key_path]
         else:
-            print("[Error] Must provide either --ssh-password or --ssh-key", file=sys.stderr)
+            print("[Error] Must provide --ssh-key (preferred) or --ssh-password", file=sys.stderr)
             return False
 
         self.proc = subprocess.Popen(
@@ -958,7 +962,7 @@ def _resolve_room_ids(
 
 
 def _validate_ssh_args(args: argparse.Namespace) -> bool:
-    """检查远端 LLM 模式所需的最小 SSH 凭据是否完整。"""
+    """检查远端 LLM 模式所需的最小 SSH 密钥/凭据是否完整。"""
     if args.ssh_host and args.ssh_user and (args.ssh_password or args.ssh_key):
         return True
     return False
@@ -1001,11 +1005,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--debug-mesh-crop", action="store_true", help="Pass-through debug flag to point cloud extraction")
     parser.add_argument("--disable-llm", action="store_true", help="Use heuristic-only mode")
 
-    parser.add_argument("--ssh-host", default=None, help="SSH server host")
-    parser.add_argument("--ssh-port", type=int, default=22, help="SSH server port")
-    parser.add_argument("--ssh-user", default=None, help="SSH username")
-    parser.add_argument("--ssh-password", default=None, help="SSH password")
-    parser.add_argument("--ssh-key", default=None, help="SSH private key path")
+    parser.add_argument("--ssh-host", default=DEFAULT_SSH_HOST, help="SSH server host")
+    parser.add_argument("--ssh-port", type=int, default=DEFAULT_SSH_PORT, help="SSH server port")
+    parser.add_argument("--ssh-user", default=DEFAULT_SSH_USER, help="SSH username")
+    parser.add_argument("--ssh-password", default=None, help="Legacy SSH password fallback; --ssh-key is preferred")
+    parser.add_argument("--ssh-key", default=DEFAULT_SSH_KEY, help="SSH private key path")
     parser.add_argument("--vllm-host", default="127.0.0.1", help="vLLM host in remote namespace")
     parser.add_argument("--vllm-port", type=int, default=8000, help="vLLM OpenAI-compatible API port")
     parser.add_argument("--local-port", type=int, default=0, help="Local forwarded port, 0 = auto")

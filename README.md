@@ -39,7 +39,7 @@
 
 可选依赖：
 - habitat-sim（实时导出 scene_info 时需要）
-- sshpass（使用 SSH 密码模式时需要）
+- 远程 Qwen3-VL 默认使用 SSH 密钥连接：`ssh -i /home/yuhang/Desktop/zw_B200.txt -p 31023 root@7.216.187.6`
 
 安装示例：
 pip install openai numpy
@@ -48,7 +48,7 @@ pip install habitat-sim
 ## 脚本一：query_rooms_for_objects.py
 
 ### 功能
-- 连接远程 vLLM Qwen3-VL（SSH 隧道）
+- 连接远程 vLLM Qwen3-VL（SSH 密钥隧道）
 - 读取场景房间候选
 - 对每张物体图片生成房间推荐 JSON
 
@@ -56,8 +56,8 @@ pip install habitat-sim
 - --scene：单场景（与 --scenes 互斥）
 - --scenes all：全量场景（与 --scene 互斥）
 - 两者都不填：默认处理 AVAILABLE_SCENES 全量
-- --ssh-host / --ssh-port / --ssh-user：SSH 必要参数
-- --ssh-password 或 --ssh-key：二选一认证方式
+- --ssh-host / --ssh-port / --ssh-user / --ssh-key：默认已配置为 `root@7.216.187.6:31023` 与 `/home/yuhang/Desktop/zw_B200.txt`
+- --ssh-password：旧版密码连接兼容参数，默认流程不再使用
 - --images-dir：图片目录，默认 ./objects_images
 - --output-dir：输出目录，默认 ./results/scene_info
 - --vllm-host / --vllm-port：默认 127.0.0.1:8000
@@ -66,7 +66,7 @@ pip install habitat-sim
 
 ### 单场景示例
 python query_rooms_for_objects.py \
-  --ssh-host 7.216.187.6 --ssh-port 31822 --ssh-user root --ssh-password 666666 \
+  --ssh-key /home/yuhang/Desktop/zw_B200.txt \
   --vllm-host 127.0.0.1 --vllm-port 8000 \
   --images-dir ./objects_images \
   --scene 00808-y9hTuugGdiq \
@@ -74,7 +74,7 @@ python query_rooms_for_objects.py \
 
 ### 全量场景示例
 python query_rooms_for_objects.py \
-  --ssh-host 7.216.187.6 --ssh-port 31822 --ssh-user root --ssh-password 666666 \
+  --ssh-key /home/yuhang/Desktop/zw_B200.txt \
   --scenes all \
   --output-dir ./results/scene_info/
 
@@ -173,8 +173,8 @@ results/layouts/{scene}/final_*.json
 1. 同时传 --scene 和 --scenes all 报错
 原因：二者互斥。请只保留一个，或都不填（默认全量）。
 
-2. 报 sshpass not found
-安装 sshpass 或改用 --ssh-key。
+2. 报 SSH key not found
+确认 `/home/yuhang/Desktop/zw_B200.txt` 存在且权限正确，或通过 `--ssh-key` 指定新的私钥路径。
 
 3. 房间推荐为空或不足 2 个
 检查图片质量、Qwen 服务状态、scene_info 可用性；脚本有回退补足逻辑。
@@ -210,7 +210,7 @@ objects_images/
 ### 2）生成房间推荐（Qwen）
 
 python query_rooms_for_objects.py \
-  --ssh-host 7.216.187.6 --ssh-port 31822 --ssh-user root --ssh-password 666666 \
+  --ssh-key /home/yuhang/Desktop/zw_B200.txt \
   --vllm-host 127.0.0.1 --vllm-port 8000 \
   --images-dir ./objects_images \
   --scene 00808-y9hTuugGdiq \

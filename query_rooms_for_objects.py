@@ -7,14 +7,14 @@ from __future__ import annotations
 逻辑流程：
 1. 读取场景导出的scene_info JSON（或实时导出）
 2. 遍历 objects_images/ 目录中的所有图片
-3. 对每个(场景, 物体图片)对，通过SSH隧道连接远程Qwen3-VL
+3. 对每个(场景, 物体图片)对，通过 SSH 密钥隧道连接远程 Qwen3-VL
 4. 询问："该物体最有可能出现在房间的哪些地方？前5个房间+3D中心"
 5. 解析回复，提取房间推荐列表
 6. 生成JSON：场景信息 + 查询内容 + Qwen原始/清洗后回复 + 前5房间推荐 + 元数据
 
 用法：
   python query_rooms_for_objects.py \
-    --ssh-host 7.216.187.6 --ssh-port 31822 --ssh-user root --ssh-password 666666 \
+    --ssh-key /home/yuhang/Desktop/zw_B200.txt \
     --vllm-host 127.0.0.1 --vllm-port 8000 \
     --images-dir ./objects_images \
     --scenes all \
@@ -23,7 +23,7 @@ from __future__ import annotations
   # 或单个场景
 
   python query_rooms_for_objects.py \
-    --ssh-host 7.216.187.6 --ssh-port 31822 --ssh-user root --ssh-password 666666 \
+    --ssh-key /home/yuhang/Desktop/zw_B200.txt \
     --vllm-host 127.0.0.1 --vllm-port 8000 \
     --images-dir ./objects_images \
     --scene 00808-y9hTuugGdiq \
@@ -63,6 +63,10 @@ except ImportError:
 # ===== 常量 =====
 DEFAULT_OUTPUT_DIR = "./results/scene_info"
 DEFAULT_IMAGES_DIR = "./objects_images"
+DEFAULT_SSH_HOST = "7.216.187.6"
+DEFAULT_SSH_PORT = 31023
+DEFAULT_SSH_USER = "root"
+DEFAULT_SSH_KEY = "/home/yuhang/Desktop/zw_B200.txt"
 AVAILABLE_SCENES = list_available_scenes(require_semantic=True)
 
 QWEN_SYSTEM_TEMPLATE = (
@@ -213,7 +217,7 @@ class SSHTunnel:
         self.base_url = f"http://127.0.0.1:{self.local_port}/v1"
     
     def start(self, timeout_s: float = 30.0) -> bool:
-        """Start SSH tunnel and wait for readiness."""
+        """Start a private-key SSH tunnel and wait for readiness."""
         tunnel_cmd = [
             "ssh",
             "-o", "ExitOnForwardFailure=yes",
@@ -229,9 +233,15 @@ class SSHTunnel:
         cmd_for_run = tunnel_cmd
         proc_env = os.environ.copy()
         
-        if self.ssh_password:
+        if self.ssh_key:
+            ssh_key_path = os.path.expanduser(self.ssh_key)
+            if not os.path.exists(ssh_key_path):
+                print(f"[Error] SSH key not found: {ssh_key_path}")
+                return False
+            tunnel_cmd[1:1] = ["-i", ssh_key_path]
+        elif self.ssh_password:
             if shutil.which("sshpass") is None:
-                print("[Error] sshpass not found. Install with: sudo apt-get install -y sshpass")
+                print("[Error] sshpass not found for legacy password fallback. Prefer --ssh-key /home/yuhang/Desktop/zw_B200.txt")
                 return False
             tunnel_cmd[1:1] = [
                 "-o", "PubkeyAuthentication=no",
@@ -240,14 +250,8 @@ class SSHTunnel:
             ]
             proc_env["SSHPASS"] = self.ssh_password
             cmd_for_run = ["sshpass", "-e", *tunnel_cmd]
-        elif self.ssh_key:
-            ssh_key_path = os.path.expanduser(self.ssh_key)
-            if not os.path.exists(ssh_key_path):
-                print(f"[Error] SSH key not found: {ssh_key_path}")
-                return False
-            tunnel_cmd[1:1] = ["-i", ssh_key_path]
         else:
-            print("[Error] Must provide either --ssh-password or --ssh-key")
+            print("[Error] Must provide --ssh-key (preferred) or --ssh-password")
             return False
         
         print(f"[Info] Opening SSH tunnel to {self.ssh_user}@{self.ssh_host}:{self.ssh_port}")
@@ -695,12 +699,12 @@ def main():
     parser.add_argument("--images-dir", type=str, default=DEFAULT_IMAGES_DIR, help="Directory containing object images")
     parser.add_argument("--output-dir", type=str, default=DEFAULT_OUTPUT_DIR, help="Output directory for results")
     
-    # SSH tunnel
-    parser.add_argument("--ssh-host", required=True, help="SSH server host")
-    parser.add_argument("--ssh-port", type=int, default=22, help="SSH server port")
-    parser.add_argument("--ssh-user", required=True, help="SSH username")
-    parser.add_argument("--ssh-password", default=None, help="SSH password (non-interactive mode)")
-    parser.add_argument("--ssh-key", default=None, help="SSH private key path")
+    # SSH tunnel (defaults use private-key auth: ssh -i DEFAULT_SSH_KEY -p DEFAULT_SSH_PORT DEFAULT_SSH_USER@DEFAULT_SSH_HOST)
+    parser.add_argument("--ssh-host", default=DEFAULT_SSH_HOST, help="SSH server host")
+    parser.add_argument("--ssh-port", type=int, default=DEFAULT_SSH_PORT, help="SSH server port")
+    parser.add_argument("--ssh-user", default=DEFAULT_SSH_USER, help="SSH username")
+    parser.add_argument("--ssh-password", default=None, help="Legacy SSH password fallback; --ssh-key is preferred")
+    parser.add_argument("--ssh-key", default=DEFAULT_SSH_KEY, help="SSH private key path")
     
     # Qwen server
     parser.add_argument("--vllm-host", default="127.0.0.1", help="vLLM API host (default: 127.0.0.1)")

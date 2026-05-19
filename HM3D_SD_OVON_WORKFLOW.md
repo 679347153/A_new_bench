@@ -37,11 +37,10 @@ pip install opencv-python
 # habitat-sim / magnum 依赖按你的环境安装
 ```
 
-若需要远程 Qwen3-VL（SSH 密码方式）：
+若需要远程 Qwen3-VL，默认使用 SSH 密钥方式：
 
 ```bash
-# Linux 示例
-sudo apt-get install -y sshpass
+ssh -i /home/yuhang/Desktop/zw_B200.txt -p 31023 root@7.216.187.6
 ```
 
 ---
@@ -109,7 +108,7 @@ python export_scene_info.py --all
 
 ```bash
 python query_rooms_for_objects.py \
-  --ssh-host <SSH_HOST> --ssh-port <SSH_PORT> --ssh-user <SSH_USER> --ssh-password <SSH_PASSWORD> \
+  --ssh-key /home/yuhang/Desktop/zw_B200.txt \
   --vllm-host 127.0.0.1 --vllm-port 8000 \
   --images-dir ./objects_images \
   --scene 00808-y9hTuugGdiq \
@@ -254,7 +253,7 @@ python -c "import json; from orchestrate_sd_ovon_complete import SDOVONPipelineO
 python verify_workflow.py
 
 python query_rooms_for_objects.py \
-  --ssh-host <SSH_HOST> --ssh-port <SSH_PORT> --ssh-user <SSH_USER> --ssh-password <SSH_PASSWORD> \
+  --ssh-key /home/yuhang/Desktop/zw_B200.txt \
   --vllm-host 127.0.0.1 --vllm-port 8000 \
   --images-dir ./objects_images \
   --scene 00808-y9hTuugGdiq \

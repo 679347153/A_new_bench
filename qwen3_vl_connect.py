@@ -2,30 +2,26 @@
 
 Usage example:
 
-# Password mode (current setup)
 python qwen3_vl_connect.py \
-  --ssh-host 7.216.187.6 \
-	--ssh-port 31822 \
-	--ssh-user root \
-	--ssh-password 666666 \
+  --ssh-key /home/yuhang/Desktop/zw_B200.txt \
 	--vllm-host 127.0.0.1 \
 	--vllm-port 8000 \
   --image /home/yuhang/zw_ws/qwen/receipt.jpg \
   --prompt "What is in the image?"
 
-# Private key mode
+# 等价的完整 SSH 参数写法：
 python qwen3_vl_connect.py \
   --ssh-host 7.216.187.6 \
-	--ssh-port 31822 \
+	--ssh-port 31023 \
 	--ssh-user root \
-  --ssh-key /home/yuhang/zw_ws/qwen/zw_B200.txt \
+  --ssh-key /home/yuhang/Desktop/zw_B200.txt \
 	--vllm-host 127.0.0.1 \
 	--vllm-port 8000 \
   --image /home/yuhang/zw_ws/qwen/receipt.jpg \
   --prompt "What is in the image?"
 
 Note:
-- --ssh-port is SSH login port (your case is 31822)
+- --ssh-port is SSH login port (your case is 31023)
 - --vllm-port is OpenAI-compatible API port inside remote host namespace
 - If vLLM runs in docker, publish container port to host (e.g. -p 8000:8000)
 """
@@ -46,6 +42,11 @@ import time
 from pathlib import Path
 
 from openai import OpenAI
+
+DEFAULT_SSH_HOST = "7.216.187.6"
+DEFAULT_SSH_PORT = 31023
+DEFAULT_SSH_USER = "root"
+DEFAULT_SSH_KEY = "/home/yuhang/Desktop/zw_B200.txt"
 
 
 def _pick_free_local_port() -> int:
@@ -109,14 +110,14 @@ def parse_args() -> argparse.Namespace:
 		description="Call remote vLLM Qwen3-VL via SSH private-key tunnel."
 	)
 
-	parser.add_argument("--ssh-host", required=True, help="SSH server host or IP")
-	parser.add_argument("--ssh-port", type=int, default=22, help="SSH server port")
-	parser.add_argument("--ssh-user", required=True, help="SSH username")
-	parser.add_argument("--ssh-key", required=False, help="Path to private key file")
+	parser.add_argument("--ssh-host", default=DEFAULT_SSH_HOST, help="SSH server host or IP")
+	parser.add_argument("--ssh-port", type=int, default=DEFAULT_SSH_PORT, help="SSH server port")
+	parser.add_argument("--ssh-user", default=DEFAULT_SSH_USER, help="SSH username")
+	parser.add_argument("--ssh-key", default=DEFAULT_SSH_KEY, help="Path to private key file")
 	parser.add_argument(
 		"--ssh-password",
 		default=None,
-		help="SSH password/passphrase for non-interactive mode (requires sshpass)",
+		help="Legacy SSH password fallback for non-interactive mode (requires sshpass); --ssh-key is preferred",
 	)
 	parser.add_argument(
 		"--ssh-key-passphrase",
@@ -191,7 +192,7 @@ def main() -> int:
 
 	if not args.ssh_password and not ssh_key_path:
 		print(
-			"[Error] You must provide at least one auth method: --ssh-password or --ssh-key",
+			"[Error] You must provide --ssh-key (preferred) or --ssh-password",
 			file=sys.stderr,
 		)
 		return 1
@@ -231,8 +232,10 @@ def main() -> int:
 		f"127.0.0.1:{local_port}:{args.remote_host}:{args.remote_port}",
 		f"{args.ssh_user}@{args.ssh_host}",
 	]
-	if args.ssh_password:
-		# Force password auth to avoid private-key prompt and interactive fallback.
+	if ssh_key_path:
+		tunnel_cmd[1:1] = ["-i", ssh_key_path]
+	elif args.ssh_password:
+		# Legacy password fallback: force password auth to avoid private-key prompt and interactive fallback.
 		tunnel_cmd[1:1] = [
 			"-o",
 			"PubkeyAuthentication=no",
@@ -241,8 +244,6 @@ def main() -> int:
 			"-o",
 			"NumberOfPasswordPrompts=1",
 		]
-	elif ssh_key_path:
-		tunnel_cmd[1:1] = ["-i", ssh_key_path]
 
 	if args.ssh_key_passphrase:
 		print(
@@ -252,17 +253,17 @@ def main() -> int:
 	if args.ssh_password and args.ssh_key_passphrase:
 		print(
 			"[Warn] Both --ssh-password and --ssh-key-passphrase are set. "
-			"Only --ssh-password is used for non-interactive authentication.",
+			"--ssh-key is preferred; password is only used when no key is provided.",
 			file=sys.stderr,
 		)
 
 	cmd_for_run = tunnel_cmd
 	proc_env = os.environ.copy()
-	if args.ssh_password:
+	if args.ssh_password and not ssh_key_path:
 		if shutil.which("sshpass") is None:
 			print(
 				"[Error] --ssh-password requires sshpass, but sshpass is not installed. "
-				"Install it first: sudo apt-get install -y sshpass",
+				"Prefer --ssh-key /home/yuhang/Desktop/zw_B200.txt.",
 				file=sys.stderr,
 			)
 			return 1
@@ -270,14 +271,14 @@ def main() -> int:
 		cmd_for_run = ["sshpass", "-e", *tunnel_cmd]
 
 	print("[Info] SSH command:")
-	if args.ssh_password:
+	if args.ssh_password and not ssh_key_path:
 		print("sshpass -e " + " ".join(shlex.quote(part) for part in tunnel_cmd))
 	else:
 		print(" ".join(shlex.quote(part) for part in tunnel_cmd))
-	if args.ssh_password:
-		print("[Info] Non-interactive password mode enabled.")
+	if args.ssh_password and not ssh_key_path:
+		print("[Info] Non-interactive password fallback enabled.")
 	else:
-		print("[Info] If prompted by ssh, please type passphrase/password in this terminal.")
+		print("[Info] Private-key SSH mode enabled.")
 	tunnel_proc = subprocess.Popen(
 		cmd_for_run,
 		stdout=None,
