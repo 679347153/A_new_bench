@@ -42,6 +42,8 @@ import socket
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Any
 
@@ -294,6 +296,62 @@ class SSHTunnel:
 
 # ===== Qwen 调用 =====
 
+def _format_exception_chain(exc: BaseException) -> str:
+    """Return a compact exception chain so OpenAI's generic errors are actionable."""
+    parts = []
+    seen = set()
+    current: Optional[BaseException] = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        text = str(current).strip() or repr(current)
+        parts.append(f"{type(current).__name__}: {text}")
+        current = current.__cause__ or current.__context__
+    return " <- ".join(parts)
+
+
+def check_qwen_endpoint(base_url: str, model: str, timeout_s: float = 10.0) -> bool:
+    """
+    Validate the tunneled OpenAI-compatible endpoint before processing images.
+
+    The SSH tunnel can be "ready" even when the remote vLLM service behind
+    127.0.0.1:8000 is down. A quick /models request catches that once instead
+    of failing every image with a generic "Connection error".
+    """
+    url = base_url.rstrip("/") + "/models"
+    print(f"[Info] Checking Qwen endpoint: {url}")
+    request = urllib.request.Request(url, headers={"Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout_s) as response:
+            status = int(getattr(response, "status", 0))
+            body = response.read(4096).decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        body = exc.read(4096).decode("utf-8", errors="replace")
+        print(f"[Error] Qwen endpoint returned HTTP {exc.code}: {body[:1000]}", file=sys.stderr)
+        return False
+    except Exception as exc:
+        print(f"[Error] Qwen endpoint health check failed: {_format_exception_chain(exc)}", file=sys.stderr)
+        print(
+            "[Hint] SSH login succeeded, but the forwarded vLLM API did not respond. "
+            "On the remote host, verify: curl http://127.0.0.1:8000/v1/models",
+            file=sys.stderr,
+        )
+        print(
+            "[Hint] If vLLM runs in Docker, make sure port 8000 is published to the host "
+            "or pass the correct --vllm-host/--vllm-port.",
+            file=sys.stderr,
+        )
+        return False
+
+    if status < 200 or status >= 300:
+        print(f"[Error] Qwen endpoint returned status {status}: {body[:1000]}", file=sys.stderr)
+        return False
+    if model and model not in body:
+        print(f"[Warning] Model name not found in /models response: {model}", file=sys.stderr)
+        print(f"[Warning] /models preview: {body[:1000]}", file=sys.stderr)
+    print("[Info] Qwen endpoint health check OK")
+    return True
+
+
 def query_qwen_for_rooms(
     client: OpenAI,
     image_path: str,
@@ -358,7 +416,7 @@ def query_qwen_for_rooms(
         cleaned_output = _clean_model_output(raw_output)
         return raw_output, cleaned_output
     except Exception as e:
-        raise RuntimeError(f"Qwen API call failed: {e}")
+        raise RuntimeError(f"Qwen API call failed: {_format_exception_chain(e)}")
 
 
 # ===== 房间推荐解析 =====
@@ -719,6 +777,11 @@ def main():
     )
     parser.add_argument("--max-tokens", type=int, default=2048, help="Max tokens in response")
     parser.add_argument("--timeout", type=int, default=3600, help="Request timeout in seconds")
+    parser.add_argument(
+        "--skip-api-health-check",
+        action="store_true",
+        help="Skip the preflight /v1/models check before querying images",
+    )
     
     args = parser.parse_args()
     
@@ -748,6 +811,11 @@ def main():
     
     # Create OpenAI client
     client = OpenAI(api_key="EMPTY", base_url=tunnel.base_url, timeout=args.timeout)
+
+    if not args.skip_api_health_check:
+        if not check_qwen_endpoint(tunnel.base_url, args.model, timeout_s=10.0):
+            tunnel.close()
+            sys.exit(1)
     
     # Process scenes
     try:
@@ -770,6 +838,9 @@ def main():
         print(f"Total successful: {total_success}")
         print(f"Total failed: {total_fail}")
         print(f"Results saved to: {args.output_dir}")
+        if total_success == 0 and total_fail > 0:
+            print("[Error] All Qwen room queries failed.")
+            sys.exit(1)
         
     finally:
         tunnel.close()
