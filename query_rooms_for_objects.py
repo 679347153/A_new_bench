@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 from __future__ import annotations
 
 """
@@ -750,7 +750,7 @@ def main():
     )
     
     # Scene selection
-    parser.add_argument("--scene", type=str, help="Single scene name (e.g., 00800-TEEsavR23oF)")
+    parser.add_argument("--scene", type=str, help="Single scene name (e.g., 00808-y9hTuugGdiq)")
     parser.add_argument("--scenes", choices=["all"], default=None, help="Process all available scenes")
     
     # Paths

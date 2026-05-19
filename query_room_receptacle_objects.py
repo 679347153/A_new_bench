@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 from __future__ import annotations
 
 """
@@ -26,24 +26,24 @@ from __future__ import annotations
 --------
 1) 启用 SSH 密钥隧道 + LLM 的完整流程：
    python query_room_receptacle_objects.py \
-     --scene 00800-TEEsavR23oF \
+     --scene 00808-y9hTuugGdiq \
      --ssh-key /home/yuhang/Desktop/zw_B200.txt \
      --vllm-host 127.0.0.1 --vllm-port 8000
 
 2) 仅启发式模式（不依赖 LLM）：
    python query_room_receptacle_objects.py \
-     --scene 00800-TEEsavR23oF \
+     --scene 00808-y9hTuugGdiq \
      --disable-llm
 
 3) 只处理指定房间：
    python query_room_receptacle_objects.py \
-     --scene 00800-TEEsavR23oF \
+     --scene 00808-y9hTuugGdiq \
      --room-id 2 --room-id 3 --room-id 5 \
      --disable-llm
 
 4) 提高上表面质量并保留更多点：
    python query_room_receptacle_objects.py \
-     --scene 00800-TEEsavR23oF \
+     --scene 00808-y9hTuugGdiq \
      --surface-points-per-instance 512 \
      --surface-min-points 96 \
      --instance-pointcloud-points 4096 \
@@ -973,7 +973,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Query receptacle instances for all rooms in a scene and extract top-surface point clouds."
     )
-    parser.add_argument("--scene", required=True, help="Scene name, e.g. 00800-TEEsavR23oF")
+    parser.add_argument("--scene", required=True, help="Scene name, e.g. 00808-y9hTuugGdiq")
     parser.add_argument("--room-id", type=int, action="append", default=None, help="Optional room region_id (repeatable)")
     parser.add_argument("--include-room-minus-one", action="store_true", help="Include region_id=-1 room")
     parser.add_argument("--scene-info-path", type=str, default=None, help="Optional explicit scene_info JSON path")

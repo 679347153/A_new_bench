@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 根据概率信息采样物体位置，并通过交互式编辑器进行微调。
 
@@ -804,7 +804,7 @@ def _build_room_groups(objects: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 def _get_scene_id(scene_name: str) -> str:
-    """Extract scene ID from scene name (e.g., 00800-TEEsavR23oF -> TEEsavR23oF)."""
+    """Extract scene ID from scene name (e.g., 00808-y9hTuugGdiq -> TEEsavR23oF)."""
     parts = scene_name.split("-", 1)
     return parts[1] if len(parts) > 1 else scene_name
 
@@ -1022,7 +1022,7 @@ def main():
         description="Sample object positions based on probabilities and edit in interactive layout editor"
     )
     
-    parser.add_argument("--scene", required=True, help="Scene name (e.g., 00800-TEEsavR23oF)")
+    parser.add_argument("--scene", required=True, help="Scene name (e.g., 00808-y9hTuugGdiq)")
     parser.add_argument(
         "--mode",
         choices=["load", "generate"],

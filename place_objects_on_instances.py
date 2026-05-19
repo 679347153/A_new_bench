@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 from __future__ import annotations
 
 """
@@ -27,13 +27,13 @@ from __future__ import annotations
 --------
 1) 使用现成分配计划直接执行：
    python place_objects_on_instances.py \
-     --scene 00824-Dd4bFSTQ8gi \
-     --assignment-plan results/object_instance_assignments/00824-Dd4bFSTQ8gi/00824-Dd4bFSTQ8gi_object_instance_plan.json \
-     --surfaces-json results/receptacle_queries/00824-Dd4bFSTQ8gi/00824-Dd4bFSTQ8gi_receptacle_surfaces_all_rooms.json
+     --scene 00808-y9hTuugGdiq \
+     --assignment-plan results/object_instance_assignments/00808-y9hTuugGdiq/00808-y9hTuugGdiq_object_instance_plan.json \
+     --surfaces-json results/receptacle_queries/00808-y9hTuugGdiq/00808-y9hTuugGdiq_receptacle_surfaces_all_rooms.json
 
 2) 更严格间距 + 更多重试：
    python place_objects_on_instances.py \
-     --scene 00824-Dd4bFSTQ8gi \
+     --scene 00808-y9hTuugGdiq \
      --assignment-plan <plan_json> \
      --surfaces-json <surfaces_json> \
      --min-distance 0.3 \
@@ -42,7 +42,7 @@ from __future__ import annotations
 
 3) 显式指定你要求的生成高度：
    python place_objects_on_instances.py \
-     --scene 00824-Dd4bFSTQ8gi \
+     --scene 00808-y9hTuugGdiq \
      --assignment-plan <plan_json> \
      --surfaces-json <surfaces_json> \
      --spawn-height 0.3

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 from __future__ import annotations
 
 """
@@ -8,7 +8,7 @@ Terminal log filter for noisy Habitat/HM3D warnings.
 python log_filter.py < raw.log > clean.log
 
 # 方式2：包裹命令实时过滤（推荐）
-python log_filter.py --run "python query_room_receptacle_objects.py --scene 00824-Dd4bFSTQ8gi --disable-llm"
+python log_filter.py --run "python query_room_receptacle_objects.py --scene 00808-y9hTuugGdiq --disable-llm"
 
 # 方式3：再加你自己的噪声规则
 python log_filter.py --run "python your_script.py" --drop-regex "No Glob path result found"

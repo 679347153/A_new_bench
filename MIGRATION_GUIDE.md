@@ -1,4 +1,4 @@
-# SD-OVON: 从妥协版到完整版的升级指南
+﻿# SD-OVON: 从妥协版到完整版的升级指南
 
 ## 📋 概述
 
@@ -89,7 +89,7 @@ fusion = GSAMInstanceFusion(config)
 
 # 需要提供真实观测数据
 result = fusion.extract_and_fuse_instances(
-    scene_name="00800-TEEsavR23oF",
+    scene_name="00808-y9hTuugGdiq",
     observations=[
         {
             "image": np.array(...),  # 图像
@@ -237,11 +237,11 @@ from orchestrate_sd_ovon_complete import SDOVONPipelineOrchestrator
 
 # 模式 1: 快速原型 (Mock)
 orchestrator_mock = SDOVONPipelineOrchestrator(config_level="mock")
-report_mock = orchestrator_mock.run_full_pipeline("00800-TEEsavR23oF")
+report_mock = orchestrator_mock.run_full_pipeline("00808-y9hTuugGdiq")
 
 # 模式 2: 完整生产版本 (Production)
 orchestrator_prod = SDOVONPipelineOrchestrator(config_level="production")
-report_prod = orchestrator_prod.run_full_pipeline("00800-TEEsavR23oF")
+report_prod = orchestrator_prod.run_full_pipeline("00808-y9hTuugGdiq")
 ```
 
 ### 配置文件示例
@@ -367,7 +367,7 @@ python integration_test_sd_ovon.py export
 [2026-04-15 10:00:00] [INFO] test: ============================================================
 [2026-04-15 10:00:00] [INFO] test: TEST 1: Mock Mode (Fast Prototype)
 [2026-04-15 10:00:00] [INFO] test: ============================================================
-[2026-04-15 10:00:00] [INFO] orchestrator: [SDOVONPipeline] Starting full pipeline for scene: 00800-TEEsavR23oF
+[2026-04-15 10:00:00] [INFO] orchestrator: [SDOVONPipeline] Starting full pipeline for scene: 00808-y9hTuugGdiq
 ...
 [2026-04-15 10:00:02] [INFO] orchestrator: [SDOVONPipeline] Fusion complete: 5 instances with avg quality 0.800
 ✓ Mock mode test passed

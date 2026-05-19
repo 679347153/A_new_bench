@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 HM3DSem 语义数据读取演示脚本
 用途：用 Habitat 加载 HM3D 场景，渲染 RGB 图 + 彩色语义分割图，并打印语义物体列表。
@@ -6,7 +6,7 @@ HM3DSem 语义数据读取演示脚本
 运行方式（在 agentrag 环境下）：
     conda run -n agentrag python AgenticRAG/scripts/demo_hm3d_semantic.py
     或指定场景：
-    conda run -n agentrag python AgenticRAG/scripts/demo_hm3d_semantic.py --scene 00824-Dd4bFSTQ8gi
+    conda run -n agentrag python AgenticRAG/scripts/demo_hm3d_semantic.py --scene 00808-y9hTuugGdiq
     保存输出图：
     conda run -n agentrag python AgenticRAG/scripts/demo_hm3d_semantic.py --save-dir /tmp/sem_demo
 """
@@ -32,7 +32,7 @@ except ImportError:
 
 # ─────────────────────── 默认路径配置 ───────────────────────
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_SCENE  = "00800-TEEsavR23oF"
+DEFAULT_SCENE  = "00808-y9hTuugGdiq"
 AVAILABLE_SCENES = list_available_scenes(require_semantic=True)
 
 # 调色板：为每个 category index 分配固定颜色（HSV 均匀分布，转 BGR）
@@ -237,7 +237,7 @@ def run(scene_name: str, save_dir: Optional[str], n_frames: int = 6):
 def main():
     parser = argparse.ArgumentParser(description="HM3DSem 语义加载演示")
     parser.add_argument("--scene",    default=DEFAULT_SCENE,
-                        help="场景名称，例如 00824-Dd4bFSTQ8gi")
+                        help="场景名称，例如 00808-y9hTuugGdiq")
     parser.add_argument("--save-dir", default=None,
                         help="图片输出目录，不指定则只打印不保存")
     parser.add_argument("--frames",   type=int, default=6,

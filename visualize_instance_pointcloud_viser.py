@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """用 viser 可视化 extract_room_instances.py 导出的实例点云，支持手动/自动/交互三种匹配模式。
 
 本文件解决的问题
@@ -66,7 +66,7 @@
 
 4) 浏览 query_room_receptacle_objects.py 的房间承载面结果（按房间切换）：
     python visualize_instance_pointcloud_viser.py \
-      --input results/receptacle_queries/00800-TEEsavR23oF/00800-TEEsavR23oF_receptacle_surfaces_all_rooms.json \
+      --input results/receptacle_queries/00808-y9hTuugGdiq/00808-y9hTuugGdiq_receptacle_surfaces_all_rooms.json \
       --show-scene-mesh \
       --receptacle-view auto
 终端按键命令切换房间：n/p、list、goto <index>、room <room_id>、show、quit

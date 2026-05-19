@@ -1,4 +1,4 @@
-"""
+﻿"""
 Run SD-OVON Pipeline
 
 端到端编排脚本，串联 3.1 到 3.4 流程和编辑器交互。
@@ -264,7 +264,7 @@ class SDOVONPipeline:
 def main():
     """命令行入口"""
     parser = argparse.ArgumentParser(description="Run SD-OVON object placement pipeline")
-    parser.add_argument("--scene", required=True, help="Scene name (e.g., 00824-Dd4bFSTQ8gi)")
+    parser.add_argument("--scene", required=True, help="Scene name (e.g., 00808-y9hTuugGdiq)")
     parser.add_argument("--output-dir", default=None, help="Output directory")
     parser.add_argument("--skip-coverage", action="store_true", help="Skip coverage sampling phase")
     parser.add_argument("--skip-physics", action="store_true", help="Skip physics check")

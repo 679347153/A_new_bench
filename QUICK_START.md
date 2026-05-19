@@ -1,4 +1,4 @@
-# SD-OVON 完整版部署快速指南
+﻿# SD-OVON 完整版部署快速指南
 
 ## 📦 新增文件清单
 
@@ -65,7 +65,7 @@ from orchestrate_sd_ovon_complete import SDOVONPipelineOrchestrator
 
 # 使用 mock 模式快速验证
 orch = SDOVONPipelineOrchestrator(config_level="mock")
-result = orch.run_full_pipeline("00800-TEEsavR23oF")
+result = orch.run_full_pipeline("00808-y9hTuugGdiq")
 
 print(f"Success: {result['pipeline_status']}")
 print(f"Objects placed: {result['final_output']['objects_placed']}")

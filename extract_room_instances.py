@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """HM3D 房间实例提取与单实例点云导出工具。
 
 这个脚本有两类用途：
@@ -34,8 +34,8 @@
 
 推荐用法
 --------
-python extract_room_instances.py --scene 00824-Dd4bFSTQ8gi --room-id 0
-python extract_room_instances.py --scene 00824-Dd4bFSTQ8gi --room-id 0 --instance-id 1
+python extract_room_instances.py --scene 00808-y9hTuugGdiq --room-id 0
+python extract_room_instances.py --scene 00808-y9hTuugGdiq --room-id 0 --instance-id 1
 
 说明：默认优先读取已导出的 scene_info JSON；若未找到，可用 --scene-info-path 显式指定。
 """
@@ -1566,7 +1566,7 @@ def main() -> None:
     实际业务逻辑都在上面的函数里，方便后续被别的脚本直接 import 使用。
     """
     parser = argparse.ArgumentParser(description="提取 HM3D 场景中某个房间的所有 instance，并可返回单 instance 点云")
-    parser.add_argument("--scene", required=True, help="场景名，例如 00824-Dd4bFSTQ8gi")
+    parser.add_argument("--scene", required=True, help="场景名，例如 00808-y9hTuugGdiq")
     parser.add_argument("--room-id", type=int, required=True, help="房间 region_id")
     parser.add_argument("--instance-id", type=int, default=None, help="可选：只查询某个 instance")
     parser.add_argument("--scene-info-path", type=str, default=None, help="可选：scene_info JSON 路径")

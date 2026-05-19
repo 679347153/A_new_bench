@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 Interactive layout editor.
 
@@ -44,8 +44,8 @@ Interactive layout editor.
 - HUD 文本是叠加在图像上的 2D 文本，不是 Habitat 场景中的 3D 文本。
 
 示例:
-	python test_layout.py 00800-TEEsavR23oF --layout scene_objects_v2.json
-	python test_layout.py 00800-TEEsavR23oF --ui-lang zh --font-path C:/Windows/Fonts/msyh.ttc
+	python test_layout.py 00808-y9hTuugGdiq --layout scene_objects_v2.json
+	python test_layout.py 00808-y9hTuugGdiq --ui-lang zh --font-path C:/Windows/Fonts/msyh.ttc
 	python test_layout.py  00808-y9hTuugGdiq
 """
 
@@ -636,7 +636,7 @@ def refresh_layout_files(scene_name, current_layout_path):
 
 def main():
 	parser = argparse.ArgumentParser(description="Interactive layout editor")
-	parser.add_argument("scene", nargs="?", default="00800-TEEsavR23oF", help="Scene name, for example 00800-TEEsavR23oF")
+	parser.add_argument("scene", nargs="?", default="00808-y9hTuugGdiq", help="Scene name, for example 00808-y9hTuugGdiq")
 	parser.add_argument("--layout", default="scene_objects.json", help="Layout filename or absolute path")
 	parser.add_argument("--ui-lang", choices=["en", "zh"], default="en", help="UI language")
 	parser.add_argument("--font-path", default="", help="Path to a CJK font, for example C:/Windows/Fonts/msyh.ttc")

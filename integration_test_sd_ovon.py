@@ -1,4 +1,4 @@
-"""
+﻿"""
 SD-OVON: Mock vs Production 切换指南与集成测试
 
 演示如何在快速原型 (mock/stub) 和完整生产版本之间无缝切换。
@@ -31,7 +31,7 @@ USAGE_GUIDE = """
    from orchestrate_sd_ovon_complete import SDOVONPipelineOrchestrator
    
    orchestrator = SDOVONPipelineOrchestrator(config_level="mock")
-   report = orchestrator.run_full_pipeline("00800-TEEsavR23oF")
+   report = orchestrator.run_full_pipeline("00808-y9hTuugGdiq")
    
    实现替代:
    - Instance Fusion: instance_fusion_stub.py (生成虚拟实例)
@@ -45,7 +45,7 @@ USAGE_GUIDE = """
    from orchestrate_sd_ovon_complete import SDOVONPipelineOrchestrator
    
    orchestrator = SDOVONPipelineOrchestrator(config_level="production")
-   report = orchestrator.run_full_pipeline("00800-TEEsavR23oF")
+   report = orchestrator.run_full_pipeline("00808-y9hTuugGdiq")
    
    完整实现:
    - Instance Fusion: instance_fusion_gsam_3d.py (G-SAM + ConceptGraphs)
@@ -121,7 +121,7 @@ def test_mock_mode():
     orchestrator = SDOVONPipelineOrchestrator(config_level="mock")
 
     report = orchestrator.run_full_pipeline(
-        scene_name="00800-TEEsavR23oF",
+        scene_name="00808-y9hTuugGdiq",
         stage_overrides={
             # 可选：跳过某些阶段
         },
@@ -150,7 +150,7 @@ def test_production_mode():
     orchestrator = SDOVONPipelineOrchestrator(config_level="production")
 
     report = orchestrator.run_full_pipeline(
-        scene_name="00800-TEEsavR23oF",
+        scene_name="00808-y9hTuugGdiq",
     )
 
     # 验证报告
@@ -177,7 +177,7 @@ def test_fallback_behavior():
     from orchestrate_sd_ovon_complete import SDOVONPipelineOrchestrator
 
     orchestrator = SDOVONPipelineOrchestrator(config_level="production")
-    report = orchestrator.run_full_pipeline("00800-TEEsavR23oF")
+    report = orchestrator.run_full_pipeline("00808-y9hTuugGdiq")
 
     # 检查是否降级
     fusion_method = report["stage_results"].get("stage_3_2_instance_fusion", {}).get("method", "unknown")

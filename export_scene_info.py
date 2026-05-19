@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 导出 HM3D 场景的完整语义信息为 JSON。
 
@@ -10,13 +10,13 @@
 
 用法：
   # 导出单个场景
-  python export_scene_info.py --scene 00824-Dd4bFSTQ8gi
+  python export_scene_info.py --scene 00808-y9hTuugGdiq
 
   # 导出 seap_test/data 下所有场景
   python export_scene_info.py --all
 
   # 指定数据目录和输出目录
-  python export_scene_info.py --scene 00824-Dd4bFSTQ8gi --data-dir /path/to/data --output-dir /path/to/output
+  python export_scene_info.py --scene 00808-y9hTuugGdiq --data-dir /path/to/data --output-dir /path/to/output
 
 实现思路概览：
     1) 读取 semantic.txt，建立 semantic_id -> 类别/房间映射
@@ -261,7 +261,7 @@ def export_scene(scene_name, data_dir, dataset_config, output_dir):
     导出单个场景信息并写入 JSON。
 
     参数:
-        scene_name: 场景目录名，例如 00824-Dd4bFSTQ8gi。
+        scene_name: 场景目录名，例如 00808-y9hTuugGdiq。
         data_dir: 场景根目录（hm3d、hm3d/minival 或 hm3d/val）。
         dataset_config: scene_dataset_config.json 路径；若为空则自动按 split 解析。
         output_dir: 输出目录。
@@ -492,7 +492,7 @@ def main():
         - 单场景或全量批处理导出
     """
     parser = argparse.ArgumentParser(description="导出 HM3D 场景的完整语义信息为 JSON")
-    parser.add_argument("--scene", type=str, help="场景名, 例如 00824-Dd4bFSTQ8gi")
+    parser.add_argument("--scene", type=str, help="场景名, 例如 00808-y9hTuugGdiq")
     parser.add_argument("--all", action="store_true", help="导出 data_dir 下所有场景")
     parser.add_argument("--data-dir", type=str, default=DEFAULT_DATA_DIR,
                         help="场景数据根目录 (默认: 脚本目录下 hm3d，自动合并 val/minival)")

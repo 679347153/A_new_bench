@@ -1,4 +1,4 @@
-# 本项目技术报告（已执行，全链路版）
+﻿# 本项目技术报告（已执行，全链路版）
 
 ## 1. 报告说明
 - 本文档为已执行技术报告，不是计划文档。
@@ -158,7 +158,7 @@
 1. 管道过滤（已有日志文件）：
    - `python log_filter.py < raw.log > clean.log`
 2. 实时过滤（包裹脚本运行）：
-   - `python log_filter.py --run "python query_room_receptacle_objects.py --scene 00824-Dd4bFSTQ8gi --disable-llm"`
+   - `python log_filter.py --run "python query_room_receptacle_objects.py --scene 00808-y9hTuugGdiq --disable-llm"`
 3. 额外添加自定义噪声规则：
    - `python log_filter.py --run "python your_script.py" --drop-regex "some noisy regex"`
 4. 关闭内置规则，仅使用自定义规则：

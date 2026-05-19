@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 from __future__ import annotations
 
 """
@@ -31,26 +31,26 @@ from __future__ import annotations
 --------
 1) 标准流程（LLM 分配 + 自动放置，自动生成 surfaces）：
    python assign_objects_to_receptacle_instances.py \
-     --scene 00800-TEEsavR23oF \
+     --scene 00808-y9hTuugGdiq \
      --ssh-key /home/yuhang/Desktop/zw_B200.txt
 
 2) 仅启发式分配（不依赖 LLM），仍执行放置：
    python assign_objects_to_receptacle_instances.py \
-     --scene 00800-TEEsavR23oF \
-     --surfaces-json results/receptacle_queries/00800-TEEsavR23oF/00800-TEEsavR23oF_receptacle_surfaces_all_rooms.json \
+     --scene 00808-y9hTuugGdiq \
+     --surfaces-json results/receptacle_queries/00808-y9hTuugGdiq/00808-y9hTuugGdiq_receptacle_surfaces_all_rooms.json \
      --disable-llm
 
 3) 只生成分配计划（不放置）：
    python assign_objects_to_receptacle_instances.py \
-     --scene 00800-TEEsavR23oF \
-     --surfaces-json results/receptacle_queries/00800-TEEsavR23oF/00800-TEEsavR23oF_receptacle_surfaces_all_rooms.json \
+     --scene 00808-y9hTuugGdiq \
+     --surfaces-json results/receptacle_queries/00808-y9hTuugGdiq/00808-y9hTuugGdiq_receptacle_surfaces_all_rooms.json \
      --skip-placement --disable-llm
 
 4) 使用预采样布局：
    python assign_objects_to_receptacle_instances.py \
-     --scene 00800-TEEsavR23oF \
-     --surfaces-json results/receptacle_queries/00800-TEEsavR23oF/00800-TEEsavR23oF_receptacle_surfaces_all_rooms.json \
-     --object-layout results/layouts/00800-TEEsavR23oF/some_layout.json
+     --scene 00808-y9hTuugGdiq \
+     --surfaces-json results/receptacle_queries/00808-y9hTuugGdiq/00808-y9hTuugGdiq_receptacle_surfaces_all_rooms.json \
+     --object-layout results/layouts/00808-y9hTuugGdiq/some_layout.json
 """
 
 import argparse

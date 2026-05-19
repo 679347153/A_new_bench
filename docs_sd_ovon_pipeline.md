@@ -1,4 +1,4 @@
-# SD-OVON 流程完整文档
+﻿# SD-OVON 流程完整文档
 
 Semantic Data Object-Video Optimization Network
 
@@ -121,7 +121,7 @@ features = preprocessor.preprocess("scene_id")
 from orchestrate_sd_ovon import orchestrate_full_pipeline
 
 result = orchestrate_full_pipeline(
-    scene_name="00800-TEEsavR23oF",
+    scene_name="00808-y9hTuugGdiq",
     config_override=None,
     enable_visualization=True,
     validate_outputs=True,
@@ -145,11 +145,11 @@ from validate_sd_ovon_outputs import validate_sd_ovon_outputs
 from visualize_sd_ovon_results import visualize_results
 
 # 验证
-report = validate_sd_ovon_outputs("00800-TEEsavR23oF")
+report = validate_sd_ovon_outputs("00808-y9hTuugGdiq")
 
 # 可视化
 visualize_results(
-    "00800-TEEsavR23oF",
+    "00808-y9hTuugGdiq",
     show_semantics=True,
     show_objects=True,
     save_png=True,
@@ -189,7 +189,7 @@ visualize_results(
 - 内容：
   ```json
   {
-    "scene_id": "00800-TEEsavR23oF",
+    "scene_id": "00808-y9hTuugGdiq",
     "objects": [
       {
         "id": "obj_0",
@@ -227,7 +227,7 @@ visualize_results(
 from sample_and_place_objects import SampleAndPlaceObjects
 
 sampler = SampleAndPlaceObjects(
-    scene_name="00800-TEEsavR23oF",
+    scene_name="00808-y9hTuugGdiq",
     backend="sd_ovon",  # 新增：使用 SD-OVON 后端
     use_ai_sampling=True,
 )
