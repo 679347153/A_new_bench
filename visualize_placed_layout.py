@@ -20,6 +20,25 @@ python visualize_placed_layout.py \
   results/layouts/00808-y9hTuugGdiq/00808-y9hTuugGdiq_assigned_instance_layout.json \
   --scene 00808-y9hTuugGdiq
 
+同一场景多 layout 切换示例
+----------------------
+如果使用 `batch_generate_layouts.py` 生成了一组 layout，它们通常位于同一个 batch 目录：
+
+  results/layouts/00808-y9hTuugGdiq/batch_<YYYYmmdd_HHMMSS>/
+
+直接打开其中任意一个 layout 后，按 `[` / `]` 就可以在该目录内切换上一个/下一个
+layout JSON，脚本会卸载旧物体、加载新 layout、重置当前选中物体与相机视角：
+python visualize_placed_layout.py \
+  results/layouts/00808-y9hTuugGdiq/batch_20260101_120000/layout_000_seed_42.json \
+  --scene 00808-y9hTuugGdiq
+
+默认只扫描当前 layout 所在目录。如果想跨多个 batch 目录比较，使用：
+python visualize_placed_layout.py \
+  results/layouts/00808-y9hTuugGdiq/batch_20260101_120000/layout_000_seed_42.json \
+  --scene 00808-y9hTuugGdiq \
+  --layout-scan-dir results/layouts/00808-y9hTuugGdiq \
+  --recursive-layout-scan
+
 手动微调高度示例
 ----------------
 当物体看起来在桌面/架子/地面下方或上方时，打开调试模式：
@@ -40,14 +59,15 @@ python visualize_placed_layout.py \
   --initial-y-offset 0
 
 推荐流程：
-1. 用 `[/]` 或 `9/0` 切到异常物体。
-2. 用 `F` 聚焦当前物体。
-3. 默认只调整当前选中物体；按 `B` 可在 `selected/all` 之间切换调试作用域。
-4. 用 `U` 将调试对象上移，用 `O` 将调试对象下移；每次移动 `--offset-step` 米。
-5. HUD 中的 `scope` 会显示当前作用域，`offset=(x,y,z)` 会显示选中物体的累计偏移。
-6. 调到合适位置后按 `M` 保存。默认输出到同目录：
+1. 用 `[/]` 在同一场景的不同 layout 之间切换。
+2. 用 `,/.` 或 `9/0` 切到异常物体。
+3. 用 `F` 聚焦当前物体。
+4. 默认只调整当前选中物体；按 `B` 可在 `selected/all` 之间切换调试作用域。
+5. 用 `U` 将调试对象上移，用 `O` 将调试对象下移；每次移动 `--offset-step` 米。
+6. HUD 中的 `scope` 会显示当前作用域，`offset=(x,y,z)` 会显示选中物体的累计偏移。
+7. 调到合适位置后按 `M` 保存。默认输出到同目录：
    `<原文件名>_offset_debug.json`
-7. 若希望指定保存路径，传入：
+8. 若希望指定保存路径，传入：
    `--output-layout results/layouts/.../manual_height_fixed.json`
 
 保存后的 JSON：
@@ -68,7 +88,8 @@ python visualize_placed_layout.py \
 W/S A/D E/C    相机前后、左右、上下移动
 I/K J/L        相机俯仰、左右转向
 R              视角重置到布局中心附近
-[/] 或 9/0     切换当前查看对象
+[/]            切换同目录中的上一个/下一个 layout
+,/. 或 9/0     切换当前查看对象
 F              相机聚焦当前对象
 --debug-offset 启用物体高度偏移调试
 U/O            调试模式下上/下调整 Y 偏移
@@ -202,6 +223,8 @@ def _normalize_pygame_key(key: int) -> int:
         pygame.K_b: ord("b"),
         pygame.K_LEFTBRACKET: ord("["),
         pygame.K_RIGHTBRACKET: ord("]"),
+        pygame.K_COMMA: ord(","),
+        pygame.K_PERIOD: ord("."),
         pygame.K_9: ord("9"),
         pygame.K_0: ord("0"),
     }
@@ -365,6 +388,8 @@ def _load_layout_objects(
             loaded.append(
                 {
                     "object": obj,
+                    "object_id": getattr(obj, "object_id", None),
+                    "handle": getattr(obj, "handle", None),
                     "layout": cfg,
                     "index": idx,
                     "model_id": model_id,
@@ -380,6 +405,134 @@ def _load_layout_objects(
             print(f"[skip] object#{idx} model={model_id}: {exc}")
             skipped += 1
     return loaded, skipped
+
+
+def _layout_json_valid(path: Path) -> bool:
+    """轻量判断一个 JSON 是否像本脚本可加载的 layout。"""
+    if not path.is_file() or path.suffix.lower() != ".json":
+        return False
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    return isinstance(payload, dict) and isinstance(payload.get("objects"), list)
+
+
+def _list_layout_files(current_layout_path: Path, scan_dir: Optional[Path], recursive: bool = False) -> List[Path]:
+    """
+    列出同一场景下可切换的 layout 文件。
+
+    默认只扫描当前 layout 所在目录；这正好适配 batch_generate_layouts.py 的输出：
+    `results/layouts/<scene>/batch_xxx/layout_000_seed_42.json` 等文件都在同一目录下。
+    如果用户想跨多个 batch 目录比较，可以传 `--layout-scan-dir results/layouts/<scene>`
+    并开启 `--recursive-layout-scan`。
+    """
+    root = scan_dir if scan_dir is not None else current_layout_path.parent
+    candidates: List[Path] = []
+    if root.is_dir():
+        pattern = "**/*.json" if recursive else "*.json"
+        candidates.extend(path for path in root.glob(pattern) if _layout_json_valid(path))
+    elif _layout_json_valid(root):
+        candidates.append(root)
+
+    if _layout_json_valid(current_layout_path):
+        candidates.append(current_layout_path)
+
+    unique: Dict[str, Path] = {}
+    for path in candidates:
+        key = os.path.normcase(str(path.resolve()))
+        unique[key] = path
+    return sorted(unique.values(), key=lambda p: str(p.parent).lower() + "/" + p.name.lower())
+
+
+def _find_layout_index(layout_files: Sequence[Path], target_path: Path) -> int:
+    target = os.path.normcase(str(target_path.resolve()))
+    for idx, path in enumerate(layout_files):
+        if os.path.normcase(str(path.resolve())) == target:
+            return idx
+    return 0
+
+
+def _remove_loaded_item(rom: Any, item: Dict[str, Any]) -> None:
+    """参考 test_layout.py，尽量通过 handle/id 移除已加载刚体。"""
+    handle = item.get("handle")
+    if handle:
+        try:
+            rom.remove_object_by_handle(handle)
+            return
+        except Exception:
+            pass
+    object_id = item.get("object_id")
+    if object_id is not None:
+        try:
+            rom.remove_object_by_id(object_id)
+        except Exception:
+            pass
+
+
+def _clear_loaded_objects(sim: habitat_sim.Simulator, loaded_items: List[Dict[str, Any]]) -> None:
+    rom = sim.get_rigid_object_manager()
+    for item in list(loaded_items):
+        _remove_loaded_item(rom, item)
+    loaded_items.clear()
+
+
+def _load_layout_path_into_viewer(
+    sim: habitat_sim.Simulator,
+    layout_path: Path,
+    loaded_items: List[Dict[str, Any]],
+    initial_y_offset: float,
+) -> Tuple[Dict[str, Any], int, int]:
+    """卸载当前物体，并把指定 layout 文件重新加载到同一个 simulator 中。"""
+    payload = json.loads(layout_path.read_text(encoding="utf-8"))
+    objects = _layout_objects(payload)
+    _clear_loaded_objects(sim, loaded_items)
+    new_items, skipped = _load_layout_objects(sim, objects, initial_y_offset=initial_y_offset)
+    loaded_items.extend(new_items)
+    return payload, len(objects), skipped
+
+
+def _switch_layout(
+    sim: habitat_sim.Simulator,
+    state: Dict[str, Any],
+    loaded_items: List[Dict[str, Any]],
+    direction: int,
+) -> None:
+    """在同一场景中切换到上一个/下一个 layout 文件，并重置选择与相机。"""
+    current_path = Path(str(state.get("layout_path", ".")))
+    scan_dir_value = state.get("layout_scan_dir")
+    scan_dir = Path(str(scan_dir_value)) if scan_dir_value else current_path.parent
+    layout_files = _list_layout_files(current_path, scan_dir, bool(state.get("recursive_layout_scan", False)))
+    if not layout_files:
+        print(f"[Warning] No switchable layout JSON found in: {scan_dir}")
+        return
+
+    current_idx = _find_layout_index(layout_files, current_path)
+    next_idx = (current_idx + int(direction)) % len(layout_files)
+    next_path = layout_files[next_idx]
+    if os.path.normcase(str(next_path.resolve())) == os.path.normcase(str(current_path.resolve())) and len(layout_files) == 1:
+        print(f"[Info] Only one layout available: {next_path.name}")
+        return
+
+    payload, object_count, skipped = _load_layout_path_into_viewer(
+        sim=sim,
+        layout_path=next_path,
+        loaded_items=loaded_items,
+        initial_y_offset=float(state.get("initial_y_offset", DEFAULT_INITIAL_Y_OFFSET)),
+    )
+    state["layout_payload"] = payload
+    state["layout_path"] = str(next_path)
+    state["layout_index"] = next_idx
+    state["layout_count"] = len(layout_files)
+    state["object_count"] = object_count
+    state["skipped"] = skipped
+    state["selected_idx"] = 0
+    state["offset_scope"] = "selected"
+    camera_pos, yaw, pitch = _reset_camera(loaded_items)
+    state["camera_pos"] = camera_pos
+    state["yaw"] = yaw
+    state["pitch"] = pitch
+    print(f"[OK] Switched layout {next_idx + 1}/{len(layout_files)} -> {next_path.name} loaded={len(loaded_items)}/{object_count} skipped={skipped}")
 
 
 def _set_camera(sim: habitat_sim.Simulator, camera_pos: np.ndarray, yaw: float, pitch: float) -> np.ndarray:
@@ -599,7 +752,7 @@ def _apply_viewer_key(
     key: int,
     state: Dict[str, Any],
     sim: habitat_sim.Simulator,
-    loaded_items: Sequence[Dict[str, Any]],
+    loaded_items: List[Dict[str, Any]],
     screenshot_dir: Path,
     scene_name: str,
 ) -> bool:
@@ -624,9 +777,15 @@ def _apply_viewer_key(
         state["camera_pos"] = camera_pos
         state["yaw"] = yaw
         state["pitch"] = pitch
-    if key in (ord("["), ord("9")) and loaded_items:
+    if key == ord("["):
+        _switch_layout(sim, state, loaded_items, -1)
+        return False
+    if key == ord("]"):
+        _switch_layout(sim, state, loaded_items, 1)
+        return False
+    if key in (ord(","), ord("<"), ord("9")) and loaded_items:
         state["selected_idx"] = (int(state.get("selected_idx", 0)) - 1) % len(loaded_items)
-    if key in (ord("]"), ord("0")) and loaded_items:
+    if key in (ord("."), ord(">"), ord("0")) and loaded_items:
         state["selected_idx"] = (int(state.get("selected_idx", 0)) + 1) % len(loaded_items)
     if key == ord("f") and loaded_items:
         camera_pos, yaw, pitch = _focus_object(loaded_items[int(state.get("selected_idx", 0))])
@@ -714,13 +873,16 @@ def _render_current_state(
     height: int,
     help_lines: Sequence[str],
 ) -> np.ndarray:
+    active_layout_path = Path(str(state.get("layout_path", layout_path)))
+    active_object_count = int(state.get("object_count", object_count))
+    active_skipped = int(state.get("skipped", skipped))
     return _render_frame(
         sim=sim,
         scene_name=scene_name,
-        layout_path=layout_path,
+        layout_path=active_layout_path,
         loaded_items=loaded_items,
-        object_count=object_count,
-        skipped=skipped,
+        object_count=active_object_count,
+        skipped=active_skipped,
         selected_idx=int(state.get("selected_idx", 0)),
         camera_pos=np.asarray(state.get("camera_pos", np.zeros(3)), dtype=np.float32),
         yaw=float(state.get("yaw", 0.0)),
@@ -753,7 +915,7 @@ def _run_pygame_viewer(
     sim: habitat_sim.Simulator,
     scene_name: str,
     layout_path: Path,
-    loaded_items: Sequence[Dict[str, Any]],
+    loaded_items: List[Dict[str, Any]],
     object_count: int,
     skipped: int,
     state: Dict[str, Any],
@@ -818,7 +980,7 @@ def _run_cv2_viewer(
     sim: habitat_sim.Simulator,
     scene_name: str,
     layout_path: Path,
-    loaded_items: Sequence[Dict[str, Any]],
+    loaded_items: List[Dict[str, Any]],
     object_count: int,
     skipped: int,
     state: Dict[str, Any],
@@ -994,8 +1156,18 @@ def parse_args() -> argparse.Namespace:
             "      results/layouts/00808-y9hTuugGdiq/00808-y9hTuugGdiq_assigned_instance_layout.json \\\n"
             "      --scene 00808-y9hTuugGdiq --debug-offset \\\n"
             "      --output-layout results/layouts/00808-y9hTuugGdiq/height_fixed.json\n\n"
+            "  Switch layouts in the same batch directory with [ and ]:\n"
+            "    python visualize_placed_layout.py \\\n"
+            "      results/layouts/00808-y9hTuugGdiq/batch_20260101_120000/layout_000_seed_42.json \\\n"
+            "      --scene 00808-y9hTuugGdiq\n\n"
+            "  Switch layouts recursively across multiple batch directories:\n"
+            "    python visualize_placed_layout.py \\\n"
+            "      results/layouts/00808-y9hTuugGdiq/batch_20260101_120000/layout_000_seed_42.json \\\n"
+            "      --scene 00808-y9hTuugGdiq \\\n"
+            "      --layout-scan-dir results/layouts/00808-y9hTuugGdiq --recursive-layout-scan\n\n"
             "Debug keys:\n"
-            "  [/] or 9/0 : select previous / next object\n"
+            "  [/]        : switch previous / next layout JSON\n"
+            "  ,/. or 9/0 : select previous / next object\n"
             "  F          : focus selected object\n"
             "  B          : toggle offset scope between selected and all objects\n"
             "  U / O      : move current scope up / down by --offset-step meters\n"
@@ -1006,6 +1178,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--scene", default=None, help="场景名；不填时尝试从 layout 或路径推断")
     parser.add_argument("--data-dir", default="hm3d", help="HM3D 数据根目录")
     parser.add_argument("--objects-dir", default="./objects", help="物体模板目录")
+    parser.add_argument(
+        "--layout-scan-dir",
+        default=None,
+        help="同场景 layout 切换目录；默认扫描当前 layout 所在目录",
+    )
+    parser.add_argument(
+        "--recursive-layout-scan",
+        action="store_true",
+        help="递归扫描 --layout-scan-dir 下的 JSON layout，便于跨 batch 目录比较",
+    )
     parser.add_argument("--width", type=int, default=DISPLAY_WIDTH, help="窗口宽度")
     parser.add_argument("--height", type=int, default=DISPLAY_HEIGHT, help="窗口高度")
     parser.add_argument("--screenshot-dir", default="./results/visual_checks", help="截图输出目录")
@@ -1069,9 +1251,16 @@ def main() -> int:
     sim = _make_simulator(scene_name, Path(args.data_dir), int(args.width), int(args.height))
     _load_templates(sim, Path(args.objects_dir))
     loaded_items, skipped = _load_layout_objects(sim, objects, initial_y_offset=float(args.initial_y_offset))
+    layout_scan_dir = Path(args.layout_scan_dir) if args.layout_scan_dir else layout_path.parent
+    layout_files = _list_layout_files(layout_path, layout_scan_dir, bool(args.recursive_layout_scan))
+    layout_index = _find_layout_index(layout_files, layout_path) if layout_files else 0
 
     print(f"[OK] Loaded scene: {scene_name}")
     print(f"[OK] Loaded objects: {len(loaded_items)}/{len(objects)} skipped={skipped}")
+    print(
+        f"[Info] Layout switch catalog: {len(layout_files)} file(s) "
+        f"from {layout_scan_dir} recursive={bool(args.recursive_layout_scan)}"
+    )
     print(f"[Info] Initial visual y_offset applied to all loaded objects: {float(args.initial_y_offset):+.4f}")
     stats = payload.get("auto_placement_stats", {})
     if isinstance(stats, dict):
@@ -1099,6 +1288,13 @@ def main() -> int:
         "offset_scope": "selected",
         "layout_payload": payload,
         "layout_path": str(layout_path),
+        "layout_scan_dir": str(layout_scan_dir),
+        "recursive_layout_scan": bool(args.recursive_layout_scan),
+        "layout_index": layout_index,
+        "layout_count": len(layout_files),
+        "object_count": len(objects),
+        "skipped": skipped,
+        "initial_y_offset": float(args.initial_y_offset),
         "output_layout_path": Path(args.output_layout) if args.output_layout else None,
     }
 
@@ -1106,7 +1302,8 @@ def main() -> int:
         "W/S A/D E/C: move camera",
         "I/K J/L: pitch / yaw",
         "R: reset view   F: focus selected",
-        "[/] or 9/0: previous / next object",
+        "[/]: previous / next layout",
+        ",/. or 9/0: previous / next object",
         "Debug offset: B toggles selected/all, U/O move y +/- step, M save",
         "H: help   P: screenshot   ESC/Q: quit",
     ]

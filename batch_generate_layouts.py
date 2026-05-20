@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 """
-批量生成同一场景下的多个最终物体布局。
+批量生成一个或多个场景下的多个最终物体布局。
 
 用途
 ----
-本脚本面向“同一场景 + 同一批物体图片”反复生成多个不同 layout 的需求。
+本脚本面向“同一场景 + 同一批物体图片”反复生成多个不同 layout 的需求；
+也支持通过计划文件一次性处理多个场景，每个场景都会按指定数量生成一批 layout。
 它不是重新实现整条放置链路，而是作为一个编排层，尽量复用现有文件和函数：
 
 1. `export_scene_info.py`
@@ -32,8 +33,8 @@ from __future__ import annotations
 - 默认 instance assignment 使用 LLM；若远端模型不可用，可用
   `--disable-assignment-llm` 切换为启发式分配。
 
-默认输出
---------
+单场景输出
+----------
 脚本会创建一个批次目录：
 
   results/layouts/<scene>/batch_<YYYYmmdd_HHMMSS>/
@@ -47,6 +48,78 @@ from __future__ import annotations
 
 `manifest.json` 会记录本批次的 scene、seed、复用/生成的缓存路径、
 每个 layout 的输出路径、采样数量、分配数量、放置成功/失败数量和失败原因摘要。
+
+计划模式
+--------
+如果需要一次处理多个场景，可以传入 `--plan-json`。计划文件可以是最简单的
+场景名数组：
+
+  [
+    "00808-y9hTuugGdiq",
+    "00800-TEEsavR23oF"
+  ]
+
+也可以是带默认参数和单场景覆盖的对象：
+
+  {
+    "num_layouts": 5,
+    "base_seed": 100,
+    "scenes": [
+      "00808-y9hTuugGdiq",
+      {"scene": "00800-TEEsavR23oF", "num_layouts": 3, "base_seed": 200}
+    ]
+  }
+
+运行示例：
+
+  python batch_generate_layouts.py \
+    --plan-json scenes_plan.json \
+    --num-layouts 10 \
+    --ssh-key /home/yuhang/Desktop/zw_B200.txt
+
+优先级为：命令行默认值 < 计划文件顶层默认值 < 单个 scene 条目覆盖。
+计划模式会为每个 scene 创建自己的
+`results/layouts/<scene>/batch_<YYYYmmdd_HHMMSS>/manifest.json`，
+同时额外写入一个总索引：
+
+  results/layouts/plan_<YYYYmmdd_HHMMSS>/plan_manifest.json
+
+生成后的可视化检查
+----------------
+批量生成完成后，推荐直接用 `visualize_placed_layout.py` 打开任意一个最终 layout：
+
+  python visualize_placed_layout.py \
+    results/layouts/00808-y9hTuugGdiq/batch_<YYYYmmdd_HHMMSS>/layout_000_seed_42.json \
+    --scene 00808-y9hTuugGdiq
+
+在可视化窗口中按 `[` / `]` 可以在同一个 batch 目录内切换不同 layout，
+按 `,/.` 或 `9/0` 可以切换当前查看物体，按 `F` 聚焦当前物体。
+如果想比较多个 batch 目录，可在可视化脚本中指定
+`--layout-scan-dir results/layouts/<scene> --recursive-layout-scan`。
+
+阶段提示与进度
+--------------
+脚本执行时间可能较长，尤其是在需要调用 Qwen 或提取 receptacle surfaces 时。
+因此运行过程中会输出显式阶段提示与轻量进度条：
+
+1. `[Stage 1/5] Prepare scene_info`
+   准备或复用场景信息。
+2. `[Stage 2/5] Prepare room probabilities`
+   检查概率文件；若缺失则先补齐房间推荐，再生成概率。
+3. `[Stage 3/5] Prepare receptacle surfaces`
+   准备或复用可放置 instance 上表面。
+4. `[Stage 4/5] Prepare assignment backend`
+   初始化 LLM 分配后端；默认复用一个 SSH tunnel。
+5. `[Stage 5/5] Generate layouts`
+   按 seed 循环生成多个最终 layout。
+
+进度条示例：
+
+  [Progress] probabilities: [########--------------------] 8/26  30.8% reuse Camera_01
+  [Progress] assign 000: [############----------------] 12/26  46.2% target=584 source=llm_assignment
+  [Progress] layouts: [##############--------------] 5/10  50.0% done seed=46
+
+如果日志系统不适合显示进度条，可传入 `--no-progress` 关闭。
 
 常用示例
 --------
@@ -135,6 +208,29 @@ from sample_and_place_objects import (
 
 DEFAULT_MODEL = "Qwen/Qwen3-VL-235B-A22B-Thinking"
 IMAGE_EXTENSIONS = ("*.webp", "*.jpg", "*.jpeg", "*.png", "*.bmp")
+PROGRESS_BAR_WIDTH = 28
+
+
+def _stage(index: int, total: int, title: str) -> None:
+    """Print a visible stage boundary for long batch runs."""
+    print(f"\n[Stage {index}/{total}] {title}")
+
+
+def _progress(label: str, current: int, total: int, detail: str = "", *, enabled: bool = True, done: bool = False) -> None:
+    """Small dependency-free progress bar."""
+    if not enabled:
+        return
+    total = max(1, int(total))
+    current = max(0, min(int(current), total))
+    ratio = current / total
+    filled = int(round(PROGRESS_BAR_WIDTH * ratio))
+    bar = "#" * filled + "-" * (PROGRESS_BAR_WIDTH - filled)
+    suffix = f" {detail}" if detail else ""
+    line = f"[Progress] {label}: [{bar}] {current}/{total} {ratio * 100:5.1f}%{suffix}"
+    if sys.stdout.isatty():
+        print("\r" + line, end="\n" if done else "", flush=True)
+    else:
+        print(line, flush=True)
 
 
 def _image_files(images_dir: str) -> List[Path]:
@@ -259,11 +355,14 @@ def _probability_path(scene: str, object_name: str, probabilities_dir: str) -> P
 
 def _ensure_probabilities(args: argparse.Namespace) -> List[Path]:
     ensured: List[Path] = []
-    for image_path in _image_files(args.images_dir):
+    image_files = _image_files(args.images_dir)
+    for idx, image_path in enumerate(image_files, start=1):
         object_name = image_path.stem
+        _progress("probabilities", idx - 1, len(image_files), object_name, enabled=not args.no_progress)
         prob_path = _probability_path(args.scene, object_name, args.probabilities_dir)
         if prob_path.is_file() and not args.regenerate_probabilities:
             ensured.append(prob_path)
+            _progress("probabilities", idx, len(image_files), f"reuse {object_name}", enabled=not args.no_progress)
             continue
         data = generate_probabilities(
             object_name=object_name,
@@ -274,6 +373,8 @@ def _ensure_probabilities(args: argparse.Namespace) -> List[Path]:
         if not data or not prob_path.is_file():
             raise RuntimeError(f"failed to generate probability file for {object_name}: {prob_path}")
         ensured.append(prob_path)
+        _progress("probabilities", idx, len(image_files), f"ready {object_name}", enabled=not args.no_progress)
+    _progress("probabilities", len(image_files), len(image_files), "done", enabled=not args.no_progress, done=True)
     print(f"[Info] Probability files ready: {len(ensured)}")
     return ensured
 
@@ -391,23 +492,35 @@ def _assign_objects(
     room_map: Dict[int, Dict[str, Any]],
     use_llm: bool,
     client: Optional[Any],
+    layout_label: str = "",
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     assignments: List[Dict[str, Any]] = []
     debug: List[Dict[str, Any]] = []
+    total = len(sampled_objects)
+    progress_label = f"assign {layout_label}".strip()
 
     for idx, obj in enumerate(sampled_objects):
         room_id = _safe_int(obj.get("sampled_region_id", -1), -1)
+        model_id = str(obj.get("model_id", ""))
+        _progress(
+            progress_label,
+            idx,
+            total,
+            f"{model_id or obj.get('name', 'object')} room={room_id}",
+            enabled=not args.no_progress,
+        )
         room_entry = room_map.get(room_id)
         if room_entry is None:
             debug.append({"object_id": obj.get("id", idx), "status": "missing_room_surface", "room_id": room_id})
+            _progress(progress_label, idx + 1, total, "missing_room_surface", enabled=not args.no_progress)
             continue
 
         candidates = _build_surface_candidates_for_room(room_entry)
         if not candidates:
             debug.append({"object_id": obj.get("id", idx), "status": "empty_candidates", "room_id": room_id})
+            _progress(progress_label, idx + 1, total, "empty_candidates", enabled=not args.no_progress)
             continue
 
-        model_id = str(obj.get("model_id", ""))
         name = str(obj.get("name", model_id or f"obj_{idx}"))
         image_path = _find_image_for_object(args.images_dir, model_id=model_id, name=name)
         raw_output = ""
@@ -438,6 +551,7 @@ def _assign_objects(
         decision = _normalize_assignment_response(parsed_output, candidates, model_id=model_id)
         if int(decision.get("target_instance_id", -1)) < 0:
             debug.append({"object_id": obj.get("id", idx), "status": "invalid_decision", "room_id": room_id})
+            _progress(progress_label, idx + 1, total, "invalid_decision", enabled=not args.no_progress)
             continue
 
         object_id = _normalize_object_id(obj.get("id", idx), fallback=idx)
@@ -468,6 +582,14 @@ def _assign_objects(
                 "cleaned_output": cleaned_output,
             }
         )
+        _progress(
+            progress_label,
+            idx + 1,
+            total,
+            f"target={int(decision['target_instance_id'])} source={source if not llm_error else 'heuristic_fallback'}",
+            enabled=not args.no_progress,
+        )
+    _progress(progress_label, total, total, "done", enabled=not args.no_progress, done=True)
 
     plan_payload = {
         "scene_name": args.scene,
@@ -508,6 +630,12 @@ def _write_json(path: Path, payload: Dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _clone_args(args: argparse.Namespace, **overrides: Any) -> argparse.Namespace:
+    data = vars(args).copy()
+    data.update(overrides)
+    return argparse.Namespace(**data)
+
+
 def _make_batch_dir(args: argparse.Namespace) -> Tuple[str, Path]:
     batch_id = time.strftime("batch_%Y%m%d_%H%M%S")
     out_dir = Path(args.layouts_dir) / args.scene / batch_id
@@ -515,12 +643,84 @@ def _make_batch_dir(args: argparse.Namespace) -> Tuple[str, Path]:
     return batch_id, out_dir
 
 
+def _coerce_scene_entry(entry: Any, defaults: Dict[str, Any], index: int) -> Dict[str, Any]:
+    if isinstance(entry, str):
+        scene = entry.strip()
+        if not scene:
+            raise ValueError(f"plan scene entry #{index} is empty")
+        out = dict(defaults)
+        out["scene"] = scene
+        return out
+    if isinstance(entry, dict):
+        scene = str(entry.get("scene", entry.get("name", ""))).strip()
+        if not scene:
+            raise ValueError(f"plan scene entry #{index} missing 'scene'")
+        out = dict(defaults)
+        for key in (
+            "num_layouts",
+            "base_seed",
+            "images_dir",
+            "rooms_info_dir",
+            "probabilities_dir",
+            "layouts_dir",
+            "data_dir",
+            "objects_dir",
+            "surfaces_json",
+        ):
+            if key in entry:
+                out[key] = entry[key]
+        out["scene"] = scene
+        return out
+    raise ValueError(f"plan scene entry #{index} must be string or object, got {type(entry).__name__}")
+
+
+def _load_plan_entries(args: argparse.Namespace) -> Tuple[Path, List[Dict[str, Any]]]:
+    plan_path = Path(args.plan_json)
+    if not plan_path.is_file():
+        raise FileNotFoundError(f"--plan-json not found: {plan_path}")
+    payload = json.loads(plan_path.read_text(encoding="utf-8"))
+
+    defaults: Dict[str, Any] = {
+        "num_layouts": int(args.num_layouts),
+        "base_seed": int(args.base_seed),
+    }
+    if isinstance(payload, list):
+        scene_items = payload
+    elif isinstance(payload, dict):
+        scene_items = payload.get("scenes", payload.get("scene_list"))
+        if not isinstance(scene_items, list):
+            raise ValueError("plan JSON object must contain a 'scenes' list")
+        plan_defaults = payload.get("defaults", {})
+        if isinstance(plan_defaults, dict):
+            defaults.update(plan_defaults)
+        for key in (
+            "num_layouts",
+            "base_seed",
+            "images_dir",
+            "rooms_info_dir",
+            "probabilities_dir",
+            "layouts_dir",
+            "data_dir",
+            "objects_dir",
+        ):
+            if key in payload:
+                defaults[key] = payload[key]
+    else:
+        raise ValueError("plan JSON root must be a list or object")
+
+    entries = [_coerce_scene_entry(item, defaults, idx) for idx, item in enumerate(scene_items)]
+    if not entries:
+        raise ValueError("plan JSON contains no scenes")
+    return plan_path, entries
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Batch-generate multiple final layouts for one scene.",
+        description="Batch-generate multiple final layouts for one or more scenes.",
         formatter_class=argparse.RawTextHelpFormatter,
     )
-    parser.add_argument("--scene", required=True, help="Scene name, e.g. 00808-y9hTuugGdiq")
+    parser.add_argument("--scene", default=None, help="Scene name, e.g. 00808-y9hTuugGdiq; optional when --plan-json is used")
+    parser.add_argument("--plan-json", default=None, help="JSON plan file containing a scene list for multi-scene generation")
     parser.add_argument("--num-layouts", type=int, default=10, help="Number of final layouts to generate")
     parser.add_argument("--base-seed", type=int, default=42, help="Seed for layout_000; later layouts use base_seed + index")
 
@@ -540,6 +740,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--keep-intermediates", action="store_true", help="Write sampled layout and assignment plan for each final layout")
     parser.add_argument("--fail-fast", action="store_true", help="Stop at first failed layout")
     parser.add_argument("--skip-api-health-check", action="store_true", help="Pass through to query_rooms_for_objects.py")
+    parser.add_argument("--no-progress", action="store_true", help="Disable terminal progress bars")
 
     parser.add_argument("--min-distance", type=float, default=0.25, help="Minimum pairwise object distance in placement")
     parser.add_argument("--spawn-height", type=float, default=0.3, help="Spawn height above target surface for collidable objects")
@@ -567,14 +768,16 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main() -> int:
-    args = parse_args()
+def _run_scene_batch(args: argparse.Namespace) -> Tuple[int, Path]:
     if int(args.num_layouts) <= 0:
         print("[Error] --num-layouts must be positive", file=sys.stderr)
-        return 1
+        return 1, Path()
+    if not args.scene:
+        print("[Error] scene is required for a scene batch", file=sys.stderr)
+        return 1, Path()
     if not _image_files(args.images_dir):
         print(f"[Error] No object images found in {args.images_dir}", file=sys.stderr)
-        return 1
+        return 1, Path()
 
     batch_id, batch_dir = _make_batch_dir(args)
     manifest_path = batch_dir / "manifest.json"
@@ -589,16 +792,23 @@ def main() -> int:
     }
 
     try:
+        _stage(1, 5, "Prepare scene_info")
         scene_info_path = _ensure_scene_info(args)
+
+        _stage(2, 5, "Prepare room probabilities")
         missing_probs = _missing_probabilities(args.scene, args.images_dir, args.probabilities_dir)
         if missing_probs or args.regenerate_probabilities:
+            print(f"[Info] Probability files missing/regenerating: {len(missing_probs)}")
             _ensure_room_queries(args)
         else:
             print("[Info] Reusing probability files; room recommendation files are not needed for this batch.")
         probability_paths = _ensure_probabilities(args)
+
+        _stage(3, 5, "Prepare receptacle surfaces")
         surfaces_path = _ensure_surfaces(args)
         surfaces_payload = _load_surfaces_payload(surfaces_path)
         room_map = _surface_room_map(surfaces_payload)
+        print(f"[Info] Surface rooms available: {len(room_map)}")
 
         manifest["paths"] = {
             "scene_info": str(scene_info_path),
@@ -611,11 +821,14 @@ def main() -> int:
         manifest["fatal_error"] = str(exc)
         _write_json(manifest_path, manifest)
         print(f"[Error] Preparation failed: {exc}", file=sys.stderr)
-        return 1
+        return 1, manifest_path
 
+    _stage(4, 5, "Prepare assignment backend")
     use_llm, tunnel, client = _start_assignment_client(args)
     exit_code = 0
     try:
+        _stage(5, 5, "Generate layouts")
+        _progress("layouts", 0, int(args.num_layouts), "start", enabled=not args.no_progress)
         for layout_idx in range(int(args.num_layouts)):
             seed = int(args.base_seed) + layout_idx
             print(f"\n[Batch] layout_index={layout_idx} seed={seed}")
@@ -625,6 +838,7 @@ def main() -> int:
                 "status": "started",
             }
             try:
+                print(f"[Step] layout {layout_idx}: sampling objects from probabilities")
                 np.random.seed(seed)
                 sampled_layout = sample_object_positions(
                     scene_name=args.scene,
@@ -636,17 +850,22 @@ def main() -> int:
                 if not sampled_layout or not isinstance(sampled_layout.get("objects"), list):
                     raise RuntimeError("sampling produced no layout objects")
                 sampled_objects = sampled_layout["objects"]
+                print(f"[Step] layout {layout_idx}: sampled_objects={len(sampled_objects)}")
 
+                print(f"[Step] layout {layout_idx}: assigning objects to receptacle instances")
                 plan_payload, assignment_summary = _assign_objects(
                     args=args,
                     sampled_objects=sampled_objects,
                     room_map=room_map,
                     use_llm=use_llm,
                     client=client,
+                    layout_label=f"{layout_idx:03d}",
                 )
                 if not plan_payload.get("assignments"):
                     raise RuntimeError("no assignments generated")
+                print(f"[Step] layout {layout_idx}: assignments={int(plan_payload.get('assignment_count', 0))}")
 
+                print(f"[Step] layout {layout_idx}: placing objects on target surfaces")
                 layout_payload = place_objects_on_instances(
                     scene_name=args.scene,
                     assignment_plan=plan_payload,
@@ -667,6 +886,7 @@ def main() -> int:
                     "assignment_count": int(plan_payload.get("assignment_count", 0)),
                 }
 
+                print(f"[Step] layout {layout_idx}: writing final layout")
                 layout_path = batch_dir / f"layout_{layout_idx:03d}_seed_{seed}.json"
                 _write_json(layout_path, layout_payload)
                 if args.keep_intermediates:
@@ -704,15 +924,18 @@ def main() -> int:
                         failed=int(stats.get("failed_count", 0)),
                     )
                 )
+                _progress("layouts", layout_idx + 1, int(args.num_layouts), f"done seed={seed}", enabled=not args.no_progress)
             except Exception as exc:
                 entry.update({"status": "failed", "error": str(exc)})
                 print(f"[Error] layout_index={layout_idx} failed: {exc}", file=sys.stderr)
                 exit_code = 1
+                _progress("layouts", layout_idx + 1, int(args.num_layouts), f"failed seed={seed}", enabled=not args.no_progress)
                 if args.fail_fast:
                     manifest["layouts"].append(entry)
                     break
             manifest["layouts"].append(entry)
             _write_json(manifest_path, manifest)
+        _progress("layouts", len(manifest["layouts"]), int(args.num_layouts), "finished", enabled=not args.no_progress, done=True)
     finally:
         if tunnel is not None:
             tunnel.close()
@@ -724,7 +947,97 @@ def main() -> int:
     _write_json(manifest_path, manifest)
     print(f"\n[OK] Manifest saved: {manifest_path}")
     print(f"[OK] Batch summary: success={manifest['success_count']} failed={manifest['failed_count']}")
+    return exit_code, manifest_path
+
+
+def _run_plan(args: argparse.Namespace) -> int:
+    try:
+        plan_path, entries = _load_plan_entries(args)
+    except Exception as exc:
+        print(f"[Error] Failed to load plan JSON: {exc}", file=sys.stderr)
+        return 1
+
+    plan_id = time.strftime("plan_%Y%m%d_%H%M%S")
+    plan_dir = Path(args.layouts_dir) / plan_id
+    plan_manifest_path = plan_dir / "plan_manifest.json"
+    plan_manifest: Dict[str, Any] = {
+        "plan_id": plan_id,
+        "plan_json": str(plan_path),
+        "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "scene_count": len(entries),
+        "scenes": [],
+    }
+    _write_json(plan_manifest_path, plan_manifest)
+
+    print(f"[Plan] Loaded {len(entries)} scene(s) from {plan_path}")
+    exit_code = 0
+    for scene_idx, entry in enumerate(entries):
+        scene = str(entry["scene"])
+        scene_args = _clone_args(args, **entry)
+        if int(scene_args.num_layouts) <= 0:
+            scene_record = {
+                "scene": scene,
+                "status": "failed",
+                "error": "num_layouts must be positive",
+                "num_layouts": int(scene_args.num_layouts),
+            }
+            plan_manifest["scenes"].append(scene_record)
+            _write_json(plan_manifest_path, plan_manifest)
+            exit_code = 1
+            if args.fail_fast:
+                break
+            continue
+
+        print(
+            f"\n[Plan] scene {scene_idx + 1}/{len(entries)}: "
+            f"{scene} num_layouts={int(scene_args.num_layouts)} base_seed={int(scene_args.base_seed)}"
+        )
+        code, manifest_path = _run_scene_batch(scene_args)
+        scene_record = {
+            "scene": scene,
+            "status": "ok" if code == 0 else "failed",
+            "num_layouts": int(scene_args.num_layouts),
+            "base_seed": int(scene_args.base_seed),
+            "manifest_path": str(manifest_path) if manifest_path else "",
+        }
+        if manifest_path and manifest_path.is_file():
+            try:
+                scene_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                scene_record["success_count"] = int(scene_manifest.get("success_count", 0))
+                scene_record["failed_count"] = int(scene_manifest.get("failed_count", 0))
+                scene_record["batch_id"] = scene_manifest.get("batch_id", "")
+            except Exception as exc:
+                scene_record["manifest_read_error"] = str(exc)
+        if code != 0:
+            exit_code = 1
+        plan_manifest["scenes"].append(scene_record)
+        _write_json(plan_manifest_path, plan_manifest)
+        if code != 0 and args.fail_fast:
+            break
+
+    plan_manifest["finished_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    plan_manifest["success_scene_count"] = sum(1 for item in plan_manifest["scenes"] if item.get("status") == "ok")
+    plan_manifest["failed_scene_count"] = sum(1 for item in plan_manifest["scenes"] if item.get("status") != "ok")
+    _write_json(plan_manifest_path, plan_manifest)
+    print(f"\n[OK] Plan manifest saved: {plan_manifest_path}")
+    print(
+        "[OK] Plan summary: scenes_success={success} scenes_failed={failed}".format(
+            success=plan_manifest["success_scene_count"],
+            failed=plan_manifest["failed_scene_count"],
+        )
+    )
     return exit_code
+
+
+def main() -> int:
+    args = parse_args()
+    if args.plan_json:
+        return _run_plan(args)
+    if not args.scene:
+        print("[Error] --scene is required unless --plan-json is provided", file=sys.stderr)
+        return 1
+    code, _manifest_path = _run_scene_batch(args)
+    return code
 
 
 if __name__ == "__main__":
