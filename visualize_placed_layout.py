@@ -33,11 +33,12 @@ python visualize_placed_layout.py \
 推荐流程：
 1. 用 `[/]` 或 `9/0` 切到异常物体。
 2. 用 `F` 聚焦当前物体。
-3. 用 `U` 将物体上移，用 `O` 将物体下移；每次移动 `--offset-step` 米。
-4. HUD 中的 `offset=(x,y,z)` 会显示相对原始 layout 位置的累计偏移。
-5. 调到合适位置后按 `M` 保存。默认输出到同目录：
+3. 默认只调整当前选中物体；按 `B` 可在 `selected/all` 之间切换调试作用域。
+4. 用 `U` 将调试对象上移，用 `O` 将调试对象下移；每次移动 `--offset-step` 米。
+5. HUD 中的 `scope` 会显示当前作用域，`offset=(x,y,z)` 会显示选中物体的累计偏移。
+6. 调到合适位置后按 `M` 保存。默认输出到同目录：
    `<原文件名>_offset_debug.json`
-6. 若希望指定保存路径，传入：
+7. 若希望指定保存路径，传入：
    `--output-layout results/layouts/.../manual_height_fixed.json`
 
 保存后的 JSON：
@@ -61,7 +62,8 @@ R              视角重置到布局中心附近
 [/] 或 9/0     切换当前查看对象
 F              相机聚焦当前对象
 --debug-offset 启用物体高度偏移调试
-U/O            调试模式下上/下调整当前物体 Y 偏移
+U/O            调试模式下上/下调整 Y 偏移
+B              调试模式下切换 selected/all 调整作用域
 M              调试模式下保存调整后的 layout JSON
 H              显示/隐藏帮助
 P              保存当前窗口截图
@@ -158,7 +160,10 @@ def _look_at_yaw_pitch(camera_pos: Sequence[float], target: Sequence[float]) -> 
 def _normalize_key(raw_key: int) -> int:
     if raw_key < 0:
         return raw_key
-    return raw_key & 0xFF
+    key = raw_key & 0xFF
+    if ord("A") <= key <= ord("Z"):
+        return key + 32
+    return key
 
 
 def _normalize_pygame_key(key: int) -> int:
@@ -184,6 +189,7 @@ def _normalize_pygame_key(key: int) -> int:
         pygame.K_u: ord("u"),
         pygame.K_o: ord("o"),
         pygame.K_m: ord("m"),
+        pygame.K_b: ord("b"),
         pygame.K_LEFTBRACKET: ord("["),
         pygame.K_RIGHTBRACKET: ord("]"),
         pygame.K_9: ord("9"),
@@ -428,6 +434,7 @@ def _build_hud(
     pitch: float,
     debug_offset: bool = False,
     offset_step: float = 0.02,
+    offset_scope: str = "selected",
 ) -> List[str]:
     """生成左上角状态文本；调试模式下额外显示步长和保存提示。"""
     lines = [
@@ -438,7 +445,7 @@ def _build_hud(
         f"Camera: ({camera_pos[0]:.2f},{camera_pos[1]:.2f},{camera_pos[2]:.2f}) yaw={yaw:.1f} pitch={pitch:.1f}",
     ]
     if debug_offset:
-        lines.append(f"Offset debug: ON  step={offset_step:.3f}m  U/O=y +/-  M=save adjusted layout")
+        lines.append(f"Offset debug: ON  scope={offset_scope}  step={offset_step:.3f}m  B=scope  U/O=y +/-  M=save")
     return lines
 
 
@@ -459,6 +466,7 @@ def _render_frame(
     help_lines: Sequence[str],
     debug_offset: bool = False,
     offset_step: float = 0.02,
+    offset_scope: str = "selected",
 ) -> np.ndarray:
     try:
         rgb = _set_camera(sim, camera_pos, yaw, pitch)
@@ -479,6 +487,7 @@ def _render_frame(
         pitch=pitch,
         debug_offset=debug_offset,
         offset_step=offset_step,
+        offset_scope=offset_scope,
     )
     _draw_text(frame, hud, 10, 24, (80, 255, 255))
     if show_help:
@@ -507,6 +516,20 @@ def _adjust_selected_object_y(loaded_items: Sequence[Dict[str, Any]], selected_i
     obj.translation = base + np.asarray(offset[:3], dtype=np.float32)
     item["debug_offset"] = offset[:3]
     return item
+
+
+def _adjust_all_objects_y(loaded_items: Sequence[Dict[str, Any]], delta_y: float) -> int:
+    """
+    批量沿 Y 轴调整所有已加载物体。
+
+    这个功能用于判断“整个 layout 是否整体偏低/偏高”。例如所有物体都埋在
+    承载面下方时，切到 all 作用域后按 U，可以立即在同一帧看到整体抬升效果。
+    """
+    moved = 0
+    for idx in range(len(loaded_items)):
+        if _adjust_selected_object_y(loaded_items, idx, delta_y) is not None:
+            moved += 1
+    return moved
 
 
 def _save_adjusted_layout(
@@ -568,8 +591,9 @@ def _apply_viewer_key(
     处理 cv2/pygame 统一后的按键。
 
     调试模式只绑定三个键：
-    - U：当前物体上移 `offset_step`
-    - O：当前物体下移 `offset_step`
+    - B：在 selected/all 作用域之间切换
+    - U：当前作用域上移 `offset_step`
+    - O：当前作用域下移 `offset_step`
     - M：保存当前所有已加载物体的位置
     """
     if key < 0:
@@ -601,14 +625,26 @@ def _apply_viewer_key(
     if bool(state.get("debug_offset", False)) and loaded_items:
         selected_idx = int(state.get("selected_idx", 0))
         step = float(state.get("offset_step", 0.02))
+        scope = str(state.get("offset_scope", "selected"))
+        if key == ord("b"):
+            state["offset_scope"] = "all" if scope != "all" else "selected"
+            print(f"[Debug] offset scope -> {state['offset_scope']}")
         if key == ord("u"):
-            item = _adjust_selected_object_y(loaded_items, selected_idx, step)
-            if item is not None:
-                print(f"[Debug] {item['model_id']} y_offset={item['debug_offset'][1]:+.4f}")
+            if scope == "all":
+                moved = _adjust_all_objects_y(loaded_items, step)
+                print(f"[Debug] all objects y_offset += {step:+.4f} ({moved} moved)")
+            else:
+                item = _adjust_selected_object_y(loaded_items, selected_idx, step)
+                if item is not None:
+                    print(f"[Debug] {item['model_id']} y_offset={item['debug_offset'][1]:+.4f}")
         if key == ord("o"):
-            item = _adjust_selected_object_y(loaded_items, selected_idx, -step)
-            if item is not None:
-                print(f"[Debug] {item['model_id']} y_offset={item['debug_offset'][1]:+.4f}")
+            if scope == "all":
+                moved = _adjust_all_objects_y(loaded_items, -step)
+                print(f"[Debug] all objects y_offset += {-step:+.4f} ({moved} moved)")
+            else:
+                item = _adjust_selected_object_y(loaded_items, selected_idx, -step)
+                if item is not None:
+                    print(f"[Debug] {item['model_id']} y_offset={item['debug_offset'][1]:+.4f}")
         if key == ord("m"):
             out_path = _save_adjusted_layout(
                 payload=state.get("layout_payload", {}),
@@ -679,6 +715,7 @@ def _render_current_state(
         help_lines=help_lines,
         debug_offset=bool(state.get("debug_offset", False)),
         offset_step=float(state.get("offset_step", 0.02)),
+        offset_scope=str(state.get("offset_scope", "selected")),
     )
 
 
@@ -940,7 +977,8 @@ def parse_args() -> argparse.Namespace:
             "Debug keys:\n"
             "  [/] or 9/0 : select previous / next object\n"
             "  F          : focus selected object\n"
-            "  U / O      : move selected object up / down by --offset-step meters\n"
+            "  B          : toggle offset scope between selected and all objects\n"
+            "  U / O      : move current scope up / down by --offset-step meters\n"
             "  M          : save adjusted layout JSON\n"
         ),
     )
@@ -964,7 +1002,7 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help=(
             "启用可视化高度调试。\n"
-            "按 U 上移当前物体，按 O 下移当前物体，按 M 保存调整后的 layout。"
+            "按 B 切换 selected/all 作用域，按 U/O 上下移动当前作用域，按 M 保存调整后的 layout。"
         ),
     )
     parser.add_argument(
@@ -1031,6 +1069,7 @@ def main() -> int:
         "quit": False,
         "debug_offset": bool(args.debug_offset),
         "offset_step": float(args.offset_step),
+        "offset_scope": "selected",
         "layout_payload": payload,
         "layout_path": str(layout_path),
         "output_layout_path": Path(args.output_layout) if args.output_layout else None,
@@ -1041,7 +1080,7 @@ def main() -> int:
         "I/K J/L: pitch / yaw",
         "R: reset view   F: focus selected",
         "[/] or 9/0: previous / next object",
-        "Debug offset: U/O move selected y +/- step, M save adjusted layout",
+        "Debug offset: B toggles selected/all, U/O move y +/- step, M save",
         "H: help   P: screenshot   ESC/Q: quit",
     ]
 
