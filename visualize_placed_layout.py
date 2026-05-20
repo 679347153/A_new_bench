@@ -10,11 +10,48 @@ from __future__ import annotations
 生成的 layout JSON，将场景与已放置物体加载到 Habitat-Sim 中，提供一个轻量查看器
 用于检查物体是否落在合理承载面上、是否穿模、是否集中到错误房间。
 
-示例
-----
+它不会重新执行分配、采样或物理放置；它只复现 layout JSON 中的
+`objects[*].position / rotation / model_id`，因此很适合定位“生成结果本身”
+是否有高度偏移、模板缺失、房间错误等问题。
+
+基础示例
+--------
 python visualize_placed_layout.py \
   results/layouts/00808-y9hTuugGdiq/00808-y9hTuugGdiq_assigned_instance_layout.json \
   --scene 00808-y9hTuugGdiq
+
+手动微调高度示例
+----------------
+当物体看起来在桌面/架子/地面下方或上方时，打开调试模式：
+
+python visualize_placed_layout.py \
+  results/layouts/00808-y9hTuugGdiq/00808-y9hTuugGdiq_assigned_instance_layout.json \
+  --scene 00808-y9hTuugGdiq \
+  --debug-offset \
+  --offset-step 0.02
+
+推荐流程：
+1. 用 `[/]` 或 `9/0` 切到异常物体。
+2. 用 `F` 聚焦当前物体。
+3. 用 `U` 将物体上移，用 `O` 将物体下移；每次移动 `--offset-step` 米。
+4. HUD 中的 `offset=(x,y,z)` 会显示相对原始 layout 位置的累计偏移。
+5. 调到合适位置后按 `M` 保存。默认输出到同目录：
+   `<原文件名>_offset_debug.json`
+6. 若希望指定保存路径，传入：
+   `--output-layout results/layouts/.../manual_height_fixed.json`
+
+保存后的 JSON：
+- `objects[*].position` 会被更新为调试后的最终可视位置。
+- `objects[*].debug_base_position` 记录调试前的原始位置。
+- `objects[*].debug_visual_offset` 记录相对原始位置的手动偏移。
+- 顶层 `visual_debug_adjustment` 记录保存来源和时间。
+
+无窗口截图示例
+--------------
+python visualize_placed_layout.py \
+  results/layouts/00808-y9hTuugGdiq/00808-y9hTuugGdiq_assigned_instance_layout.json \
+  --scene 00808-y9hTuugGdiq \
+  --headless --headless-max-focus 20
 
 按键
 ----
@@ -23,9 +60,18 @@ I/K J/L        相机俯仰、左右转向
 R              视角重置到布局中心附近
 [/] 或 9/0     切换当前查看对象
 F              相机聚焦当前对象
+--debug-offset 启用物体高度偏移调试
+U/O            调试模式下上/下调整当前物体 Y 偏移
+M              调试模式下保存调整后的 layout JSON
 H              显示/隐藏帮助
 P              保存当前窗口截图
 ESC/Q          退出
+
+注意
+----
+- 如果 OpenCV HighGUI 不可用，脚本会自动尝试 pygame 后端。
+- 由于本脚本的目标是检查最终 layout，加载物体时会设置为 KINEMATIC，
+  避免可视化过程中的物理模拟再次改变位置。
 """
 
 import argparse
@@ -135,6 +181,9 @@ def _normalize_pygame_key(key: int) -> int:
         pygame.K_k: ord("k"),
         pygame.K_j: ord("j"),
         pygame.K_l: ord("l"),
+        pygame.K_u: ord("u"),
+        pygame.K_o: ord("o"),
+        pygame.K_m: ord("m"),
         pygame.K_LEFTBRACKET: ord("["),
         pygame.K_RIGHTBRACKET: ord("]"),
         pygame.K_9: ord("9"),
@@ -253,6 +302,17 @@ def _resolve_template_handle(template_mgr: Any, model_id: str) -> Optional[str]:
 
 
 def _load_layout_objects(sim: habitat_sim.Simulator, objects: Sequence[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], int]:
+    """
+    将 layout JSON 中的 objects 加载为 Habitat-Sim 刚体。
+
+    这里故意不做任何“重新放置”逻辑，只按 JSON 的 position/rotation 复现结果：
+    - `position/base_position`：layout 原始坐标，作为调试偏移的零点。
+    - `debug_offset`：运行时手动调试的累计偏移，初始为 0。
+    - `index`：原始 objects 数组下标，保存调整结果时用它回写对应条目。
+
+    物体统一设置为 KINEMATIC，是为了让可视化器成为稳定的检查工具；
+    否则 DYNAMIC 物体可能因为模板碰撞属性/重力再次移动，掩盖 layout 本身的问题。
+    """
     rom = sim.get_rigid_object_manager()
     template_mgr = sim.get_object_template_manager()
     loaded: List[Dict[str, Any]] = []
@@ -288,6 +348,8 @@ def _load_layout_objects(sim: habitat_sim.Simulator, objects: Sequence[Dict[str,
                     "model_id": model_id,
                     "name": str(cfg.get("name", model_id)),
                     "position": pos,
+                    "base_position": list(pos),
+                    "debug_offset": [0.0, 0.0, 0.0],
                     "target_instance_id": cfg.get("target_instance_id", "?"),
                     "sampled_region_id": cfg.get("sampled_region_id", "?"),
                 }
@@ -317,19 +379,23 @@ def _draw_text(frame: np.ndarray, lines: Sequence[str], x: int, y: int, color: T
 
 
 def _selected_label(items: Sequence[Dict[str, Any]], selected_idx: int) -> str:
+    """构造 HUD 中当前选中物体的简短状态行。"""
     if not items:
         return "none"
     item = items[selected_idx % len(items)]
     obj = item["object"]
     pos = obj.translation
+    offset = item.get("debug_offset", [0.0, 0.0, 0.0])
     return (
         f"{selected_idx + 1}/{len(items)} {item['model_id']} "
         f"pos=({float(pos[0]):.2f},{float(pos[1]):.2f},{float(pos[2]):.2f}) "
+        f"offset=({float(offset[0]):+.2f},{float(offset[1]):+.2f},{float(offset[2]):+.2f}) "
         f"room={item.get('sampled_region_id')} target={item.get('target_instance_id')}"
     )
 
 
 def _reset_camera(objects: Sequence[Dict[str, Any]]) -> Tuple[np.ndarray, float, float]:
+    """把相机放到能看到整体布局的位置。"""
     center = _layout_center([item.get("layout", {}) for item in objects])
     if objects:
         positions = np.asarray([item["object"].translation for item in objects], dtype=np.float32)
@@ -343,6 +409,7 @@ def _reset_camera(objects: Sequence[Dict[str, Any]]) -> Tuple[np.ndarray, float,
 
 
 def _focus_object(item: Dict[str, Any]) -> Tuple[np.ndarray, float, float]:
+    """把相机移动到当前物体前方，用于逐个检查高度和穿模。"""
     target = np.asarray(item["object"].translation, dtype=np.float32)
     camera_pos = target + np.array([0.0, 1.0, 2.4], dtype=np.float32)
     yaw, pitch = _look_at_yaw_pitch(camera_pos, target)
@@ -359,14 +426,20 @@ def _build_hud(
     camera_pos: np.ndarray,
     yaw: float,
     pitch: float,
+    debug_offset: bool = False,
+    offset_step: float = 0.02,
 ) -> List[str]:
-    return [
+    """生成左上角状态文本；调试模式下额外显示步长和保存提示。"""
+    lines = [
         f"Scene: {scene_name}",
         f"Layout: {layout_path.name}",
         f"Objects loaded: {len(loaded_items)}/{object_count} skipped={skipped}",
         f"Selected: {_selected_label(loaded_items, selected_idx)}",
         f"Camera: ({camera_pos[0]:.2f},{camera_pos[1]:.2f},{camera_pos[2]:.2f}) yaw={yaw:.1f} pitch={pitch:.1f}",
     ]
+    if debug_offset:
+        lines.append(f"Offset debug: ON  step={offset_step:.3f}m  U/O=y +/-  M=save adjusted layout")
+    return lines
 
 
 def _render_frame(
@@ -384,6 +457,8 @@ def _render_frame(
     height: int,
     show_help: bool,
     help_lines: Sequence[str],
+    debug_offset: bool = False,
+    offset_step: float = 0.02,
 ) -> np.ndarray:
     try:
         rgb = _set_camera(sim, camera_pos, yaw, pitch)
@@ -402,12 +477,83 @@ def _render_frame(
         camera_pos=camera_pos,
         yaw=yaw,
         pitch=pitch,
+        debug_offset=debug_offset,
+        offset_step=offset_step,
     )
     _draw_text(frame, hud, 10, 24, (80, 255, 255))
     if show_help:
         y0 = int(height) - len(help_lines) * 22 - 16
         _draw_text(frame, help_lines, 10, max(24, y0), (80, 255, 80))
     return frame
+
+
+def _adjust_selected_object_y(loaded_items: Sequence[Dict[str, Any]], selected_idx: int, delta_y: float) -> Optional[Dict[str, Any]]:
+    """
+    在调试模式下沿 Y 轴调整当前物体。
+
+    `debug_offset` 始终是“相对 base_position 的累计偏移”，而不是相对上一次
+    obj.translation 的增量保存。这样反复按 U/O 后，保存出来的
+    `debug_base_position + debug_visual_offset == position`，后续排查更直观。
+    """
+    if not loaded_items:
+        return None
+    item = loaded_items[selected_idx % len(loaded_items)]
+    offset = list(item.get("debug_offset", [0.0, 0.0, 0.0]))
+    while len(offset) < 3:
+        offset.append(0.0)
+    offset[1] = float(offset[1]) + float(delta_y)
+    base = np.asarray(item.get("base_position", item.get("position", [0.0, 0.0, 0.0])), dtype=np.float32)
+    obj = item["object"]
+    obj.translation = base + np.asarray(offset[:3], dtype=np.float32)
+    item["debug_offset"] = offset[:3]
+    return item
+
+
+def _save_adjusted_layout(
+    payload: Dict[str, Any],
+    loaded_items: Sequence[Dict[str, Any]],
+    input_layout_path: Path,
+    output_layout_path: Optional[Path],
+) -> Path:
+    """
+    保存手动微调后的 layout。
+
+    保存策略：
+    - 不破坏原始 payload 的内存对象，先深拷贝一份再写文件。
+    - 只回写已成功加载的物体；模板缺失/无法加载的物体保持原 JSON。
+    - `position` 直接写成当前可视化位置，便于后续脚本直接消费。
+    - 额外保留 `debug_base_position/debug_visual_offset`，方便知道改了多少。
+    """
+    out_path = output_layout_path
+    if out_path is None:
+        out_path = input_layout_path.with_name(f"{input_layout_path.stem}_offset_debug{input_layout_path.suffix}")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    adjusted_payload = json.loads(json.dumps(payload, ensure_ascii=False))
+    objects = adjusted_payload.get("objects", [])
+    if not isinstance(objects, list):
+        objects = []
+        adjusted_payload["objects"] = objects
+
+    for item in loaded_items:
+        idx = int(item.get("index", -1))
+        if idx < 0 or idx >= len(objects) or not isinstance(objects[idx], dict):
+            continue
+        obj = item["object"]
+        pos = [round(float(obj.translation[0]), 4), round(float(obj.translation[1]), 4), round(float(obj.translation[2]), 4)]
+        offset = [round(float(v), 4) for v in item.get("debug_offset", [0.0, 0.0, 0.0])[:3]]
+        objects[idx]["position"] = pos
+        objects[idx]["debug_base_position"] = [round(float(v), 4) for v in item.get("base_position", pos)[:3]]
+        objects[idx]["debug_visual_offset"] = offset
+
+    adjusted_payload["visual_debug_adjustment"] = {
+        "tool": "visualize_placed_layout.py",
+        "saved_at_unix": int(time.time()),
+        "source_layout": str(input_layout_path),
+        "note": "position fields include manual visual debug offsets",
+    }
+    out_path.write_text(json.dumps(adjusted_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return out_path
 
 
 def _apply_viewer_key(
@@ -418,6 +564,14 @@ def _apply_viewer_key(
     screenshot_dir: Path,
     scene_name: str,
 ) -> bool:
+    """
+    处理 cv2/pygame 统一后的按键。
+
+    调试模式只绑定三个键：
+    - U：当前物体上移 `offset_step`
+    - O：当前物体下移 `offset_step`
+    - M：保存当前所有已加载物体的位置
+    """
     if key < 0:
         return False
     if key in (27, ord("q")):
@@ -444,6 +598,25 @@ def _apply_viewer_key(
         out_path = screenshot_dir / f"{scene_name}_layout_view_{int(time.time())}.png"
         cv2.imwrite(str(out_path), state["last_frame"])
         print(f"[OK] Screenshot saved: {out_path}")
+    if bool(state.get("debug_offset", False)) and loaded_items:
+        selected_idx = int(state.get("selected_idx", 0))
+        step = float(state.get("offset_step", 0.02))
+        if key == ord("u"):
+            item = _adjust_selected_object_y(loaded_items, selected_idx, step)
+            if item is not None:
+                print(f"[Debug] {item['model_id']} y_offset={item['debug_offset'][1]:+.4f}")
+        if key == ord("o"):
+            item = _adjust_selected_object_y(loaded_items, selected_idx, -step)
+            if item is not None:
+                print(f"[Debug] {item['model_id']} y_offset={item['debug_offset'][1]:+.4f}")
+        if key == ord("m"):
+            out_path = _save_adjusted_layout(
+                payload=state.get("layout_payload", {}),
+                loaded_items=loaded_items,
+                input_layout_path=Path(state.get("layout_path", ".")),
+                output_layout_path=state.get("output_layout_path"),
+            )
+            print(f"[OK] Adjusted layout saved: {out_path}")
 
     yaw = float(state.get("yaw", 0.0))
     pitch = float(state.get("pitch", 0.0))
@@ -504,6 +677,8 @@ def _render_current_state(
         height=height,
         show_help=bool(state.get("show_help", True)),
         help_lines=help_lines,
+        debug_offset=bool(state.get("debug_offset", False)),
+        offset_step=float(state.get("offset_step", 0.02)),
     )
 
 
@@ -744,7 +919,31 @@ def _opencv_gui_diagnostics(exc: Exception) -> List[str]:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Visualize a placed Habitat layout JSON.")
+    parser = argparse.ArgumentParser(
+        description="Visualize a placed Habitat layout JSON.",
+        formatter_class=argparse.RawTextHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  Basic viewer:\n"
+            "    python visualize_placed_layout.py \\\n"
+            "      results/layouts/00808-y9hTuugGdiq/00808-y9hTuugGdiq_assigned_instance_layout.json \\\n"
+            "      --scene 00808-y9hTuugGdiq\n\n"
+            "  Manual height debugging:\n"
+            "    python visualize_placed_layout.py \\\n"
+            "      results/layouts/00808-y9hTuugGdiq/00808-y9hTuugGdiq_assigned_instance_layout.json \\\n"
+            "      --scene 00808-y9hTuugGdiq --debug-offset --offset-step 0.02\n\n"
+            "  Manual height debugging with explicit output:\n"
+            "    python visualize_placed_layout.py \\\n"
+            "      results/layouts/00808-y9hTuugGdiq/00808-y9hTuugGdiq_assigned_instance_layout.json \\\n"
+            "      --scene 00808-y9hTuugGdiq --debug-offset \\\n"
+            "      --output-layout results/layouts/00808-y9hTuugGdiq/height_fixed.json\n\n"
+            "Debug keys:\n"
+            "  [/] or 9/0 : select previous / next object\n"
+            "  F          : focus selected object\n"
+            "  U / O      : move selected object up / down by --offset-step meters\n"
+            "  M          : save adjusted layout JSON\n"
+        ),
+    )
     parser.add_argument("layout", help="已放置 layout JSON 路径")
     parser.add_argument("--scene", default=None, help="场景名；不填时尝试从 layout 或路径推断")
     parser.add_argument("--data-dir", default="hm3d", help="HM3D 数据根目录")
@@ -760,6 +959,25 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--headless", action="store_true", help="不打开窗口，直接保存总览和物体聚焦截图")
     parser.add_argument("--headless-max-focus", type=int, default=12, help="headless 模式最多保存多少张物体聚焦图")
+    parser.add_argument(
+        "--debug-offset",
+        action="store_true",
+        help=(
+            "启用可视化高度调试。\n"
+            "按 U 上移当前物体，按 O 下移当前物体，按 M 保存调整后的 layout。"
+        ),
+    )
+    parser.add_argument(
+        "--offset-step",
+        type=float,
+        default=0.02,
+        help="debug-offset 每次调整的高度步长，单位米；0.02 表示每次 2cm",
+    )
+    parser.add_argument(
+        "--output-layout",
+        default=None,
+        help="debug-offset 保存路径；不填则写到原 layout 同目录的 *_offset_debug.json",
+    )
     return parser.parse_args()
 
 
@@ -811,6 +1029,11 @@ def main() -> int:
         "show_help": True,
         "last_frame": None,
         "quit": False,
+        "debug_offset": bool(args.debug_offset),
+        "offset_step": float(args.offset_step),
+        "layout_payload": payload,
+        "layout_path": str(layout_path),
+        "output_layout_path": Path(args.output_layout) if args.output_layout else None,
     }
 
     help_lines = [
@@ -818,6 +1041,7 @@ def main() -> int:
         "I/K J/L: pitch / yaw",
         "R: reset view   F: focus selected",
         "[/] or 9/0: previous / next object",
+        "Debug offset: U/O move selected y +/- step, M save adjusted layout",
         "H: help   P: screenshot   ESC/Q: quit",
     ]
 

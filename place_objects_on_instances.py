@@ -9,7 +9,8 @@ from __future__ import annotations
 本脚本读取“物体 -> 实例”分配结果并执行自动放置：
 1) 从场景级上表面结果建立目标实例索引。
 2) 对每个物体在目标实例上表面采样候选点。
-3) 以 `surface_y + spawn_height`（默认 0.3m）生成初始位置。
+3) 对可碰撞模板以 `surface_y + spawn_height + y_offset` 生成物理下落初始位置。
+   对不可碰撞模板直接以 `surface_y + y_offset` 生成最终位置，避免被重力带到承载面下方。
 4) 执行物体间最小距离约束。
 5) 若 habitat-sim 可用：
    - 通过模板实例化刚体
@@ -339,6 +340,44 @@ def _load_point_cloud_file(path: Path) -> np.ndarray:
     return np.zeros((0, 3), dtype=np.float32)
 
 
+def _template_collidable_from_config(objects_dir: str, model_id: str) -> Optional[bool]:
+    """Read is_collidable from a local object config when available."""
+    root = Path(objects_dir).expanduser()
+    raw = str(model_id).strip()
+    if not raw:
+        return None
+
+    names = [raw]
+    if raw.endswith(".object_config.json"):
+        names.append(raw.replace(".object_config.json", ""))
+    else:
+        names.append(f"{raw}.object_config.json")
+    if not raw.endswith("_4k") and not raw.endswith("_4k.object_config.json"):
+        names.extend([f"{raw}_4k", f"{raw}_4k.object_config.json"])
+
+    candidates: List[Path] = []
+    for name in names:
+        p = Path(name)
+        if p.suffix == ".json":
+            candidates.append(root / p.name)
+        else:
+            candidates.append(root / f"{p.name}.object_config.json")
+
+    seen = set()
+    for path in candidates:
+        key = str(path)
+        if key in seen or not path.is_file():
+            continue
+        seen.add(key)
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if isinstance(payload, dict) and "is_collidable" in payload:
+            return bool(payload.get("is_collidable"))
+    return None
+
+
 def _load_surface_points(surface_item: Dict[str, Any], base_dir: Optional[Path] = None) -> List[List[float]]:
     """
     Load surface points from `top_surface.point_cloud_file`.
@@ -438,7 +477,7 @@ def place_objects_on_instances(
 
     放置循环：
     1) 取一个候选表面点
-    2) 以 `point_y + spawn_height` 生成初始位置
+    2) 以 `point_y + y_offset` 生成目标位置；仅可碰撞模板额外上抬 `spawn_height` 后执行物理稳定
     3) 执行最小距离约束
     4) 按需执行 habitat-sim 接触检测
     5) 首个合法候选即接受，否则记为失败
@@ -509,20 +548,28 @@ def place_objects_on_instances(
 
         profile = _get_profile(model_id)
         radius = float(profile.get("radius", 0.2))
+        y_offset = max(float(profile.get("y_offset", 0.05)), 0.0)
+        template_collidable = _template_collidable_from_config(objects_dir, model_id)
+        use_physics_settle = template_collidable is not False and int(settle_steps) > 0
         placed = False
         failure_reason = "no_valid_candidate"
         for pt in candidates:
-            spawn_pos = [
+            target_pos = [
                 _safe_float(pt[0]),
-                _safe_float(pt[1]) + float(spawn_height),
+                _safe_float(pt[1]) + y_offset,
                 _safe_float(pt[2]),
             ]
-            if not _distance_ok(spawn_pos, radius, placed_internal, min_distance=min_distance):
+            spawn_pos = [
+                target_pos[0],
+                target_pos[1] + (float(spawn_height) if use_physics_settle else 0.0),
+                target_pos[2],
+            ]
+            if not _distance_ok(target_pos, radius, placed_internal, min_distance=min_distance):
                 failure_reason = "min_distance_rejected"
                 continue
 
             yaw = float(rng.uniform(0.0, 360.0))
-            final_pos = list(spawn_pos)
+            final_pos = list(target_pos)
             sim_object_id = None
             sim_handle = None
 
@@ -539,9 +586,12 @@ def place_objects_on_instances(
                     sim_object_id = int(getattr(obj, "object_id", -1))
                     sim_handle = getattr(obj, "handle", None)
                     obj.translation = np.array(spawn_pos, dtype=np.float32)
-                    if hasattr(obj, "motion_type") and hasattr(habitat_sim, "physics"):
+                    if use_physics_settle and hasattr(obj, "motion_type") and hasattr(habitat_sim, "physics"):
                         obj.motion_type = habitat_sim.physics.MotionType.DYNAMIC
-                    _step_physics(sim, steps=settle_steps)
+                    elif hasattr(obj, "motion_type") and hasattr(habitat_sim, "physics"):
+                        obj.motion_type = habitat_sim.physics.MotionType.KINEMATIC
+                    if use_physics_settle:
+                        _step_physics(sim, steps=settle_steps)
                     pos = getattr(obj, "translation", np.array(spawn_pos, dtype=np.float32))
                     final_pos = [round(float(pos[0]), 4), round(float(pos[1]), 4), round(float(pos[2]), 4)]
                     existing_ids = [x.get("_sim_object_id") for x in placed_internal if x.get("_sim_object_id") is not None]
@@ -569,6 +619,9 @@ def place_objects_on_instances(
                 "sampled_region_id": int(room_id) if room_id is not None else -1,
                 "target_instance_id": int(target_instance_id) if target_instance_id is not None else -1,
                 "source": "assigned_instance_surface",
+                "placement_y_offset": round(float(y_offset), 4),
+                "template_collidable": template_collidable,
+                "physics_settle": bool(use_physics_settle),
             }
             placed_layout_objects.append(layout_obj)
             placed_internal.append(

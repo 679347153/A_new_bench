@@ -11,6 +11,7 @@
   - `query_room_receptacle_objects.py`
   - `assign_objects_to_receptacle_instances.py`
   - `place_objects_on_instances.py`
+  - `visualize_placed_layout.py`
   - `visualize_instance_pointcloud_viser.py`
   - `log_filter.py`
 
@@ -25,6 +26,7 @@
         ├── query_room_receptacle_objects.py 提取可放置 instance 上表面
         ├── assign_objects_to_receptacle_instances.py 物体到 instance 分配
         ├── place_objects_on_instances.py Habitat-Sim 碰撞检查放置
+        ├── visualize_placed_layout.py 加载最终布局检查放置效果/高度偏移
         └── visualize_instance_pointcloud_viser.py 可视化核验（调试/对齐）
 ```
 
@@ -130,12 +132,33 @@
 ### 3.8 `place_objects_on_instances.py`：自动放置与碰撞检查
 已实现能力：
 1. 根据分配结果在目标 `top_surface.point_cloud_file`（PLY）上采样落点（兼容旧版 `top_surface.points`）。
-2. 使用 `spawn_height` 上抬策略（默认 `0.3m`）。
+2. 使用 `object profile y_offset` 对齐模型原点与承载面；仅当模板可碰撞时再使用 `spawn_height` 执行物理下落稳定。
 3. 执行最小距离约束 `max(min_distance, radius_i + radius_j)`。
-4. 启用 Habitat-Sim 物理步进与接触碰撞检测。
-5. 输出 `layout + auto_placement_stats + failed_objects`。
+4. 对 `is_collidable=false` 的物体模板使用 KINEMATIC 直接放置，避免 DYNAMIC 重力步进把物体带到承载面下方。
+5. 对可碰撞模板启用 Habitat-Sim 物理步进与接触碰撞检测。
+6. 输出 `layout + auto_placement_stats + failed_objects`，每个成功放置物体记录 `placement_y_offset / template_collidable / physics_settle` 便于后续排查高度问题。
 
-### 3.9 `visualize_instance_pointcloud_viser.py`：viser 可视化核验
+### 3.9 `visualize_placed_layout.py`：最终布局可视化与高度调试
+已实现能力：
+1. 读取 `assign_objects_to_receptacle_instances.py` / `place_objects_on_instances.py` 生成的 layout JSON。
+2. 使用 Habitat-Sim 加载 HM3D 场景与 `objects` 目录中的物体模板，复现已放置状态。
+3. 支持交互式浏览：相机移动、切换物体、聚焦当前物体、保存截图。
+4. 支持 `--headless` 保存总览与物体聚焦截图，用于无 GUI 环境快速验收。
+5. 支持 `--debug-offset` 高度调试模式：
+   - `U/O` 对当前选中物体执行 Y 方向上/下微调。
+   - HUD 显示当前物体的实时 `debug_offset`。
+   - `M` 保存调整后的 layout；默认输出到原文件同目录的 `*_offset_debug.json`，也可用 `--output-layout` 指定。
+6. 用途：当物体看起来位于承载面下方/上方时，直接在真实场景渲染中估计需要补偿的高度偏移，再把调试结果回写到 layout 供后续复查。
+
+执行示例：
+```bash
+python visualize_placed_layout.py \
+  results/layouts/00808-y9hTuugGdiq/00808-y9hTuugGdiq_assigned_instance_layout.json \
+  --scene 00808-y9hTuugGdiq \
+  --debug-offset --offset-step 0.02
+```
+
+### 3.10 `visualize_instance_pointcloud_viser.py`：viser 可视化核验
 已实现能力：
 1. 可视化 `extract_room_instances.py` 导出的 instance 点云与包围盒。
 2. 可叠加场景 mesh，检查点云与场景对齐情况。
@@ -146,7 +169,7 @@
 4. 支持从 `.ply/.xyz` 或 JSON 内嵌点云读取。
 5. 用于自动分支调试、对齐校验与可视化验收。
 
-### 3.10 `log_filter.py`：终端日志噪声过滤
+### 3.11 `log_filter.py`：终端日志噪声过滤
 已实现能力：
 1. 过滤 Habitat/HM3D 高频噪声告警（如 `Metadata ... No Glob path result found ... unable to load templates ...`）。
 2. 支持“管道模式”：从 stdin 读取日志并输出清洗结果。
@@ -182,6 +205,7 @@
    - 承载面结果：`results/receptacle_queries/<scene>/*_receptacle_surfaces_*.json`
    - 分配计划：`results/object_instance_assignments/<scene>/*_object_instance_plan.json`
    - 自动布局：`results/layouts/<scene>/*assigned_instance_layout*.json`
+   - 可视化高度调试布局：`results/layouts/<scene>/*_offset_debug.json`
 
 ### 4.3 终端输出治理产物
 1. 日志清洗脚本：`log_filter.py`
@@ -203,10 +227,12 @@
 ## 6. 与本次需求对照
 1. 技术报告新增 `extract_room_instances.py`：已完成。
 2. 技术报告新增 `visualize_instance_pointcloud_viser.py`：已完成。
-3. 全链路概览改为树状结构：已完成。
-4. 概览前段统一为“场景信息导出 -> Qwen 房间推荐 -> 概率采样与自动初放”：已完成。
-5. 后段改为手动微调模式与自动放置模式两分支，并标注打通状态：已完成。
+3. 技术报告新增 `visualize_placed_layout.py`：已完成。
+4. 全链路概览改为树状结构：已完成。
+5. 概览前段统一为“场景信息导出 -> Qwen 房间推荐 -> 概率采样与自动初放”：已完成。
+6. 后段改为手动微调模式与自动放置模式两分支，并标注打通状态：已完成。
+7. 自动放置后的高度偏移调试流程：已完成。
 
 ## 7. 结论
 - 报告现已与你定义的“树状主干+双分支”方案对齐。
-- 自动分支的调试与验收链（`extract_room_instances.py` + `visualize_instance_pointcloud_viser.py`）已在报告中补齐。
+- 自动分支的调试与验收链（`extract_room_instances.py` + `visualize_instance_pointcloud_viser.py` + `visualize_placed_layout.py`）已在报告中补齐。
