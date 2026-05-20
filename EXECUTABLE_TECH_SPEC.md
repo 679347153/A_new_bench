@@ -11,6 +11,7 @@
   - `query_room_receptacle_objects.py`
   - `assign_objects_to_receptacle_instances.py`
   - `place_objects_on_instances.py`
+  - `batch_generate_layouts.py`
   - `visualize_placed_layout.py`
   - `visualize_instance_pointcloud_viser.py`
   - `log_filter.py`
@@ -26,6 +27,7 @@
         ├── query_room_receptacle_objects.py 提取可放置 instance 上表面
         ├── assign_objects_to_receptacle_instances.py 物体到 instance 分配
         ├── place_objects_on_instances.py Habitat-Sim 碰撞检查放置
+        ├── batch_generate_layouts.py 复用缓存批量生成多个最终布局
         ├── visualize_placed_layout.py 加载最终布局检查放置效果/高度偏移
         └── visualize_instance_pointcloud_viser.py 可视化核验（调试/对齐）
 ```
@@ -138,7 +140,42 @@
 5. 对可碰撞模板启用 Habitat-Sim 物理步进与接触碰撞检测。
 6. 输出 `layout + auto_placement_stats + failed_objects`，每个成功放置物体记录 `placement_y_offset / template_collidable / physics_settle` 便于后续排查高度问题。
 
-### 3.9 `visualize_placed_layout.py`：最终布局可视化与高度调试
+### 3.9 `batch_generate_layouts.py`：批量最终布局生成
+已实现能力：
+1. 面向同一场景与同一批物体图片，批量生成多个最终放置 layout。
+2. 复用已有链路产物：
+   - `scene_info`
+   - 每个物体的房间推荐 JSON
+   - 每个物体的房间概率文件
+   - 全场景 receptacle surfaces JSON
+3. 每个 layout 仅重新执行：
+   - 根据 `base_seed + layout_index` 设置随机种子。
+   - 调用 `sample_object_positions(..., mode="load")` 复用概率重新采样房间。
+   - 复用 `assign_objects_to_receptacle_instances.py` 中的 LLM/启发式 helper 分配目标 instance。
+   - 调用 `place_objects_on_instances(...)` 生成最终放置结果。
+4. 默认 instance assignment 使用 LLM，并在整个 batch 内复用一个 SSH tunnel/client；可用 `--disable-assignment-llm` 切换启发式模式。
+5. 支持 `--disable-surface-llm`、`--regenerate-room-queries`、`--regenerate-probabilities`、`--regenerate-surfaces` 控制缓存复用与重算。
+6. 输出批次目录 `results/layouts/<scene>/batch_<YYYYmmdd_HHMMSS>/`，包含多个 `layout_<idx>_seed_<seed>.json` 与 `manifest.json`。
+7. `manifest.json` 汇总记录缓存路径、每个 layout 的 seed、输出路径、采样数量、分配数量、放置成功/失败统计与失败原因摘要。
+
+执行示例：
+```bash
+python batch_generate_layouts.py \
+  --scene 00808-y9hTuugGdiq \
+  --num-layouts 10 \
+  --ssh-key /home/yuhang/Desktop/zw_B200.txt
+```
+
+启发式快速验证：
+```bash
+python batch_generate_layouts.py \
+  --scene 00808-y9hTuugGdiq \
+  --num-layouts 2 \
+  --disable-assignment-llm \
+  --disable-surface-llm
+```
+
+### 3.10 `visualize_placed_layout.py`：最终布局可视化与高度调试
 已实现能力：
 1. 读取 `assign_objects_to_receptacle_instances.py` / `place_objects_on_instances.py` 生成的 layout JSON。
 2. 使用 Habitat-Sim 加载 HM3D 场景与 `objects` 目录中的物体模板，复现已放置状态。
@@ -158,7 +195,7 @@ python visualize_placed_layout.py \
   --debug-offset --offset-step 0.02
 ```
 
-### 3.10 `visualize_instance_pointcloud_viser.py`：viser 可视化核验
+### 3.11 `visualize_instance_pointcloud_viser.py`：viser 可视化核验
 已实现能力：
 1. 可视化 `extract_room_instances.py` 导出的 instance 点云与包围盒。
 2. 可叠加场景 mesh，检查点云与场景对齐情况。
@@ -169,7 +206,7 @@ python visualize_placed_layout.py \
 4. 支持从 `.ply/.xyz` 或 JSON 内嵌点云读取。
 5. 用于自动分支调试、对齐校验与可视化验收。
 
-### 3.11 `log_filter.py`：终端日志噪声过滤
+### 3.12 `log_filter.py`：终端日志噪声过滤
 已实现能力：
 1. 过滤 Habitat/HM3D 高频噪声告警（如 `Metadata ... No Glob path result found ... unable to load templates ...`）。
 2. 支持“管道模式”：从 stdin 读取日志并输出清洗结果。
@@ -205,6 +242,8 @@ python visualize_placed_layout.py \
    - 承载面结果：`results/receptacle_queries/<scene>/*_receptacle_surfaces_*.json`
    - 分配计划：`results/object_instance_assignments/<scene>/*_object_instance_plan.json`
    - 自动布局：`results/layouts/<scene>/*assigned_instance_layout*.json`
+   - 批量布局：`results/layouts/<scene>/batch_<YYYYmmdd_HHMMSS>/layout_*_seed_*.json`
+   - 批量索引：`results/layouts/<scene>/batch_<YYYYmmdd_HHMMSS>/manifest.json`
    - 可视化高度调试布局：`results/layouts/<scene>/*_offset_debug.json`
 
 ### 4.3 终端输出治理产物
@@ -228,11 +267,13 @@ python visualize_placed_layout.py \
 1. 技术报告新增 `extract_room_instances.py`：已完成。
 2. 技术报告新增 `visualize_instance_pointcloud_viser.py`：已完成。
 3. 技术报告新增 `visualize_placed_layout.py`：已完成。
-4. 全链路概览改为树状结构：已完成。
-5. 概览前段统一为“场景信息导出 -> Qwen 房间推荐 -> 概率采样与自动初放”：已完成。
-6. 后段改为手动微调模式与自动放置模式两分支，并标注打通状态：已完成。
-7. 自动放置后的高度偏移调试流程：已完成。
+4. 技术报告新增 `batch_generate_layouts.py`：已完成。
+5. 全链路概览改为树状结构：已完成。
+6. 概览前段统一为“场景信息导出 -> Qwen 房间推荐 -> 概率采样与自动初放”：已完成。
+7. 后段改为手动微调模式与自动放置模式两分支，并标注打通状态：已完成。
+8. 自动放置后的高度偏移调试流程：已完成。
+9. 同场景同物体批量生成最终 layout 流程：已完成。
 
 ## 7. 结论
 - 报告现已与你定义的“树状主干+双分支”方案对齐。
-- 自动分支的调试与验收链（`extract_room_instances.py` + `visualize_instance_pointcloud_viser.py` + `visualize_placed_layout.py`）已在报告中补齐。
+- 自动分支的调试、批量生成与验收链（`extract_room_instances.py` + `batch_generate_layouts.py` + `visualize_instance_pointcloud_viser.py` + `visualize_placed_layout.py`）已在报告中补齐。

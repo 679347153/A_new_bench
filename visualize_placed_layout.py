@@ -30,6 +30,15 @@ python visualize_placed_layout.py \
   --debug-offset \
   --offset-step 0.02
 
+默认情况下，所有物体加载后会先应用 `--initial-y-offset 2.5`，也就是
+整体上移 2.5m。这个默认值用于快速验证“当前 layout 是否整体偏低”。
+如果需要严格复现原始 layout，请显式传入：
+
+python visualize_placed_layout.py \
+  results/layouts/00808-y9hTuugGdiq/00808-y9hTuugGdiq_assigned_instance_layout.json \
+  --scene 00808-y9hTuugGdiq \
+  --initial-y-offset 0
+
 推荐流程：
 1. 用 `[/]` 或 `9/0` 切到异常物体。
 2. 用 `F` 聚焦当前物体。
@@ -115,6 +124,7 @@ CAMERA_HEIGHT = 1.35
 CAMERA_MOVE_SPEED = 0.18
 ROTATE_SPEED = 2.5
 PITCH_LIMIT = 85.0
+DEFAULT_INITIAL_Y_OFFSET = 2.5
 
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
@@ -307,13 +317,18 @@ def _resolve_template_handle(template_mgr: Any, model_id: str) -> Optional[str]:
     return None
 
 
-def _load_layout_objects(sim: habitat_sim.Simulator, objects: Sequence[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], int]:
+def _load_layout_objects(
+    sim: habitat_sim.Simulator,
+    objects: Sequence[Dict[str, Any]],
+    initial_y_offset: float = DEFAULT_INITIAL_Y_OFFSET,
+) -> Tuple[List[Dict[str, Any]], int]:
     """
     将 layout JSON 中的 objects 加载为 Habitat-Sim 刚体。
 
     这里故意不做任何“重新放置”逻辑，只按 JSON 的 position/rotation 复现结果：
     - `position/base_position`：layout 原始坐标，作为调试偏移的零点。
-    - `debug_offset`：运行时手动调试的累计偏移，初始为 0。
+    - `debug_offset`：运行时手动调试的累计偏移，初始 Y 值来自
+      `--initial-y-offset`，当前默认是 +2.5m。
     - `index`：原始 objects 数组下标，保存调整结果时用它回写对应条目。
 
     物体统一设置为 KINEMATIC，是为了让可视化器成为稳定的检查工具；
@@ -342,7 +357,8 @@ def _load_layout_objects(sim: habitat_sim.Simulator, objects: Sequence[Dict[str,
             if obj is None:
                 raise RuntimeError("add_object_by_template_handle returned None")
             yaw = _extract_yaw_deg(cfg.get("rotation"))
-            obj.translation = np.asarray(pos, dtype=np.float32)
+            debug_offset = [0.0, float(initial_y_offset), 0.0]
+            obj.translation = np.asarray(pos, dtype=np.float32) + np.asarray(debug_offset, dtype=np.float32)
             obj.rotation = _yaw_to_magnum_quat(yaw)
             if hasattr(obj, "motion_type") and hasattr(habitat_sim, "physics"):
                 obj.motion_type = habitat_sim.physics.MotionType.KINEMATIC
@@ -355,7 +371,7 @@ def _load_layout_objects(sim: habitat_sim.Simulator, objects: Sequence[Dict[str,
                     "name": str(cfg.get("name", model_id)),
                     "position": pos,
                     "base_position": list(pos),
-                    "debug_offset": [0.0, 0.0, 0.0],
+                    "debug_offset": debug_offset,
                     "target_instance_id": cfg.get("target_instance_id", "?"),
                     "sampled_region_id": cfg.get("sampled_region_id", "?"),
                 }
@@ -969,6 +985,10 @@ def parse_args() -> argparse.Namespace:
             "    python visualize_placed_layout.py \\\n"
             "      results/layouts/00808-y9hTuugGdiq/00808-y9hTuugGdiq_assigned_instance_layout.json \\\n"
             "      --scene 00808-y9hTuugGdiq --debug-offset --offset-step 0.02\n\n"
+            "  Strictly reproduce original layout without the default +2.5m lift:\n"
+            "    python visualize_placed_layout.py \\\n"
+            "      results/layouts/00808-y9hTuugGdiq/00808-y9hTuugGdiq_assigned_instance_layout.json \\\n"
+            "      --scene 00808-y9hTuugGdiq --initial-y-offset 0\n\n"
             "  Manual height debugging with explicit output:\n"
             "    python visualize_placed_layout.py \\\n"
             "      results/layouts/00808-y9hTuugGdiq/00808-y9hTuugGdiq_assigned_instance_layout.json \\\n"
@@ -1012,6 +1032,12 @@ def parse_args() -> argparse.Namespace:
         help="debug-offset 每次调整的高度步长，单位米；0.02 表示每次 2cm",
     )
     parser.add_argument(
+        "--initial-y-offset",
+        type=float,
+        default=DEFAULT_INITIAL_Y_OFFSET,
+        help="所有物体加载时默认应用的 Y 偏移，单位米；默认 2.5，设为 0 可严格复现原始 layout",
+    )
+    parser.add_argument(
         "--output-layout",
         default=None,
         help="debug-offset 保存路径；不填则写到原 layout 同目录的 *_offset_debug.json",
@@ -1042,10 +1068,11 @@ def main() -> int:
     objects = _layout_objects(payload)
     sim = _make_simulator(scene_name, Path(args.data_dir), int(args.width), int(args.height))
     _load_templates(sim, Path(args.objects_dir))
-    loaded_items, skipped = _load_layout_objects(sim, objects)
+    loaded_items, skipped = _load_layout_objects(sim, objects, initial_y_offset=float(args.initial_y_offset))
 
     print(f"[OK] Loaded scene: {scene_name}")
     print(f"[OK] Loaded objects: {len(loaded_items)}/{len(objects)} skipped={skipped}")
+    print(f"[Info] Initial visual y_offset applied to all loaded objects: {float(args.initial_y_offset):+.4f}")
     stats = payload.get("auto_placement_stats", {})
     if isinstance(stats, dict):
         print(
