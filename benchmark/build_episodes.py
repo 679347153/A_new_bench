@@ -43,7 +43,26 @@ def _object_name(obj: Dict[str, Any]) -> str:
 
 
 def _object_id(obj: Dict[str, Any]) -> str:
-    return str(obj.get("id") or obj.get("model_id") or obj.get("name") or "object")
+    raw_id = str(obj.get("id", "")).strip()
+    model_id = str(obj.get("model_id", "")).strip()
+    name = str(obj.get("name", "")).strip()
+    base = model_id or name or raw_id or "object"
+    if raw_id and raw_id != base:
+        return f"{base}#{raw_id}"
+    return base
+
+
+def _unique_object_ids(objects: Sequence[Dict[str, Any]]) -> List[str]:
+    counts: Dict[str, int] = {}
+    results: List[str] = []
+    for obj in objects:
+        base = _object_id(obj)
+        counts[base] = counts.get(base, 0) + 1
+        if counts[base] == 1:
+            results.append(base)
+        else:
+            results.append(f"{base}@{counts[base] - 1}")
+    return results
 
 
 def _object_position(obj: Dict[str, Any]) -> Pose:
@@ -141,7 +160,9 @@ def _make_subtask(
         image_path=image_path,
         success_radius=success_radius,
         metadata={
+            "layout_object_id": obj.get("id"),
             "model_id": obj.get("model_id", ""),
+            "name": obj.get("name", ""),
             "sampled_region_id": obj.get("sampled_region_id"),
             "target_instance_id": obj.get("target_instance_id"),
             "layout_object": obj,
@@ -255,7 +276,7 @@ def _make_episode(
             layout_id=layout_id,
             layout_path=str(layout_path),
             time_index=state_index,
-            movable_objects=[_object_id(obj) for obj in objects],
+            movable_objects=_unique_object_ids(objects),
         ),
         seed=rng.randrange(0, 2**31),
         start_pose=Pose(0.0, 0.0, 0.0, 0.0),
