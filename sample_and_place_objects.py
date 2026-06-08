@@ -39,6 +39,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 
 from hm3d_paths import list_available_scenes, resolve_scene_paths
+from object_profiles import DEFAULT_OBJECT_PROFILE, get_object_profile
 
 try:
     import numpy as np
@@ -54,24 +55,6 @@ DEFAULT_LAYOUTS_DIR = "./results/layouts"
 DEFAULT_IMAGES_DIR = "./objects_images"
 
 AVAILABLE_SCENES = list_available_scenes(require_semantic=True)
-
-PROFILE_KEYWORDS: Dict[str, Dict[str, float]] = {
-    "table": {"radius": 0.60, "y_offset": 0.05},
-    "desk": {"radius": 0.58, "y_offset": 0.05},
-    "sofa": {"radius": 0.70, "y_offset": 0.05},
-    "chair": {"radius": 0.40, "y_offset": 0.05},
-    "bed": {"radius": 0.80, "y_offset": 0.05},
-    "cabinet": {"radius": 0.55, "y_offset": 0.05},
-    "shelf": {"radius": 0.50, "y_offset": 0.05},
-    "statue": {"radius": 0.42, "y_offset": 0.08},
-    "vase": {"radius": 0.28, "y_offset": 0.10},
-    "bottle": {"radius": 0.24, "y_offset": 0.08},
-    "clock": {"radius": 0.20, "y_offset": 0.10},
-    "camera": {"radius": 0.20, "y_offset": 0.08},
-}
-
-DEFAULT_OBJECT_PROFILE = {"radius": 0.35, "y_offset": 0.05}
-
 
 # ===== 模板映射 =====
 
@@ -112,11 +95,11 @@ def resolve_model_id_for_template(object_name: str, template_index: Dict[str, st
 
 def infer_object_profile(model_id: str) -> Dict[str, float]:
     """Infer placement profile from model keywords."""
-    key = (model_id or "").lower()
-    for keyword, profile in PROFILE_KEYWORDS.items():
-        if keyword in key:
-            return dict(profile)
-    return dict(DEFAULT_OBJECT_PROFILE)
+    profile = get_object_profile(model_id)
+    return {
+        "radius": float(profile.get("radius", DEFAULT_OBJECT_PROFILE["radius"])),
+        "y_offset": float(profile.get("y_offset", DEFAULT_OBJECT_PROFILE["y_offset"])),
+    }
 
 
 def load_sd_ovon_layout(

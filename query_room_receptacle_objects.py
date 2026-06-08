@@ -78,6 +78,12 @@ from extract_room_instances import (
     extract_room_instances,
     get_instance_point_cloud,
 )
+from hm3d_paths import resolve_scene_paths
+
+try:
+    import habitat_sim  # type: ignore[import-not-found]
+except Exception:
+    habitat_sim = None  # type: ignore[assignment]
 
 try:
     from openai import OpenAI
@@ -94,6 +100,7 @@ DEFAULT_SSH_PORT = 31023
 DEFAULT_SSH_USER = "root"
 DEFAULT_SSH_KEY = "/home/yuhang/Desktop/zw_B200.txt"
 SYNTHETIC_FLOOR_ID_BASE = 900_000_000
+_NAVMESH_SAMPLE_CACHE: Dict[Tuple[str, str], List[List[float]]] = {}
 
 FLOOR_CATEGORY_KEYWORDS = {
     "floor",
@@ -515,7 +522,94 @@ def _room_floor_instance_id(room_id: int) -> int:
     return SYNTHETIC_FLOOR_ID_BASE + max(0, int(room_id) + 10_000)
 
 
-def _build_synthetic_room_floor(room: Dict[str, Any], room_id: int, instances: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+def _make_navmesh_sim(scene_name: str, data_dir: Path) -> Optional[Any]:
+    if habitat_sim is None:
+        return None
+    scene_paths = resolve_scene_paths(scene_name, root=Path(data_dir))
+    if scene_paths is None or not scene_paths.navmesh.is_file():
+        return None
+    try:
+        sim_cfg = habitat_sim.SimulatorConfiguration()
+        sim_cfg.scene_dataset_config_file = str(scene_paths.dataset_config)
+        sim_cfg.scene_id = str(scene_paths.stage_glb)
+        sim_cfg.enable_physics = False
+        agent_cfg = habitat_sim.agent.AgentConfiguration()
+        sim = habitat_sim.Simulator(habitat_sim.Configuration(sim_cfg, [agent_cfg]))
+        try:
+            sim.pathfinder.load_nav_mesh(str(scene_paths.navmesh))
+        except Exception:
+            pass
+        return sim
+    except Exception:
+        return None
+
+
+def _scene_navmesh_samples(scene_name: str, data_dir: Path, sample_count: int = 6000) -> List[List[float]]:
+    cache_key = (str(scene_name), str(Path(data_dir).expanduser().resolve()))
+    cached = _NAVMESH_SAMPLE_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    samples: List[List[float]] = []
+    sim = _make_navmesh_sim(scene_name, Path(data_dir))
+    if sim is None:
+        _NAVMESH_SAMPLE_CACHE[cache_key] = samples
+        return samples
+    try:
+        pathfinder = getattr(sim, "pathfinder", None)
+        if pathfinder is None or not getattr(pathfinder, "is_loaded", True):
+            _NAVMESH_SAMPLE_CACHE[cache_key] = samples
+            return samples
+        for _ in range(max(100, int(sample_count))):
+            try:
+                point = pathfinder.get_random_navigable_point()
+            except Exception:
+                continue
+            if point is None or len(point) < 3:
+                continue
+            samples.append([float(point[0]), float(point[1]), float(point[2])])
+    finally:
+        try:
+            sim.close()
+        except Exception:
+            pass
+    _NAVMESH_SAMPLE_CACHE[cache_key] = samples
+    return samples
+
+
+def _navmesh_points_in_room(
+    scene_name: str,
+    data_dir: Path,
+    room_min: List[float],
+    room_max: List[float],
+    max_points: int = 512,
+) -> List[List[float]]:
+    samples = _scene_navmesh_samples(scene_name, data_dir)
+    if not samples:
+        return []
+    x0, y0, z0 = (_safe_float(room_min[0]), _safe_float(room_min[1]), _safe_float(room_min[2]))
+    x1, y1, z1 = (_safe_float(room_max[0]), _safe_float(room_max[1]), _safe_float(room_max[2]))
+    lo_x, hi_x = min(x0, x1), max(x0, x1)
+    lo_y, hi_y = min(y0, y1) - 0.35, max(y0, y1) + 0.35
+    lo_z, hi_z = min(z0, z1), max(z0, z1)
+    inside = [
+        p
+        for p in samples
+        if lo_x <= float(p[0]) <= hi_x and lo_y <= float(p[1]) <= hi_y and lo_z <= float(p[2]) <= hi_z
+    ]
+    if len(inside) > max_points:
+        step = max(1, len(inside) // max_points)
+        inside = inside[::step][:max_points]
+    return inside
+
+
+def _build_synthetic_room_floor(
+    room: Dict[str, Any],
+    room_id: int,
+    instances: List[Dict[str, Any]],
+    scene_name: str = "",
+    data_dir: Path = DEFAULT_DATA_DIR,
+) -> Optional[Dict[str, Any]]:
     """Create a floor support surface from room bounds when no floor instance exists."""
     if any(_is_floor_like_category(ins.get("category", "")) for ins in instances):
         return None
@@ -533,12 +627,32 @@ def _build_synthetic_room_floor(room: Dict[str, Any], room_id: int, instances: L
     if sx * sz < DEFAULT_CANDIDATE_MIN_TOP_AREA_EST:
         return None
 
+    bbox_source = "room_bounding_box_floor"
+    surface_points: List[List[float]] = []
+    if scene_name:
+        nav_points = _navmesh_points_in_room(str(scene_name), Path(data_dir), min_pt, max_pt)
+        if len(nav_points) >= 24:
+            pts = np.asarray(nav_points, dtype=np.float64)
+            x0 = float(np.min(pts[:, 0]))
+            x1 = float(np.max(pts[:, 0]))
+            z0 = float(np.min(pts[:, 2]))
+            z1 = float(np.max(pts[:, 2]))
+            y0 = float(np.median(pts[:, 1]))
+            sx = max(0.0, x1 - x0)
+            sz = max(0.0, z1 - z0)
+            bbox_source = "navmesh_floor_samples"
+            surface_points = [[round(float(p[0]), 4), round(float(y0), 4), round(float(p[2]), 4)] for p in nav_points]
+            if sx * sz < DEFAULT_CANDIDATE_MIN_TOP_AREA_EST:
+                return None
+
     return {
         "id": _room_floor_instance_id(room_id),
         "category": "room_floor",
         "region_id": int(room_id),
         "synthetic_type": "room_floor",
-        "bbox_source": "room_bounding_box_floor",
+        "bbox_source": bbox_source,
+        "synthetic_surface_point_count": len(surface_points),
+        "synthetic_surface_points": surface_points,
         "aabb": {
             "min": [round(x0, 4), round(y0, 4), round(z0, 4)],
             "max": [round(x1, 4), round(y0, 4), round(z1, 4)],
@@ -838,6 +952,25 @@ def _estimate_surface_normal(points: np.ndarray) -> List[float]:
         return [0.0, 1.0, 0.0]
 
 
+def _refine_top_band_to_horizontal_patch(points: np.ndarray, min_points: int) -> Tuple[np.ndarray, str]:
+    """
+    Prefer a thin horizontal patch inside the top-band points.
+
+    Top-band extraction can include chair backs, shelf lips, or decorative rims.
+    A thin median-Y filter keeps the flattest part when enough points remain.
+    """
+    if points.ndim != 2 or points.shape[1] < 3 or len(points) < max(8, int(min_points)):
+        return points, "point_cloud_top_band"
+    y = points[:, 1]
+    y_span = max(float(np.max(y) - np.min(y)), 1e-6)
+    median_y = float(np.median(y))
+    tolerance = max(0.012, min(0.04, y_span * 0.25))
+    refined = points[np.abs(y - median_y) <= tolerance]
+    if len(refined) >= max(8, int(min_points)):
+        return np.asarray(refined, dtype=np.float32), "point_cloud_top_band_flat_refined"
+    return points, "point_cloud_top_band"
+
+
 def _extract_top_surface(
     raw_points: List[List[float]],
     instance: Dict[str, Any],
@@ -873,7 +1006,7 @@ def _extract_top_surface(
             source = "aabb_top_fallback"
         else:
             top = np.round(top, 4)
-            source = "point_cloud_top_band"
+            top, source = _refine_top_band_to_horizontal_patch(np.asarray(top, dtype=np.float32), min_points)
         points = np.asarray(top, dtype=np.float32)
 
     if len(points) > max(1, int(target_points)):
@@ -890,6 +1023,7 @@ def _extract_top_surface(
         "centroid": centroid,
         "bounds": {"min": bounds_min, "max": bounds_max},
         "plane_height": round(float(bounds_max[1]), 4) if len(points) else 0.0,
+        "height_std": round(float(np.std(points[:, 1])), 5) if len(points) else 0.0,
         "normal": _estimate_surface_normal(points) if len(points) else [0.0, 1.0, 0.0],
         "points": np.round(points, 4).tolist(),
     }
@@ -1102,6 +1236,8 @@ def main() -> int:
             room=room_report.get("room", {}) if isinstance(room_report, dict) else {},
             room_id=int(room_id),
             instances=candidate_instances,
+            scene_name=str(args.scene),
+            data_dir=data_dir,
         )
         if synthetic_floor is not None:
             candidate_instances.append(synthetic_floor)
@@ -1204,11 +1340,16 @@ def main() -> int:
                 continue
             point_cloud_report = {}
             if str(ins_hint.get("synthetic_type", "")) == "room_floor":
+                synthetic_points = ins_hint.get("synthetic_surface_points", [])
+                if not isinstance(synthetic_points, list):
+                    synthetic_points = []
                 point_cloud_report = {
                     "point_cloud_generation": {
                         "method": "synthetic_room_floor",
-                        "details": "sampled from room bounding box floor plane",
-                    }
+                        "details": "sampled from navmesh floor points when available, otherwise room bounding box floor plane",
+                        "bbox_source": str(ins_hint.get("bbox_source", "")),
+                    },
+                    "point_cloud": {"points": synthetic_points},
                 }
             else:
                 try:

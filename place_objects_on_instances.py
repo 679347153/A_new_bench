@@ -62,17 +62,12 @@ import numpy as np
 
 from extract_room_instances import DEFAULT_DATA_DIR
 from hm3d_paths import resolve_scene_paths
+from object_profiles import get_object_profile, surface_requirement
 
 try:
     import habitat_sim  # type: ignore[import-not-found]
 except ImportError:
     habitat_sim = None
-
-try:
-    from sample_and_place_objects import infer_object_profile
-except Exception:
-    infer_object_profile = None
-
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
     """尽力转换为 float，失败时返回确定性的默认值。"""
@@ -82,23 +77,14 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
         return default
 
 
-def _get_profile(model_id: str) -> Dict[str, float]:
+def _get_profile(model_id: str, objects_dir: str = "./objects") -> Dict[str, Any]:
     """
-    从现有项目规则中获取物体碰撞轮廓参数。
+    获取物体几何/放置 profile。
 
-    若未命中配置，则回退到保守默认值。
+    优先读取 `object_profiles.json` 手工覆盖，其次读取模板配置中的碰撞字段，
+    最后回退到关键词估计。
     """
-    if infer_object_profile is not None:
-        try:
-            profile = infer_object_profile(model_id)
-            if isinstance(profile, dict):
-                return {
-                    "radius": float(profile.get("radius", 0.2)),
-                    "y_offset": float(profile.get("y_offset", 0.05)),
-                }
-        except Exception:
-            pass
-    return {"radius": 0.2, "y_offset": 0.05}
+    return get_object_profile(model_id, objects_dir=objects_dir)
 
 
 def _resolve_template_handle(template_mgr: Any, model_id: str) -> Optional[str]:
@@ -158,6 +144,112 @@ def _remove_object_safe(rom: Any, obj: Any) -> None:
             pass
 
 
+def _vec3_to_list(value: Any) -> Optional[List[float]]:
+    if value is None:
+        return None
+    try:
+        return [float(value[0]), float(value[1]), float(value[2])]
+    except Exception:
+        pass
+    try:
+        return [float(value.x), float(value.y), float(value.z)]
+    except Exception:
+        return None
+
+
+def _bbox_min_max(bbox: Any) -> Optional[Tuple[List[float], List[float]]]:
+    if bbox is None:
+        return None
+    min_vec = None
+    max_vec = None
+    for key in ("min", "min_", "back_bottom_left"):
+        try:
+            attr = getattr(bbox, key)
+            attr = attr() if callable(attr) else attr
+            min_vec = _vec3_to_list(attr)
+            if min_vec is not None:
+                break
+        except Exception:
+            continue
+    for key in ("max", "max_", "front_top_right"):
+        try:
+            attr = getattr(bbox, key)
+            attr = attr() if callable(attr) else attr
+            max_vec = _vec3_to_list(attr)
+            if max_vec is not None:
+                break
+        except Exception:
+            continue
+    if min_vec is None or max_vec is None:
+        return None
+    if any((not np.isfinite(v)) for v in min_vec + max_vec):
+        return None
+    if min_vec[0] > max_vec[0] or min_vec[1] > max_vec[1] or min_vec[2] > max_vec[2]:
+        return None
+    return min_vec, max_vec
+
+
+def _object_bbox_min_max(obj: Any) -> Optional[Tuple[List[float], List[float]]]:
+    for attr_path in (
+        ("aabb",),
+        ("root_scene_node", "cumulative_bb"),
+        ("visual_scene_node", "cumulative_bb"),
+    ):
+        try:
+            cur = obj
+            for attr in attr_path:
+                cur = getattr(cur, attr)
+                cur = cur() if callable(cur) else cur
+            pair = _bbox_min_max(cur)
+            if pair is not None:
+                return pair
+        except Exception:
+            continue
+    return None
+
+
+def _profile_from_sim_object(obj: Any, base_profile: Dict[str, Any]) -> Dict[str, Any]:
+    pair = _object_bbox_min_max(obj)
+    if pair is None:
+        return dict(base_profile)
+    bmin, bmax = pair
+    pos = _vec3_to_list(getattr(obj, "translation", None)) or [0.0, 0.0, 0.0]
+    sx = max(0.0, float(bmax[0]) - float(bmin[0]))
+    sy = max(0.0, float(bmax[1]) - float(bmin[1]))
+    sz = max(0.0, float(bmax[2]) - float(bmin[2]))
+    if sx <= 1e-4 or sy <= 1e-4 or sz <= 1e-4:
+        return dict(base_profile)
+    out = dict(base_profile)
+    out["radius"] = round(max(float(out.get("radius", 0.2)), float(np.sqrt(sx * sx + sz * sz) * 0.5)), 4)
+    out["footprint_x"] = round(sx, 4)
+    out["footprint_z"] = round(sz, 4)
+    out["height"] = round(sy, 4)
+    out["y_offset"] = round(max(0.0, float(pos[1]) - float(bmin[1])), 4)
+    out["profile_source"] = "habitat_runtime_aabb"
+    return out
+
+
+def _runtime_template_profile(
+    rom: Any,
+    template_handle: str,
+    base_profile: Dict[str, Any],
+) -> Dict[str, Any]:
+    obj = None
+    try:
+        obj = rom.add_object_by_template_handle(template_handle)
+        if obj is None:
+            return dict(base_profile)
+        try:
+            obj.translation = np.array([0.0, 0.0, 0.0], dtype=np.float32)
+        except Exception:
+            pass
+        return _profile_from_sim_object(obj, base_profile)
+    except Exception:
+        return dict(base_profile)
+    finally:
+        _remove_object_safe(rom, obj)
+
+
 def _step_physics(sim: Any, steps: int) -> None:
     """多帧推进物理模拟，兼容不同版本 API。"""
     for _ in range(max(0, int(steps))):
@@ -210,11 +302,20 @@ def _distance_ok(
     radius: float,
     placed: Sequence[Dict[str, Any]],
     min_distance: float,
+    target_instance_id: Optional[int] = None,
+    surface_height: Optional[float] = None,
+    height_threshold: float = 0.25,
 ) -> bool:
-    """检查 XZ 平面上的两两最小距离约束。"""
+    """检查 XZ 平面上的两两最小距离约束，允许不同高度层适度放宽。"""
     x = _safe_float(pos[0])
     z = _safe_float(pos[2])
     for item in placed:
+        other_target = item.get("_target_instance_id")
+        other_height = item.get("_surface_height")
+        if target_instance_id is not None and other_target != target_instance_id:
+            if surface_height is not None and other_height is not None:
+                if abs(float(surface_height) - float(other_height)) > float(height_threshold):
+                    continue
         p = item.get("position", [0.0, 0.0, 0.0])
         px = _safe_float(p[0])
         pz = _safe_float(p[2])
@@ -264,17 +365,107 @@ def _choose_surface_item(
     return by_instance.get(target_instance_id)
 
 
-def _sample_surface_points(points: List[List[float]], max_trials: int, rng: random.Random) -> List[List[float]]:
-    """Shuffle/downsample surface points so each object tries bounded candidates."""
+def _candidate_surface_items(
+    assignment: Dict[str, Any],
+    by_room_instance: Dict[Tuple[int, int], Dict[str, Any]],
+    by_instance: Dict[int, Dict[str, Any]],
+) -> List[Tuple[int, Dict[str, Any], str]]:
+    """Return target surface followed by backup surfaces, de-duplicated."""
+    ids: List[Tuple[int, str]] = []
+    try:
+        ids.append((int(assignment.get("target_instance_id")), "target"))
+    except Exception:
+        pass
+    backup_raw = assignment.get("backup_instance_ids", [])
+    if isinstance(backup_raw, list):
+        for item in backup_raw:
+            try:
+                ids.append((int(item), "backup"))
+            except Exception:
+                continue
+
+    room_id = assignment.get("target_room_id", assignment.get("sampled_region_id", None))
+    out: List[Tuple[int, Dict[str, Any], str]] = []
+    seen = set()
+    for instance_id, source in ids:
+        if instance_id in seen:
+            continue
+        seen.add(instance_id)
+        item = None
+        if room_id is not None:
+            try:
+                item = by_room_instance.get((int(room_id), instance_id))
+            except Exception:
+                item = None
+        if item is None:
+            item = by_instance.get(instance_id)
+        if item is not None:
+            out.append((instance_id, item, source))
+    return out
+
+
+def _surface_bounds(surface_item: Dict[str, Any]) -> Optional[Tuple[List[float], List[float]]]:
+    top = surface_item.get("top_surface", {}) if isinstance(surface_item, dict) else {}
+    bounds = top.get("bounds", {}) if isinstance(top, dict) else {}
+    bmin = bounds.get("min", [0.0, 0.0, 0.0]) if isinstance(bounds, dict) else [0.0, 0.0, 0.0]
+    bmax = bounds.get("max", [0.0, 0.0, 0.0]) if isinstance(bounds, dict) else [0.0, 0.0, 0.0]
+    if not isinstance(bmin, list) or not isinstance(bmax, list) or len(bmin) < 3 or len(bmax) < 3:
+        return None
+    return bmin[:3], bmax[:3]
+
+
+def _surface_height(surface_item: Dict[str, Any]) -> float:
+    top = surface_item.get("top_surface", {}) if isinstance(surface_item, dict) else {}
+    if isinstance(top, dict):
+        return _safe_float(top.get("plane_height"), 0.0)
+    return 0.0
+
+
+def _surface_fits_profile(surface_item: Dict[str, Any], profile: Dict[str, Any]) -> Tuple[bool, str]:
+    bounds = _surface_bounds(surface_item)
+    if bounds is None:
+        return False, "invalid_surface_bounds"
+    bmin, bmax = bounds
+    span_x = max(0.0, _safe_float(bmax[0]) - _safe_float(bmin[0]))
+    span_z = max(0.0, _safe_float(bmax[2]) - _safe_float(bmin[2]))
+    area = span_x * span_z
+    req = surface_requirement(profile)
+    if area < float(req["required_area"]):
+        return False, "surface_area_smaller_than_object"
+    if span_x < float(req["required_min_span"]) or span_z < float(req["required_min_span"]):
+        return False, "surface_span_smaller_than_object"
+    return True, ""
+
+
+def _sample_surface_points(
+    points: List[List[float]],
+    max_trials: int,
+    rng: random.Random,
+    edge_margin: float = 0.0,
+) -> List[List[float]]:
+    """Downsample surface points, preferring points away from surface edges."""
     clean = [p for p in points if isinstance(p, list) and len(p) >= 3]
     if not clean:
         return []
-    if len(clean) <= max_trials:
-        rng.shuffle(clean)
-        return clean
-    idx = list(range(len(clean)))
-    rng.shuffle(idx)
-    return [clean[i] for i in idx[:max_trials]]
+    margin = max(0.0, float(edge_margin))
+    arr = np.asarray(clean, dtype=np.float32)[:, :3]
+    bmin = arr.min(axis=0)
+    bmax = arr.max(axis=0)
+    eligible: List[Tuple[float, List[float]]] = []
+    fallback: List[Tuple[float, List[float]]] = []
+    for p in clean:
+        x = _safe_float(p[0])
+        z = _safe_float(p[2])
+        edge_score = min(x - float(bmin[0]), float(bmax[0]) - x, z - float(bmin[2]), float(bmax[2]) - z)
+        row = (edge_score + rng.random() * 1e-4, p)
+        fallback.append(row)
+        if x >= float(bmin[0]) + margin and x <= float(bmax[0]) - margin and z >= float(bmin[2]) + margin and z <= float(bmax[2]) - margin:
+            eligible.append(row)
+    pool = eligible if eligible else fallback
+    pool.sort(key=lambda item: item[0], reverse=True)
+    selected = [p for _, p in pool[: max(1, int(max_trials))]]
+    rng.shuffle(selected)
+    return selected
 
 
 def _load_point_cloud_file(path: Path) -> np.ndarray:
@@ -504,9 +695,12 @@ def place_objects_on_instances(
     placed_layout_objects: List[Dict[str, Any]] = []
     placed_internal: List[Dict[str, Any]] = []
     failed_objects: List[Dict[str, Any]] = []
+    profile_diagnostics: List[Dict[str, Any]] = []
+    profile_diag_seen = set()
 
     rom = None
     template_mgr = None
+    runtime_profile_cache: Dict[str, Dict[str, Any]] = {}
     if sim is not None:
         try:
             rom = sim.get_rigid_object_manager()
@@ -521,119 +715,201 @@ def place_objects_on_instances(
         object_id = assignment.get("object_id", idx)
         target_instance_id = assignment.get("target_instance_id")
         room_id = assignment.get("target_room_id", assignment.get("sampled_region_id", -1))
-        surface_item = _choose_surface_item(assignment, by_room_instance, by_instance)
-        if surface_item is None:
+        surface_attempts = _candidate_surface_items(assignment, by_room_instance, by_instance)
+        if not surface_attempts:
             failed_objects.append(
                 {
                     "object_id": object_id,
                     "model_id": model_id,
                     "target_instance_id": target_instance_id,
                     "reason": "missing_surface_instance",
+                    "backup_instance_ids": assignment.get("backup_instance_ids", []),
                 }
             )
             continue
 
-        surface_points = _load_surface_points(surface_item, base_dir=surfaces_base_dir)
-        candidates = _sample_surface_points(surface_points, max_trials=max_trials_per_object, rng=rng)
-        if not candidates:
-            failed_objects.append(
-                {
-                    "object_id": object_id,
-                    "model_id": model_id,
-                    "target_instance_id": target_instance_id,
-                    "reason": "empty_surface_points",
-                }
-            )
-            continue
-
-        profile = _get_profile(model_id)
+        profile = _get_profile(model_id, objects_dir=objects_dir)
+        template_collidable = _template_collidable_from_config(objects_dir, model_id)
+        template_handle = None
+        if sim is not None and rom is not None and template_mgr is not None and model_id:
+            template_handle = _resolve_template_handle(template_mgr, model_id)
+            if template_handle and template_handle not in runtime_profile_cache:
+                runtime_profile_cache[template_handle] = _runtime_template_profile(rom, template_handle, profile)
+            if template_handle and template_handle in runtime_profile_cache:
+                profile = dict(runtime_profile_cache[template_handle])
         radius = float(profile.get("radius", 0.2))
         y_offset = max(float(profile.get("y_offset", 0.05)), 0.0)
-        template_collidable = _template_collidable_from_config(objects_dir, model_id)
+        edge_margin = float(surface_requirement(profile)["edge_margin"])
+        profile_source = str(profile.get("profile_source", "unknown"))
+        if profile_source.startswith("keyword:") or profile_source.startswith("default_") or profile.get("missing_template_config"):
+            diag_key = (model_id, profile_source, bool(profile.get("missing_template_config")))
+            if diag_key not in profile_diag_seen:
+                profile_diag_seen.add(diag_key)
+                profile_diagnostics.append(
+                    {
+                        "model_id": model_id,
+                        "profile_source": profile_source,
+                        "missing_template_config": bool(profile.get("missing_template_config", False)),
+                        "message": "Using estimated object profile; add object_profiles.json entry or valid template geometry for higher accuracy.",
+                    }
+                )
         use_physics_settle = template_collidable is not False and int(settle_steps) > 0
         placed = False
         failure_reason = "no_valid_candidate"
-        for pt in candidates:
-            target_pos = [
-                _safe_float(pt[0]),
-                _safe_float(pt[1]) + y_offset,
-                _safe_float(pt[2]),
-            ]
-            spawn_pos = [
-                target_pos[0],
-                target_pos[1] + (float(spawn_height) if use_physics_settle else 0.0),
-                target_pos[2],
-            ]
-            if not _distance_ok(target_pos, radius, placed_internal, min_distance=min_distance):
-                failure_reason = "min_distance_rejected"
+        placement_attempts: List[Dict[str, Any]] = []
+        chosen_instance_id = target_instance_id
+        chosen_surface_source = "target"
+
+        for candidate_instance_id, surface_item, surface_source in surface_attempts:
+            surface_height = _surface_height(surface_item)
+            surface_ok, surface_fit_reason = _surface_fits_profile(surface_item, profile)
+            if not surface_ok:
+                failure_reason = surface_fit_reason
+                placement_attempts.append(
+                    {
+                        "target_instance_id": int(candidate_instance_id),
+                        "source": surface_source,
+                        "reason": surface_fit_reason,
+                    }
+                )
                 continue
 
-            yaw = float(rng.uniform(0.0, 360.0))
-            final_pos = list(target_pos)
-            sim_object_id = None
-            sim_handle = None
+            surface_points = _load_surface_points(surface_item, base_dir=surfaces_base_dir)
+            candidates = _sample_surface_points(
+                surface_points,
+                max_trials=max_trials_per_object,
+                rng=rng,
+                edge_margin=edge_margin,
+            )
+            if not candidates:
+                failure_reason = "empty_surface_points"
+                placement_attempts.append(
+                    {
+                        "target_instance_id": int(candidate_instance_id),
+                        "source": surface_source,
+                        "reason": "empty_surface_points",
+                    }
+                )
+                continue
 
-            if sim is not None and rom is not None and template_mgr is not None and model_id:
-                template_handle = _resolve_template_handle(template_mgr, model_id)
-                if template_handle is None:
-                    failure_reason = "template_not_found"
-                    continue
-                try:
-                    obj = rom.add_object_by_template_handle(template_handle)
-                    if obj is None:
-                        failure_reason = "failed_to_add_object"
-                        continue
-                    sim_object_id = int(getattr(obj, "object_id", -1))
-                    sim_handle = getattr(obj, "handle", None)
-                    obj.translation = np.array(spawn_pos, dtype=np.float32)
-                    if use_physics_settle and hasattr(obj, "motion_type") and hasattr(habitat_sim, "physics"):
-                        obj.motion_type = habitat_sim.physics.MotionType.DYNAMIC
-                    elif hasattr(obj, "motion_type") and hasattr(habitat_sim, "physics"):
-                        obj.motion_type = habitat_sim.physics.MotionType.KINEMATIC
-                    if use_physics_settle:
-                        _step_physics(sim, steps=settle_steps)
-                    pos = getattr(obj, "translation", np.array(spawn_pos, dtype=np.float32))
-                    final_pos = [round(float(pos[0]), 4), round(float(pos[1]), 4), round(float(pos[2]), 4)]
-                    existing_ids = [x.get("_sim_object_id") for x in placed_internal if x.get("_sim_object_id") is not None]
-                    if not _distance_ok(final_pos, radius, placed_internal, min_distance=min_distance):
-                        _remove_object_safe(rom, obj)
-                        failure_reason = "min_distance_after_settle"
-                        continue
-                    if sim_object_id is not None and _contact_with_existing(sim, sim_object_id, existing_ids):
-                        _remove_object_safe(rom, obj)
-                        failure_reason = "habitat_contact_collision"
-                        continue
-                    if hasattr(obj, "motion_type") and hasattr(habitat_sim, "physics"):
-                        obj.motion_type = habitat_sim.physics.MotionType.KINEMATIC
-                except Exception:
-                    failure_reason = "habitat_sim_runtime_error"
+            for pt in candidates:
+                target_pos = [
+                    _safe_float(pt[0]),
+                    _safe_float(pt[1]) + y_offset,
+                    _safe_float(pt[2]),
+                ]
+                spawn_pos = [
+                    target_pos[0],
+                    target_pos[1] + (float(spawn_height) if use_physics_settle else 0.0),
+                    target_pos[2],
+                ]
+                if not _distance_ok(
+                    target_pos,
+                    radius,
+                    placed_internal,
+                    min_distance=min_distance,
+                    target_instance_id=int(candidate_instance_id),
+                    surface_height=surface_height,
+                ):
+                    failure_reason = "min_distance_rejected"
                     continue
 
-            placed = True
-            layout_obj = {
-                "id": int(idx),
-                "name": name,
-                "model_id": model_id,
-                "position": [round(float(final_pos[0]), 4), round(float(final_pos[1]), 4), round(float(final_pos[2]), 4)],
-                "rotation": [0.0, round(float(yaw), 4), 0.0],
-                "sampled_region_id": int(room_id) if room_id is not None else -1,
-                "target_instance_id": int(target_instance_id) if target_instance_id is not None else -1,
-                "source": "assigned_instance_surface",
-                "placement_y_offset": round(float(y_offset), 4),
-                "template_collidable": template_collidable,
-                "physics_settle": bool(use_physics_settle),
-            }
-            placed_layout_objects.append(layout_obj)
-            placed_internal.append(
+                yaw = float(rng.uniform(0.0, 360.0))
+                final_pos = list(target_pos)
+                sim_object_id = None
+                sim_handle = None
+
+                if sim is not None and rom is not None and template_mgr is not None and model_id:
+                    if template_handle is None:
+                        failure_reason = "template_not_found"
+                        continue
+                    try:
+                        obj = rom.add_object_by_template_handle(template_handle)
+                        if obj is None:
+                            failure_reason = "failed_to_add_object"
+                            continue
+                        sim_object_id = int(getattr(obj, "object_id", -1))
+                        sim_handle = getattr(obj, "handle", None)
+                        obj.translation = np.array(spawn_pos, dtype=np.float32)
+                        if use_physics_settle and hasattr(obj, "motion_type") and hasattr(habitat_sim, "physics"):
+                            obj.motion_type = habitat_sim.physics.MotionType.DYNAMIC
+                        elif hasattr(obj, "motion_type") and hasattr(habitat_sim, "physics"):
+                            obj.motion_type = habitat_sim.physics.MotionType.KINEMATIC
+                        if use_physics_settle:
+                            _step_physics(sim, steps=settle_steps)
+                        pos = getattr(obj, "translation", np.array(spawn_pos, dtype=np.float32))
+                        final_pos = [round(float(pos[0]), 4), round(float(pos[1]), 4), round(float(pos[2]), 4)]
+                        existing_ids = [x.get("_sim_object_id") for x in placed_internal if x.get("_sim_object_id") is not None]
+                        if not _distance_ok(
+                            final_pos,
+                            radius,
+                            placed_internal,
+                            min_distance=min_distance,
+                            target_instance_id=int(candidate_instance_id),
+                            surface_height=surface_height,
+                        ):
+                            _remove_object_safe(rom, obj)
+                            failure_reason = "min_distance_after_settle"
+                            continue
+                        if sim_object_id is not None and _contact_with_existing(sim, sim_object_id, existing_ids):
+                            _remove_object_safe(rom, obj)
+                            failure_reason = "habitat_contact_collision"
+                            continue
+                        if hasattr(obj, "motion_type") and hasattr(habitat_sim, "physics"):
+                            obj.motion_type = habitat_sim.physics.MotionType.KINEMATIC
+                    except Exception:
+                        failure_reason = "habitat_sim_runtime_error"
+                        continue
+
+                placed = True
+                chosen_instance_id = candidate_instance_id
+                chosen_surface_source = surface_source
+                layout_obj = {
+                    "id": int(idx),
+                    "name": name,
+                    "model_id": model_id,
+                    "position": [round(float(final_pos[0]), 4), round(float(final_pos[1]), 4), round(float(final_pos[2]), 4)],
+                    "rotation": [0.0, round(float(yaw), 4), 0.0],
+                    "sampled_region_id": int(room_id) if room_id is not None else -1,
+                    "target_instance_id": int(chosen_instance_id) if chosen_instance_id is not None else -1,
+                    "assigned_target_instance_id": int(target_instance_id) if target_instance_id is not None else -1,
+                    "placement_target_source": chosen_surface_source,
+                    "source": "assigned_instance_surface",
+                    "placement_y_offset": round(float(y_offset), 4),
+                    "placement_radius": round(float(radius), 4),
+                    "object_profile": {
+                        "profile_source": profile.get("profile_source", "unknown"),
+                        "placement_class": profile.get("placement_class", "tabletop_or_floor"),
+                        "footprint_x": round(float(profile.get("footprint_x", 0.0)), 4),
+                        "footprint_z": round(float(profile.get("footprint_z", 0.0)), 4),
+                        "height": round(float(profile.get("height", 0.0)), 4),
+                    },
+                    "template_collidable": template_collidable,
+                    "physics_settle": bool(use_physics_settle),
+                }
+                placed_layout_objects.append(layout_obj)
+                placed_internal.append(
+                    {
+                        "object_id": object_id,
+                        "position": layout_obj["position"],
+                        "_radius": radius,
+                        "_sim_object_id": sim_object_id,
+                        "_sim_handle": sim_handle,
+                        "_target_instance_id": int(chosen_instance_id),
+                        "_surface_height": surface_height,
+                    }
+                )
+                break
+
+            if placed:
+                break
+            placement_attempts.append(
                 {
-                    "object_id": object_id,
-                    "position": layout_obj["position"],
-                    "_radius": radius,
-                    "_sim_object_id": sim_object_id,
-                    "_sim_handle": sim_handle,
+                    "target_instance_id": int(candidate_instance_id),
+                    "source": surface_source,
+                    "reason": failure_reason,
                 }
             )
-            break
 
         if not placed:
             failed_objects.append(
@@ -642,6 +918,14 @@ def place_objects_on_instances(
                     "model_id": model_id,
                     "target_instance_id": target_instance_id,
                     "reason": failure_reason,
+                    "backup_instance_ids": assignment.get("backup_instance_ids", []),
+                    "placement_attempts": placement_attempts,
+                    "object_profile": {
+                        "profile_source": profile.get("profile_source", "unknown"),
+                        "placement_class": profile.get("placement_class", "tabletop_or_floor"),
+                        "radius": round(float(profile.get("radius", 0.0)), 4),
+                        "y_offset": round(float(profile.get("y_offset", 0.0)), 4),
+                    },
                 }
             )
 
@@ -674,6 +958,7 @@ def place_objects_on_instances(
             "habitat_sim_used": bool(sim is not None),
             "failed_by_reason": failed_by_reason,
             "failed_objects": failed_objects,
+            "profile_diagnostics": profile_diagnostics,
         },
     }
 
@@ -744,6 +1029,18 @@ def main() -> int:
             bool(stats.get("habitat_sim_used", False)),
         )
     )
+    profile_diags = stats.get("profile_diagnostics", [])
+    if isinstance(profile_diags, list) and profile_diags:
+        print(f"[Warning] Estimated object profiles used: {len(profile_diags)}")
+        for item in profile_diags[:8]:
+            if isinstance(item, dict):
+                print(
+                    "  [Profile] model={model} source={source} missing_template_config={missing}".format(
+                        model=item.get("model_id", "?"),
+                        source=item.get("profile_source", "?"),
+                        missing=bool(item.get("missing_template_config", False)),
+                    )
+                )
     return 0
 
 

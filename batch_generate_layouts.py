@@ -32,6 +32,8 @@ from __future__ import annotations
 - 默认生成“最终可视化 layout”，不是只生成中间采样布局。
 - 默认 instance assignment 使用 LLM；若远端模型不可用，可用
   `--disable-assignment-llm` 切换为启发式分配。
+- 默认开启一次失败驱动 placement retry：如果首轮存在放置失败，会降低最小物体间距、
+  增加候选落点尝试次数并重新放置整份 plan；只有 retry 的 placed_count 更高时才采用结果。
 
 单场景输出
 ----------
@@ -47,7 +49,8 @@ from __future__ import annotations
   manifest.json
 
 `manifest.json` 会记录本批次的 scene、seed、复用/生成的缓存路径、
-每个 layout 的输出路径、采样数量、分配数量、放置成功/失败数量和失败原因摘要。
+每个 layout 的输出路径、采样数量、分配数量、放置成功/失败数量、失败原因摘要
+以及 retry 是否生效。
 
 计划模式
 --------
@@ -159,6 +162,12 @@ from __future__ import annotations
     --regenerate-probabilities \
     --regenerate-surfaces
 
+6. 关闭失败驱动 placement retry，保留首轮放置结果：
+
+  python batch_generate_layouts.py \
+    --scene 00808-y9hTuugGdiq \
+    --disable-placement-retry
+
 注意
 ----
 - 如果概率文件已经齐全，脚本不会强制要求 room recommendation JSON 存在；
@@ -188,6 +197,7 @@ from assign_objects_to_receptacle_instances import (
     OpenAI,
     SSHTunnel,
     _build_surface_candidates_for_room,
+    _filter_surface_candidates_for_object,
     _find_image_for_object,
     _normalize_assignment_response,
     _normalize_object_id,
@@ -516,6 +526,11 @@ def _assign_objects(
             continue
 
         candidates = _build_surface_candidates_for_room(room_entry)
+        candidates, fit_debug = _filter_surface_candidates_for_object(
+            candidates,
+            model_id=model_id,
+            objects_dir=str(args.objects_dir),
+        )
         if not candidates:
             debug.append({"object_id": obj.get("id", idx), "status": "empty_candidates", "room_id": room_id})
             _progress(progress_label, idx + 1, total, "empty_candidates", enabled=not args.no_progress)
@@ -541,6 +556,7 @@ def _assign_objects(
                     image_path=image_path,
                     candidates=candidates,
                     max_tokens=int(args.max_tokens),
+                    objects_dir=str(args.objects_dir),
                 )
                 source = "llm_assignment"
                 status = "llm"
@@ -580,6 +596,7 @@ def _assign_objects(
                 "target_instance_id": int(decision["target_instance_id"]),
                 "raw_output": raw_output,
                 "cleaned_output": cleaned_output,
+                "fit_debug": fit_debug,
             }
         )
         _progress(
@@ -623,6 +640,115 @@ def _failure_summary(stats: Dict[str, Any]) -> str:
             reason = str(item.get("reason", "unknown"))
             counts[reason] = counts.get(reason, 0) + 1
     return ", ".join(f"{k}={v}" for k, v in sorted(counts.items()))
+
+
+def _placed_count(layout_payload: Dict[str, Any]) -> int:
+    stats = layout_payload.get("auto_placement_stats", {})
+    if isinstance(stats, dict):
+        try:
+            return int(stats.get("placed_count", 0))
+        except Exception:
+            return 0
+    return 0
+
+
+def _failed_count(layout_payload: Dict[str, Any]) -> int:
+    stats = layout_payload.get("auto_placement_stats", {})
+    if isinstance(stats, dict):
+        try:
+            return int(stats.get("failed_count", 0))
+        except Exception:
+            return 0
+    return 0
+
+
+def _run_placement(
+    *,
+    args: argparse.Namespace,
+    plan_payload: Dict[str, Any],
+    surfaces_payload: Dict[str, Any],
+    seed: int,
+    min_distance: float,
+    max_trials_per_object: int,
+) -> Dict[str, Any]:
+    return place_objects_on_instances(
+        scene_name=args.scene,
+        assignment_plan=plan_payload,
+        surfaces_payload=surfaces_payload,
+        data_dir=Path(args.data_dir),
+        objects_dir=args.objects_dir,
+        min_distance=float(min_distance),
+        spawn_height=float(args.spawn_height),
+        max_trials_per_object=int(max_trials_per_object),
+        settle_steps=int(args.settle_steps),
+        seed=int(seed),
+    )
+
+
+def _maybe_retry_placement(
+    *,
+    args: argparse.Namespace,
+    plan_payload: Dict[str, Any],
+    surfaces_payload: Dict[str, Any],
+    first_layout: Dict[str, Any],
+    seed: int,
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    first_stats = first_layout.get("auto_placement_stats", {})
+    if not isinstance(first_stats, dict):
+        first_stats = {}
+    retry_info: Dict[str, Any] = {
+        "enabled": not bool(args.disable_placement_retry),
+        "attempted": False,
+        "accepted": False,
+        "first_placed_count": _placed_count(first_layout),
+        "first_failed_count": _failed_count(first_layout),
+    }
+    if args.disable_placement_retry or _failed_count(first_layout) <= 0:
+        return first_layout, retry_info
+
+    retry_min_distance = max(0.05, float(args.min_distance) * float(args.retry_min_distance_scale))
+    retry_trials = max(
+        int(args.max_trials_per_object),
+        int(round(int(args.max_trials_per_object) * float(args.retry_trial_multiplier))),
+    )
+    retry_seed = int(seed) + int(args.retry_seed_offset)
+    print(
+        "[Retry] placement failed={failed}; retry with min_distance={dist:.3f}, "
+        "max_trials_per_object={trials}, seed={seed}".format(
+            failed=_failed_count(first_layout),
+            dist=retry_min_distance,
+            trials=retry_trials,
+            seed=retry_seed,
+        )
+    )
+    retry_info.update(
+        {
+            "attempted": True,
+            "retry_min_distance": round(retry_min_distance, 4),
+            "retry_max_trials_per_object": retry_trials,
+            "retry_seed": retry_seed,
+        }
+    )
+    retry_layout = _run_placement(
+        args=args,
+        plan_payload=plan_payload,
+        surfaces_payload=surfaces_payload,
+        seed=retry_seed,
+        min_distance=retry_min_distance,
+        max_trials_per_object=retry_trials,
+    )
+    retry_info["retry_placed_count"] = _placed_count(retry_layout)
+    retry_info["retry_failed_count"] = _failed_count(retry_layout)
+    if _placed_count(retry_layout) > _placed_count(first_layout):
+        retry_info["accepted"] = True
+        print(
+            f"[Retry] accepted: placed {_placed_count(first_layout)} -> {_placed_count(retry_layout)}"
+        )
+        return retry_layout, retry_info
+    print(
+        f"[Retry] kept first result: placed {_placed_count(first_layout)} vs retry {_placed_count(retry_layout)}"
+    )
+    return first_layout, retry_info
 
 
 def _write_json(path: Path, payload: Dict[str, Any]) -> None:
@@ -746,6 +872,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--spawn-height", type=float, default=0.3, help="Spawn height above target surface for collidable objects")
     parser.add_argument("--max-trials-per-object", type=int, default=30, help="Max surface candidates tried per object")
     parser.add_argument("--settle-steps", type=int, default=45, help="Habitat physics settle steps")
+    parser.add_argument("--disable-placement-retry", action="store_true", help="Disable one-shot relaxed retry when placement has failed objects")
+    parser.add_argument("--retry-min-distance-scale", type=float, default=0.8, help="Retry min_distance multiplier; lower values reduce pairwise rejection")
+    parser.add_argument("--retry-trial-multiplier", type=float, default=2.0, help="Retry max_trials_per_object multiplier")
+    parser.add_argument("--retry-seed-offset", type=int, default=10000, help="Seed offset used by placement retry")
 
     parser.add_argument("--surface-max-results", type=int, default=10, help="Max receptacle instances per room")
     parser.add_argument("--surface-instance-pointcloud-points", type=int, default=2048, help="Point count for instance pointcloud extraction")
@@ -866,16 +996,19 @@ def _run_scene_batch(args: argparse.Namespace) -> Tuple[int, Path]:
                 print(f"[Step] layout {layout_idx}: assignments={int(plan_payload.get('assignment_count', 0))}")
 
                 print(f"[Step] layout {layout_idx}: placing objects on target surfaces")
-                layout_payload = place_objects_on_instances(
-                    scene_name=args.scene,
-                    assignment_plan=plan_payload,
+                first_layout_payload = _run_placement(
+                    args=args,
+                    plan_payload=plan_payload,
                     surfaces_payload=surfaces_payload,
-                    data_dir=Path(args.data_dir),
-                    objects_dir=args.objects_dir,
+                    seed=seed,
                     min_distance=float(args.min_distance),
-                    spawn_height=float(args.spawn_height),
                     max_trials_per_object=int(args.max_trials_per_object),
-                    settle_steps=int(args.settle_steps),
+                )
+                layout_payload, retry_info = _maybe_retry_placement(
+                    args=args,
+                    plan_payload=plan_payload,
+                    surfaces_payload=surfaces_payload,
+                    first_layout=first_layout_payload,
                     seed=seed,
                 )
                 layout_payload["batch_generation"] = {
@@ -884,6 +1017,7 @@ def _run_scene_batch(args: argparse.Namespace) -> Tuple[int, Path]:
                     "seed": seed,
                     "sampled_object_count": len(sampled_objects),
                     "assignment_count": int(plan_payload.get("assignment_count", 0)),
+                    "placement_retry": retry_info,
                 }
 
                 print(f"[Step] layout {layout_idx}: writing final layout")
@@ -907,6 +1041,7 @@ def _run_scene_batch(args: argparse.Namespace) -> Tuple[int, Path]:
                         "failed_by_reason": stats.get("failed_by_reason", {}),
                         "failure_summary": _failure_summary(stats),
                         "assignment_summary": assignment_summary,
+                        "placement_retry": retry_info,
                     }
                 )
                 if int(stats.get("placed_count", 0)) <= 0:

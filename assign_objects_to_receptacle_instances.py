@@ -70,6 +70,12 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from extract_room_instances import DEFAULT_DATA_DIR
+from object_profiles import (
+    get_object_profile,
+    is_floor_like_category,
+    surface_affordance_score,
+    surface_requirement,
+)
 from place_objects_on_instances import place_objects_on_instances
 from sample_and_place_objects import (
     DEFAULT_IMAGES_DIR,
@@ -103,6 +109,10 @@ Hard constraints:
 2) Return ONLY JSON, no markdown, no extra text.
 3) confidence_score must be float in [0, 1].
 4) backup_instance_ids must be from candidate list and must not include target_instance_id.
+5) Prefer candidates whose object_fit.fits is true.
+6) Respect object_fit.affordance.allowed. If it is false, only select that candidate when every candidate is false.
+7) For floor_only objects, choose floor/ground/room_floor candidates; do not choose shelves, tables, beds, or chairs.
+8) For small_tabletop/large_tabletop objects, prefer table, desk, counter, shelf, cabinet, dresser, or nightstand surfaces with enough span/area.
 
 Output JSON schema:
 {{
@@ -337,7 +347,11 @@ def _build_surface_candidates_for_room(room_entry: Dict[str, Any]) -> List[Dict[
         bounds = top.get("bounds", {}) if isinstance(top, dict) else {}
         bmin = bounds.get("min", [0.0, 0.0, 0.0]) if isinstance(bounds, dict) else [0.0, 0.0, 0.0]
         bmax = bounds.get("max", [0.0, 0.0, 0.0]) if isinstance(bounds, dict) else [0.0, 0.0, 0.0]
-        area = max(0.0, (_safe_float(bmax[0]) - _safe_float(bmin[0])) * (_safe_float(bmax[2]) - _safe_float(bmin[2])))
+        span_x = max(0.0, _safe_float(bmax[0]) - _safe_float(bmin[0]))
+        span_z = max(0.0, _safe_float(bmax[2]) - _safe_float(bmin[2]))
+        area = max(0.0, span_x * span_z)
+        normal = top.get("normal", [0.0, 1.0, 0.0]) if isinstance(top, dict) else [0.0, 1.0, 0.0]
+        normal_y = _safe_float(normal[1], 1.0) if isinstance(normal, list) and len(normal) >= 2 else 1.0
         out.append(
             {
                 "instance_id": int(item.get("instance_id", -1)),
@@ -345,11 +359,93 @@ def _build_surface_candidates_for_room(room_entry: Dict[str, Any]) -> List[Dict[
                 "receptacle_confidence": float(item.get("confidence_score", 0.5)),
                 "surface_point_count": int(top.get("point_count", 0)),
                 "surface_height": float(top.get("plane_height", 0.0)),
+                "surface_span_x": round(span_x, 4),
+                "surface_span_z": round(span_z, 4),
+                "surface_min_span": round(min(span_x, span_z), 4),
                 "surface_area_est": round(area, 4),
+                "surface_source": str(top.get("source", "")),
+                "surface_normal_y": round(normal_y, 4),
             }
         )
     out = [x for x in out if int(x.get("instance_id", -1)) >= 0]
     return out
+
+
+def _candidate_fits_profile(candidate: Dict[str, Any], profile: Dict[str, Any]) -> Tuple[bool, str]:
+    category = str(candidate.get("category", ""))
+    placement_class = str(profile.get("placement_class", "tabletop_or_floor"))
+    affordance_ok, _, affordance_reason = surface_affordance_score("", category, profile=profile)
+    req = surface_requirement(profile)
+    span_x = _safe_float(candidate.get("surface_span_x"), 0.0)
+    span_z = _safe_float(candidate.get("surface_span_z"), 0.0)
+    area = _safe_float(candidate.get("surface_area_est"), 0.0)
+    normal_y = _safe_float(candidate.get("surface_normal_y"), 1.0)
+
+    if not affordance_ok:
+        return False, affordance_reason
+    if normal_y < 0.65:
+        return False, "surface_not_horizontal"
+    if area < float(req["required_area"]):
+        return False, "surface_area_smaller_than_object"
+    if span_x < float(req["required_min_span"]) or span_z < float(req["required_min_span"]):
+        return False, "surface_span_smaller_than_object"
+    return True, ""
+
+
+def _filter_surface_candidates_for_object(
+    candidates: List[Dict[str, Any]],
+    model_id: str,
+    objects_dir: str = "./objects",
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    profile = get_object_profile(model_id, objects_dir=objects_dir)
+    req = surface_requirement(profile)
+    kept: List[Dict[str, Any]] = []
+    rejected: List[Dict[str, Any]] = []
+    for c in candidates:
+        ok, reason = _candidate_fits_profile(c, profile)
+        affordance_ok, affordance_delta, affordance_reason = surface_affordance_score(
+            model_id,
+            c.get("category", ""),
+            profile=profile,
+        )
+        enriched = dict(c)
+        enriched["object_fit"] = {
+            "fits": bool(ok),
+            "reason": reason,
+            "required_min_span": req["required_min_span"],
+            "required_area": req["required_area"],
+            "placement_class": profile.get("placement_class", "tabletop_or_floor"),
+            "affordance": {
+                "allowed": bool(affordance_ok),
+                "score_delta": round(float(affordance_delta), 4),
+                "reason": affordance_reason,
+            },
+        }
+        if ok:
+            kept.append(enriched)
+        else:
+            rejected.append(enriched)
+
+    if kept:
+        return kept, {
+            "profile": profile,
+            "required_surface": req,
+            "candidate_count_before_fit": len(candidates),
+            "candidate_count_after_fit": len(kept),
+            "fit_rejected_count": len(rejected),
+            "fit_rejected_preview": rejected[:5],
+            "fit_filter_fallback": False,
+        }
+    return rejected or candidates, {
+        "profile": profile,
+        "required_surface": req,
+        "candidate_count_before_fit": len(candidates),
+        "candidate_count_after_fit": len(candidates),
+        "fit_rejected_count": len(rejected),
+        "fit_rejected_preview": rejected[:5],
+        "fit_filter_fallback": True,
+        "fit_filter_fallback_reason": "all_candidates_rejected_keep_original_candidates",
+    }
 
 
 def _heuristic_choose_instance(candidates: List[Dict[str, Any]], model_id: str) -> Dict[str, Any]:
@@ -359,23 +455,42 @@ def _heuristic_choose_instance(candidates: List[Dict[str, Any]], model_id: str) 
     依据：候选置信度 + 表面积 + 轻量类别先验。
     """
     model_key = (model_id or "").lower()
+    profile = get_object_profile(model_id)
+    placement_class = str(profile.get("placement_class", "tabletop_or_floor"))
     scored = []
     for c in candidates:
         score = float(c.get("receptacle_confidence", 0.5))
         score += min(0.2, float(c.get("surface_area_est", 0.0)) * 0.05)
+        score += min(0.08, float(c.get("surface_min_span", 0.0)) * 0.08)
+        if str(c.get("surface_source", "")) == "aabb_top_fallback":
+            score -= 0.08
+        if float(c.get("surface_normal_y", 1.0)) < 0.85:
+            score -= 0.08
         category = str(c.get("category", "")).lower()
+        affordance_ok, affordance_delta, affordance_reason = surface_affordance_score(
+            model_id,
+            category,
+            profile=profile,
+        )
+        score += float(affordance_delta)
+        if not affordance_ok:
+            score -= 0.40
         if "table" in category or "desk" in category:
             score += 0.1
         if "bed" in category and ("lamp" in model_key or "book" in model_key):
             score += 0.05
-        scored.append((score, c))
+        if placement_class == "floor_only":
+            score += 0.35 if is_floor_like_category(category) else -0.35
+        elif is_floor_like_category(category):
+            score -= 0.08
+        scored.append((score, c, affordance_reason))
     scored.sort(key=lambda x: x[0], reverse=True)
     target = scored[0][1] if scored else {"instance_id": -1}
     backups = [int(x[1].get("instance_id", -1)) for x in scored[1:4] if int(x[1].get("instance_id", -1)) >= 0]
     return {
         "target_instance_id": int(target.get("instance_id", -1)),
         "confidence_score": round(float(scored[0][0]) if scored else 0.0, 4),
-        "reasoning": "Heuristic fallback from receptacle score and surface area.",
+        "reasoning": f"Heuristic fallback from receptacle score, surface geometry, and affordance: {scored[0][2] if scored else 'no_candidate'}.",
         "backup_instance_ids": backups,
     }
 
@@ -575,6 +690,7 @@ def _query_assignment_for_object(
     image_path: Optional[str],
     candidates: List[Dict[str, Any]],
     max_tokens: int,
+    objects_dir: str = "./objects",
 ) -> Tuple[str, str, Optional[Dict[str, Any]]]:
     """
     对单个物体在单个房间内发起目标实例分配查询。
@@ -587,6 +703,7 @@ def _query_assignment_for_object(
         "name": object_entry.get("name"),
         "confidence": object_entry.get("confidence", 0.5),
         "image_path": image_path or "",
+        "object_profile": get_object_profile(str(object_entry.get("model_id", "")), objects_dir=objects_dir),
     }
     prompt = USER_PROMPT_TEMPLATE.format(
         scene_name=scene_name,
@@ -750,6 +867,11 @@ def main() -> int:
             continue
 
         candidates = _build_surface_candidates_for_room(room_entry)
+        candidates, fit_debug = _filter_surface_candidates_for_object(
+            candidates,
+            model_id=str(obj.get("model_id", "")),
+            objects_dir=str(args.objects_dir),
+        )
         if not candidates:
             llm_debug.append({"object_id": obj.get("id", idx), "status": "empty_candidates"})
             continue
@@ -772,6 +894,7 @@ def main() -> int:
                     image_path=image_path,
                     candidates=candidates,
                     max_tokens=int(args.max_tokens),
+                    objects_dir=str(args.objects_dir),
                 )
             except Exception as exc:
                 llm_debug.append(
@@ -806,6 +929,7 @@ def main() -> int:
                 "raw_output": raw_output,
                 "cleaned_output": cleaned_output,
                 "candidate_count": len(candidates),
+                "fit_debug": fit_debug,
             }
         )
 

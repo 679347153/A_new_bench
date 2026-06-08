@@ -24,6 +24,7 @@
   - `extract_room_instances.py`
   - `query_room_receptacle_objects.py`
   - `assign_objects_to_receptacle_instances.py`
+  - `object_profiles.py`
   - `place_objects_on_instances.py`
   - `batch_generate_layouts.py`
   - `visualize_placed_layout.py`
@@ -40,6 +41,7 @@
         ├── extract_room_instances.py 提取房间 instances 与单 instance 点云
         ├── query_room_receptacle_objects.py 提取可放置 instance 上表面
         ├── assign_objects_to_receptacle_instances.py 物体到 instance 分配
+        ├── object_profiles.py 统一物体尺寸/放置类别/承载面 affordance 规则
         ├── place_objects_on_instances.py Habitat-Sim 碰撞检查放置
         ├── batch_generate_layouts.py 复用缓存批量生成多个最终布局
         ├── visualize_placed_layout.py 加载最终布局检查放置效果/高度偏移
@@ -76,6 +78,7 @@
 3. 支持 `placement=auto` 自动初放（房间内采样+碰撞约束）。
 4. 支持 `placement=manual`，将布局交给编辑器人工微调。
 5. 支持迭代式 `sample -> edit -> save` 流程。
+6. 自动初放使用 `object_profiles.py` 提供的半径/footprint 估计，减少不同阶段对物体尺寸理解不一致的问题。
 
 ### 3.4 `test_layout.py`：手动微调模式
 已实现能力：
@@ -106,10 +109,11 @@
 5. 对上表面进行面积与尺寸有效性过滤，确保结果“可用优先、数量可降”。
 6. 将上表面点云落盘为 `.ply`，JSON 中仅保留路径与摘要字段。
 7. 输出房间级 `receptacle_instances` 与场景汇总统计，供后续分配/放置模块使用。
+8. 当房间缺少显式 floor instance 时，自动构造 `room_floor` 合成承载面；优先使用 Habitat-Sim navmesh 点收缩到可导航地面范围，navmesh 不可用时回退房间 AABB 地面。
 
 上表面点云提取逻辑（当前实现）：
 1. 房间遍历与实例收集：按 `scene_info.rooms` 解析 `room_id` 列表，逐房间调用 `extract_room_instances(...)` 获取 `instances`。
-2. 候选预过滤：对每个 instance 计算 AABB 几何特征 `(size_x, size_y, size_z, top_area_est, volume_est)`；剔除明显无效类别（如 `wall/ceiling/window/door/tap/faucet/shower/...`）与估计顶面积过小样本（`top_area_est < --candidate-min-top-area-est`，默认 `0.03 m^2`）。
+2. 候选预过滤：对每个 instance 计算 AABB 几何特征 `(size_x, size_y, size_z, top_area_est, volume_est)`；剔除明显无效类别（如 `wall/ceiling/window/door/tap/faucet/shower/...`）与估计顶面积过小样本（`top_area_est < --candidate-min-top-area-est`，默认 `0.005 m^2`）。已知承载类别不会仅因粗略 AABB 顶面积偏小被提前剔除。
 3. 排序阶段：优先 LLM，失败则启发式回退；启发式使用类别先验分数 + `top_area_est` 加分，且支持输出空集合（0 到 `--max-results`），避免“硬凑”无效承载体。
 4. 实例点云获取：对入选候选调用 `get_instance_point_cloud(...)`，取 `point_cloud.points` 作为原始点集。
 5. 顶面提取（Top-band）：
@@ -123,8 +127,8 @@
    - 用 SVD 拟合估计法向 `normal`；若退化或朝向不稳定则回退 `[0,1,0]`。
 7. 有效性过滤（关键质量门）：
    - 点数门限：`point_count >= --surface-min-points`（默认 `48`）。
-   - 可用面积门限：由 `bounds` 估计 `usable_area_est = span_x * span_z`，要求 `usable_area_est >= --surface-min-area`（默认 `0.05 m^2`）。
-   - 最小跨度门限：要求 `min(span_x, span_z) >= --surface-min-span`（默认 `0.12 m`）。
+   - 可用面积门限：由 `bounds` 估计 `usable_area_est = span_x * span_z`，要求 `usable_area_est >= --surface-min-area`（默认 `0.005 m^2`）。
+   - 最小跨度门限：要求 `min(span_x, span_z) >= --surface-min-span`（默认 `0.02 m`）。
    - 任何一项不满足均丢弃，并在终端输出 `[Filter]` 原因日志。
 8. 结果持久化：
    - 每个有效顶面写入 `surface_pointclouds/room_<room_id>_instance_<instance_id>_top_surface.ply`。
@@ -134,27 +138,48 @@
 关键参数（默认值）：
 1. `--surface-points-per-instance=256`：每个上表面保存点数上限。
 2. `--surface-min-points=48`：上表面最少点数要求。
-3. `--surface-min-area=0.05`：上表面估计可用面积下限（平方米）。
-4. `--surface-min-span=0.12`：上表面最小边跨度下限（米）。
-5. `--candidate-min-top-area-est=0.03`：候选预筛顶面积下限（平方米）。
+3. `--surface-min-area=0.005`：上表面估计可用面积下限（平方米）。
+4. `--surface-min-span=0.02`：上表面最小边跨度下限（米）。
+5. `--candidate-min-top-area-est=0.005`：候选预筛顶面积下限（平方米）。
 
-### 3.7 `assign_objects_to_receptacle_instances.py`：物体到 instance 分配
+### 3.7 `object_profiles.py`：物体尺寸与承载面 affordance 规则
+已实现能力：
+1. 为每个物体提供统一的近似几何 profile：`radius / footprint_x / footprint_z / height / y_offset / placement_class`。
+2. 支持 `object_profiles.json` 覆盖默认估计；若没有覆盖，则按物体名关键词稳定回退。
+   - 查找位置包括项目根目录、`objects` 父目录和 `objects` 目录。
+   - 支持按 `model_id`、去掉 `_4k` 的别名、补 `_4k` 的别名匹配。
+3. 提供 `surface_requirement(...)`，把物体 footprint 转换为承载面最小跨度、面积和边缘余量要求。
+4. 提供 `surface_affordance_score(...)`，按 `placement_class` 判断承载类别是否合理：
+   - `floor_only`：轮椅、桌椅等优先且基本只允许地面。
+   - `small_tabletop`：闹钟、相机、花瓶等优先桌面/柜面/架子。
+   - `large_tabletop`：棋盘、茶具等优先较大的桌面/柜面。
+   - `soft_surface`：枕头等优先床、沙发、椅子或地毯。
+5. 下游分配和放置共用同一套 profile，减少“分配看起来合理但几何放不下”的断裂。
+6. 若缺少手工 profile，会保留 `profile_source` 与 `missing_template_config` 等诊断字段，便于后续补充精确尺寸。
+
+### 3.8 `assign_objects_to_receptacle_instances.py`：物体到 instance 分配
 已实现能力：
 1. 输入对象可来自 `--object-layout` 或采样函数。
 2. 严格房间约束：物体只能在其 `sampled_region_id` 房间内分配。
 3. 支持图文 LLM 分配与启发式回退。
 4. 输出 `assignment_plan`，并可继续调用放置模块。
+5. 分配前会用 `object_profiles.py` 对候选承载面做尺寸与 affordance 过滤，并把 `object_fit` 诊断写入 LLM prompt/debug。
+6. LLM prompt 明确要求优先选择 `object_fit.fits=true` 且 affordance 合理的候选；LLM 输出无效时启发式回退也使用相同规则打分。
+7. 当所有候选都被尺寸/affordance 过滤掉时，不会直接丢弃该物体，而是回退保留带 `object_fit` 诊断的候选，便于 LLM/启发式做最后选择并在 debug 中解释原因。
 
-### 3.8 `place_objects_on_instances.py`：自动放置与碰撞检查
+### 3.9 `place_objects_on_instances.py`：自动放置与碰撞检查
 已实现能力：
 1. 根据分配结果在目标 `top_surface.point_cloud_file`（PLY）上采样落点（兼容旧版 `top_surface.points`）。
 2. 使用 `object profile y_offset` 对齐模型原点与承载面；仅当模板可碰撞时再使用 `spawn_height` 执行物理下落稳定。
 3. 执行最小距离约束 `max(min_distance, radius_i + radius_j)`。
 4. 对 `is_collidable=false` 的物体模板使用 KINEMATIC 直接放置，避免 DYNAMIC 重力步进把物体带到承载面下方。
 5. 对可碰撞模板启用 Habitat-Sim 物理步进与接触碰撞检测。
-6. 输出 `layout + auto_placement_stats + failed_objects`，每个成功放置物体记录 `placement_y_offset / template_collidable / physics_settle` 便于后续排查高度问题。
+6. 支持从分配计划中的 `backup_instance_ids` 依次尝试备用承载面；目标面失败时可自动尝试同房间其他合理 surface。
+7. 采样落点时使用 profile 推导的 `edge_margin`，尽量避开承载面边缘，降低悬空与掉落概率。
+8. 输出 `layout + auto_placement_stats + failed_objects`，每个成功放置物体记录 `placement_y_offset / template_collidable / physics_settle / placement_target_source / placement_radius / object_profile`，便于后续排查高度、碰撞和尺寸估计问题。
+9. `auto_placement_stats.profile_diagnostics` 会列出缺少精确 profile 的物体，提示补充 `object_profiles.json`。
 
-### 3.9 `batch_generate_layouts.py`：批量最终布局生成
+### 3.10 `batch_generate_layouts.py`：批量最终布局生成
 已实现能力：
 1. 面向同一场景与同一批物体图片，批量生成多个最终放置 layout。
 2. 复用已有链路产物：
@@ -171,6 +196,11 @@
 5. 支持 `--disable-surface-llm`、`--regenerate-room-queries`、`--regenerate-probabilities`、`--regenerate-surfaces` 控制缓存复用与重算。
 6. 输出批次目录 `results/layouts/<scene>/batch_<YYYYmmdd_HHMMSS>/`，包含多个 `layout_<idx>_seed_<seed>.json` 与 `manifest.json`。
 7. `manifest.json` 汇总记录缓存路径、每个 layout 的 seed、输出路径、采样数量、分配数量、放置成功/失败统计与失败原因摘要。
+8. 默认开启一次失败驱动 placement retry：若首轮存在 failed objects，会降低 `min_distance`、增加 `max_trials_per_object` 并重新放置整份 plan；仅当 retry 的 `placed_count` 更高时采用 retry 结果，retry 摘要写入 layout 与 manifest。可用 `--disable-placement-retry` 关闭。
+9. retry 参数可调：
+   - `--retry-min-distance-scale=0.8`
+   - `--retry-trial-multiplier=2.0`
+   - `--retry-seed-offset=10000`
 
 执行示例：
 ```bash
@@ -189,17 +219,22 @@ python batch_generate_layouts.py \
   --disable-surface-llm
 ```
 
-### 3.10 `visualize_placed_layout.py`：最终布局可视化与高度调试
+### 3.11 `visualize_placed_layout.py`：最终布局可视化与高度调试
 已实现能力：
 1. 读取 `assign_objects_to_receptacle_instances.py` / `place_objects_on_instances.py` 生成的 layout JSON。
 2. 使用 Habitat-Sim 加载 HM3D 场景与 `objects` 目录中的物体模板，复现已放置状态。
-3. 支持交互式浏览：相机移动、切换物体、聚焦当前物体、保存截图。
+3. 支持交互式浏览：相机移动、切换 layout、切换物体、聚焦当前物体、保存截图。
 4. 支持 `--headless` 保存总览与物体聚焦截图，用于无 GUI 环境快速验收。
-5. 支持 `--debug-offset` 高度调试模式：
-   - `U/O` 对当前选中物体执行 Y 方向上/下微调。
-   - HUD 显示当前物体的实时 `debug_offset`。
+5. 支持同场景多 layout 切换：
+   - 默认扫描当前 layout 所在目录，按 `[` / `]` 切换上一个/下一个 layout。
+   - 可用 `--layout-scan-dir results/layouts/<scene> --recursive-layout-scan` 跨多个 batch 目录比较。
+6. 支持 `--debug-offset` 高度调试模式：
+   - 默认 `--initial-y-offset=2.5`，加载后所有物体整体上移 2.5m，用于快速判断 layout 是否整体偏低；严格复现原始 layout 时可传 `--initial-y-offset 0`。
+   - `B` 在 `selected/all` 作用域之间切换，可只调当前物体，也可让所有物体同时上下移动。
+   - `U/O` 对调试作用域执行 Y 方向上/下微调。
+   - HUD 显示当前物体实时偏移、调试作用域和累计 offset。
    - `M` 保存调整后的 layout；默认输出到原文件同目录的 `*_offset_debug.json`，也可用 `--output-layout` 指定。
-6. 用途：当物体看起来位于承载面下方/上方时，直接在真实场景渲染中估计需要补偿的高度偏移，再把调试结果回写到 layout 供后续复查。
+7. 用途：当物体看起来位于承载面下方/上方时，直接在真实场景渲染中估计需要补偿的高度偏移，再把调试结果回写到 layout 供后续复查。
 
 执行示例：
 ```bash
@@ -209,7 +244,24 @@ python visualize_placed_layout.py \
   --debug-offset --offset-step 0.02
 ```
 
-### 3.11 `visualize_instance_pointcloud_viser.py`：viser 可视化核验
+严格复现原始 layout：
+```bash
+python visualize_placed_layout.py \
+  results/layouts/00808-y9hTuugGdiq/batch_<YYYYmmdd_HHMMSS>/layout_000_seed_42.json \
+  --scene 00808-y9hTuugGdiq \
+  --initial-y-offset 0
+```
+
+跨 batch 比较：
+```bash
+python visualize_placed_layout.py \
+  results/layouts/00808-y9hTuugGdiq/batch_<YYYYmmdd_HHMMSS>/layout_000_seed_42.json \
+  --scene 00808-y9hTuugGdiq \
+  --layout-scan-dir results/layouts/00808-y9hTuugGdiq \
+  --recursive-layout-scan
+```
+
+### 3.12 `visualize_instance_pointcloud_viser.py`：viser 可视化核验
 已实现能力：
 1. 可视化 `extract_room_instances.py` 导出的 instance 点云与包围盒。
 2. 可叠加场景 mesh，检查点云与场景对齐情况。
@@ -220,7 +272,7 @@ python visualize_placed_layout.py \
 4. 支持从 `.ply/.xyz` 或 JSON 内嵌点云读取。
 5. 用于自动分支调试、对齐校验与可视化验收。
 
-### 3.12 `log_filter.py`：终端日志噪声过滤
+### 3.13 `log_filter.py`：终端日志噪声过滤
 已实现能力：
 1. 过滤 Habitat/HM3D 高频噪声告警（如 `Metadata ... No Glob path result found ... unable to load templates ...`）。
 2. 支持“管道模式”：从 stdin 读取日志并输出清洗结果。
@@ -247,6 +299,7 @@ python visualize_placed_layout.py \
 2. 房间推荐：`results/scene_info/<scene>/<object>_rooms.json`
 3. 概率文件：`results/probabilities/<scene>/<object>_probs.json`
 4. 初放布局：`results/layouts/<scene>/temp_*.json`
+5. 可选物体 profile 覆盖：`object_profiles.json`
 
 ### 4.2 分支产物
 1. 手动分支：
@@ -259,6 +312,8 @@ python visualize_placed_layout.py \
    - 批量布局：`results/layouts/<scene>/batch_<YYYYmmdd_HHMMSS>/layout_*_seed_*.json`
    - 批量索引：`results/layouts/<scene>/batch_<YYYYmmdd_HHMMSS>/manifest.json`
    - 可视化高度调试布局：`results/layouts/<scene>/*_offset_debug.json`
+   - 自动放置统计：layout 顶层 `auto_placement_stats`，包含 `failed_by_reason / failed_objects / profile_diagnostics`
+   - 批量 retry 记录：layout 顶层 `batch_generation.placement_retry` 与 manifest 中每个 layout 的 `placement_retry`
 
 ### 4.3 终端输出治理产物
 1. 日志清洗脚本：`log_filter.py`
@@ -275,7 +330,10 @@ python visualize_placed_layout.py \
 ### 5.2 当前实现状态
 1. 两个分支核心能力都已实现。
 2. 主干到自动分支可通过中间 JSON 衔接，语义约束可保持一致。
-3. 自动分支已支持“分配脚本内自动补齐承载面查询”，仍可继续完善整库级一键编排体验。
+3. 自动分支已支持“分配脚本内自动补齐承载面查询”。
+4. 批量生成已由 `batch_generate_layouts.py` 编排：同一场景同一批物体可以复用 scene_info、概率、承载面结果，并通过不同 seed 生成多个最终 layout。
+5. 放置准确性增强已接入主链路：`object_profiles.py` 统一尺寸估计，assignment 使用 affordance/几何过滤，placement 支持备用承载面和失败驱动 retry。
+6. 验收工具已支持同场景多 layout 切换、跨 batch 扫描和 selected/all 高度偏移调试。
 
 ## 6. 与本次需求对照
 1. 技术报告新增 `extract_room_instances.py`：已完成。
@@ -287,7 +345,10 @@ python visualize_placed_layout.py \
 7. 后段改为手动微调模式与自动放置模式两分支，并标注打通状态：已完成。
 8. 自动放置后的高度偏移调试流程：已完成。
 9. 同场景同物体批量生成最终 layout 流程：已完成。
+10. 自动放置准确性增强：已完成，包括统一 object profile、承载面 affordance、navmesh 合成地面、备用承载面尝试与 placement retry。
+11. 报告已根据当前代码更新默认参数、产物字段和可视化调试能力。
 
 ## 7. 结论
 - 报告现已与你定义的“树状主干+双分支”方案对齐。
-- 自动分支的调试、批量生成与验收链（`extract_room_instances.py` + `batch_generate_layouts.py` + `visualize_instance_pointcloud_viser.py` + `visualize_placed_layout.py`）已在报告中补齐。
+- 自动分支已形成可复用、可批量、可调试的闭环：承载面提取、实例分配、物理放置、失败诊断、retry、可视化验收均已在报告中描述。
+- 当前最值得继续迭代的数据资产是 `object_profiles.json`：为常用物体补充更精确的 footprint、height、y_offset 和 placement_class，可进一步提升自动放置稳定性。
