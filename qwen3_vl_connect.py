@@ -1,9 +1,9 @@
-"""Connect to a remote vLLM Qwen3-VL endpoint through SSH private-key tunnel.
+"""Connect to a remote vLLM Qwen3-VL endpoint through SSH password tunnel.
 
 Usage example:
 
 python qwen3_vl_connect.py \
-  --ssh-key /home/yuhang/Desktop/zw_B200.txt \
+  --ssh-password 666666 \
 	--vllm-host 127.0.0.1 \
 	--vllm-port 8000 \
   --image /home/yuhang/zw_ws/qwen/receipt.jpg \
@@ -11,17 +11,17 @@ python qwen3_vl_connect.py \
 
 # 等价的完整 SSH 参数写法：
 python qwen3_vl_connect.py \
-  --ssh-host 7.216.187.6 \
-	--ssh-port 31023 \
+	--ssh-host 7.216.187.6 \
+	--ssh-port 30180 \
 	--ssh-user root \
-  --ssh-key /home/yuhang/Desktop/zw_B200.txt \
+  --ssh-password 666666 \
 	--vllm-host 127.0.0.1 \
 	--vllm-port 8000 \
   --image /home/yuhang/zw_ws/qwen/receipt.jpg \
   --prompt "What is in the image?"
 
 Note:
-- --ssh-port is SSH login port (your case is 31023)
+- --ssh-port is SSH login port (default is 30180)
 - --vllm-port is OpenAI-compatible API port inside remote host namespace
 - If vLLM runs in docker, publish container port to host (e.g. -p 8000:8000)
 """
@@ -44,9 +44,10 @@ from pathlib import Path
 from openai import OpenAI
 
 DEFAULT_SSH_HOST = "7.216.187.6"
-DEFAULT_SSH_PORT = 31023
+DEFAULT_SSH_PORT = 30180
 DEFAULT_SSH_USER = "root"
-DEFAULT_SSH_KEY = "/home/yuhang/Desktop/zw_B200.txt"
+DEFAULT_SSH_PASSWORD = "666666"
+DEFAULT_SSH_KEY = None
 
 
 def _pick_free_local_port() -> int:
@@ -107,17 +108,17 @@ def _clean_model_output(text: str | None) -> str:
 
 def parse_args() -> argparse.Namespace:
 	parser = argparse.ArgumentParser(
-		description="Call remote vLLM Qwen3-VL via SSH private-key tunnel."
+		description="Call remote vLLM Qwen3-VL via SSH password tunnel."
 	)
 
 	parser.add_argument("--ssh-host", default=DEFAULT_SSH_HOST, help="SSH server host or IP")
 	parser.add_argument("--ssh-port", type=int, default=DEFAULT_SSH_PORT, help="SSH server port")
 	parser.add_argument("--ssh-user", default=DEFAULT_SSH_USER, help="SSH username")
-	parser.add_argument("--ssh-key", default=DEFAULT_SSH_KEY, help="Path to private key file")
+	parser.add_argument("--ssh-key", default=DEFAULT_SSH_KEY, help="Optional path to private key file; overrides password mode when provided")
 	parser.add_argument(
 		"--ssh-password",
-		default=None,
-		help="Legacy SSH password fallback for non-interactive mode (requires sshpass); --ssh-key is preferred",
+		default=DEFAULT_SSH_PASSWORD,
+		help="SSH password for Qwen server login (requires sshpass for non-interactive mode)",
 	)
 	parser.add_argument(
 		"--ssh-key-passphrase",
@@ -192,7 +193,7 @@ def main() -> int:
 
 	if not args.ssh_password and not ssh_key_path:
 		print(
-			"[Error] You must provide --ssh-key (preferred) or --ssh-password",
+			"[Error] You must provide --ssh-password or explicit --ssh-key",
 			file=sys.stderr,
 		)
 		return 1
@@ -235,7 +236,7 @@ def main() -> int:
 	if ssh_key_path:
 		tunnel_cmd[1:1] = ["-i", ssh_key_path]
 	elif args.ssh_password:
-		# Legacy password fallback: force password auth to avoid private-key prompt and interactive fallback.
+		# Password auth: avoid interactive auth prompts and fallback.
 		tunnel_cmd[1:1] = [
 			"-o",
 			"PubkeyAuthentication=no",
@@ -253,7 +254,7 @@ def main() -> int:
 	if args.ssh_password and args.ssh_key_passphrase:
 		print(
 			"[Warn] Both --ssh-password and --ssh-key-passphrase are set. "
-			"--ssh-key is preferred; password is only used when no key is provided.",
+			"Explicit --ssh-key overrides password mode.",
 			file=sys.stderr,
 		)
 
@@ -262,8 +263,7 @@ def main() -> int:
 	if args.ssh_password and not ssh_key_path:
 		if shutil.which("sshpass") is None:
 			print(
-				"[Error] --ssh-password requires sshpass, but sshpass is not installed. "
-				"Prefer --ssh-key /home/yuhang/Desktop/zw_B200.txt.",
+				"[Error] --ssh-password requires sshpass, but sshpass is not installed.",
 				file=sys.stderr,
 			)
 			return 1

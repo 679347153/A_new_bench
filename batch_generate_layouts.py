@@ -78,7 +78,7 @@ from __future__ import annotations
   python batch_generate_layouts.py \
     --plan-json scenes_plan.json \
     --num-layouts 10 \
-    --ssh-key /home/yuhang/Desktop/zw_B200.txt
+    --ssh-password 666666
 
 优先级为：命令行默认值 < 计划文件顶层默认值 < 单个 scene 条目覆盖。
 计划模式会为每个 scene 创建自己的
@@ -131,7 +131,7 @@ from __future__ import annotations
   python batch_generate_layouts.py \
     --scene 00808-y9hTuugGdiq \
     --num-layouts 10 \
-    --ssh-key /home/yuhang/Desktop/zw_B200.txt
+    --ssh-password 666666
 
 2. 快速启发式 smoke test，不依赖远端 LLM：
 
@@ -192,6 +192,7 @@ import numpy as np
 from assign_objects_to_receptacle_instances import (
     DEFAULT_SSH_HOST,
     DEFAULT_SSH_KEY,
+    DEFAULT_SSH_PASSWORD,
     DEFAULT_SSH_PORT,
     DEFAULT_SSH_USER,
     OpenAI,
@@ -887,8 +888,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ssh-host", default=DEFAULT_SSH_HOST, help="SSH server host")
     parser.add_argument("--ssh-port", type=int, default=DEFAULT_SSH_PORT, help="SSH server port")
     parser.add_argument("--ssh-user", default=DEFAULT_SSH_USER, help="SSH user")
-    parser.add_argument("--ssh-password", default=None, help="Legacy SSH password fallback; prefer --ssh-key")
-    parser.add_argument("--ssh-key", default=DEFAULT_SSH_KEY, help="SSH private key path")
+    parser.add_argument("--ssh-password", default=DEFAULT_SSH_PASSWORD, help="SSH password for Qwen server login")
+    parser.add_argument("--ssh-key", default=DEFAULT_SSH_KEY, help="Optional SSH private key path; overrides password mode when provided")
     parser.add_argument("--vllm-host", default="127.0.0.1", help="Remote vLLM host")
     parser.add_argument("--vllm-port", type=int, default=8000, help="Remote vLLM OpenAI API port")
     parser.add_argument("--local-port", type=int, default=0, help="Local forwarded port; 0 means auto")

@@ -207,7 +207,7 @@
 python batch_generate_layouts.py \
   --scene 00808-y9hTuugGdiq \
   --num-layouts 10 \
-  --ssh-key /home/yuhang/Desktop/zw_B200.txt
+  --ssh-password 666666
 ```
 
 启发式快速验证：

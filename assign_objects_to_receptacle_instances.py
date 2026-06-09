@@ -32,7 +32,7 @@ from __future__ import annotations
 1) 标准流程（LLM 分配 + 自动放置，自动生成 surfaces）：
    python assign_objects_to_receptacle_instances.py \
      --scene 00808-y9hTuugGdiq \
-     --ssh-key /home/yuhang/Desktop/zw_B200.txt
+     --ssh-password 666666
 
 2) 仅启发式分配（不依赖 LLM），仍执行放置：
    python assign_objects_to_receptacle_instances.py \
@@ -85,9 +85,10 @@ from sample_and_place_objects import (
 )
 
 DEFAULT_SSH_HOST = "7.216.187.6"
-DEFAULT_SSH_PORT = 31023
+DEFAULT_SSH_PORT = 30180
 DEFAULT_SSH_USER = "root"
-DEFAULT_SSH_KEY = "/home/yuhang/Desktop/zw_B200.txt"
+DEFAULT_SSH_PASSWORD = "666666"
+DEFAULT_SSH_KEY = None
 
 try:
     from openai import OpenAI
@@ -239,7 +240,7 @@ class SSHTunnel:
             tunnel_cmd[1:1] = ["-i", ssh_key_path]
         elif self.ssh_password:
             if shutil.which("sshpass") is None:
-                print("[Error] sshpass not found for legacy password fallback. Prefer --ssh-key /home/yuhang/Desktop/zw_B200.txt", file=sys.stderr)
+                print("[Error] sshpass not found. Default Qwen SSH connection uses --ssh-password 666666", file=sys.stderr)
                 return False
             tunnel_cmd[1:1] = [
                 "-o",
@@ -252,7 +253,7 @@ class SSHTunnel:
             env["SSHPASS"] = self.ssh_password
             cmd_for_run = ["sshpass", "-e", *tunnel_cmd]
         else:
-            print("[Error] Must provide --ssh-key (preferred) or --ssh-password", file=sys.stderr)
+            print("[Error] Must provide --ssh-password or explicit --ssh-key", file=sys.stderr)
             return False
 
         self.proc = subprocess.Popen(
@@ -532,7 +533,7 @@ def _normalize_assignment_response(parsed: Optional[Dict[str, Any]], candidates:
 
 
 def _validate_ssh_args(args: argparse.Namespace) -> bool:
-    """检查是否具备远端 LLM 所需 SSH 密钥/凭据。"""
+    """检查是否具备远端 LLM 所需 SSH 密码/凭据。"""
     return bool(args.ssh_host and args.ssh_user and (args.ssh_password or args.ssh_key))
 
 
@@ -783,8 +784,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ssh-host", default=DEFAULT_SSH_HOST, help="SSH server host")
     parser.add_argument("--ssh-port", type=int, default=DEFAULT_SSH_PORT, help="SSH server port")
     parser.add_argument("--ssh-user", default=DEFAULT_SSH_USER, help="SSH username")
-    parser.add_argument("--ssh-password", default=None, help="Legacy SSH password fallback; --ssh-key is preferred")
-    parser.add_argument("--ssh-key", default=DEFAULT_SSH_KEY, help="SSH private key")
+    parser.add_argument("--ssh-password", default=DEFAULT_SSH_PASSWORD, help="SSH password for Qwen server login")
+    parser.add_argument("--ssh-key", default=DEFAULT_SSH_KEY, help="Optional SSH private key path; overrides password mode when provided")
     parser.add_argument("--vllm-host", default="127.0.0.1", help="vLLM host")
     parser.add_argument("--vllm-port", type=int, default=8000, help="vLLM OpenAI API port")
     parser.add_argument("--local-port", type=int, default=0, help="Local forwarded port")
