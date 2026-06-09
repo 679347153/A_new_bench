@@ -2,6 +2,14 @@
 
 本文档按执行顺序汇总本项目中“动态家庭场景 layout 数据集”和“导航任务 episode 集”的生成命令。
 
+所有可执行命令均统一使用：
+
+```bash
+python log_filter.py --run "<真实命令>"
+```
+
+这样可以过滤 Habitat/HM3D 高频日志噪声，并在末尾输出过滤统计。
+
 默认示例场景为：
 
 ```text
@@ -27,38 +35,38 @@ remote vLLM: 127.0.0.1:8000
 在项目根目录执行：
 
 ```bash
-python verify_workflow.py
+python log_filter.py --run "python verify_workflow.py"
 ```
 
 检查关键输入目录：
 
 ```bash
-ls hm3d
-ls objects
-ls objects_images
+python log_filter.py --run "ls hm3d"
+python log_filter.py --run "ls objects"
+python log_filter.py --run "ls objects_images"
 ```
 
 若使用默认密码方式连接 Qwen，Linux 环境需要安装 `sshpass`：
 
 ```bash
-sshpass -V
+python log_filter.py --run "sshpass -V"
 ```
 
 手动测试 SSH 登录：
 
 ```bash
-SSHPASS=666666 sshpass -e ssh -p 30180 root@7.216.187.6
+python log_filter.py --run "SSHPASS=666666 sshpass -e ssh -p 30180 root@7.216.187.6"
 ```
 
 测试远程 Qwen/vLLM 隧道与图文调用：
 
 ```bash
-python qwen3_vl_connect.py \
+python log_filter.py --run "python qwen3_vl_connect.py \
   --ssh-password 666666 \
   --vllm-host 127.0.0.1 \
   --vllm-port 8000 \
   --image objects_images/Camera_01.webp \
-  --prompt "Describe this object briefly."
+  --prompt 'Describe this object briefly.'"
 ```
 
 ---
@@ -68,17 +76,17 @@ python qwen3_vl_connect.py \
 单场景导出：
 
 ```bash
-python export_scene_info.py \
+python log_filter.py --run "python export_scene_info.py \
   --scene 00808-y9hTuugGdiq \
-  --output-dir ./results/scene_info/00808-y9hTuugGdiq
+  --output-dir ./results/scene_info/00808-y9hTuugGdiq"
 ```
 
 全量导出：
 
 ```bash
-python export_scene_info.py \
+python log_filter.py --run "python export_scene_info.py \
   --all \
-  --output-dir ./results/scene_info
+  --output-dir ./results/scene_info"
 ```
 
 预期产物：
@@ -115,27 +123,27 @@ results/scene_info/<scene>/<object>_rooms.json
 首次生成概率，并输出一个初始 layout：
 
 ```bash
-python sample_and_place_objects.py \
+python log_filter.py --run "python sample_and_place_objects.py \
   --scene 00808-y9hTuugGdiq \
   --mode generate \
   --images-dir ./objects_images \
   --rooms-info-dir ./results/scene_info \
   --probabilities-dir ./results/probabilities \
   --layouts-dir ./results/layouts \
-  --placement auto
+  --placement auto"
 ```
 
 后续复用已有概率重新采样：
 
 ```bash
-python sample_and_place_objects.py \
+python log_filter.py --run "python sample_and_place_objects.py \
   --scene 00808-y9hTuugGdiq \
   --mode load \
   --images-dir ./objects_images \
   --rooms-info-dir ./results/scene_info \
   --probabilities-dir ./results/probabilities \
   --layouts-dir ./results/layouts \
-  --placement auto
+  --placement auto"
 ```
 
 预期产物：
@@ -310,43 +318,43 @@ results/layouts/plan_<YYYYmmdd_HHMMSS>/plan_manifest.json
 严格复现原始 layout：
 
 ```bash
-python visualize_placed_layout.py \
+python log_filter.py --run "python visualize_placed_layout.py \
   results/layouts/00808-y9hTuugGdiq/batch_<YYYYmmdd_HHMMSS>/layout_000_seed_42.json \
   --scene 00808-y9hTuugGdiq \
-  --initial-y-offset 0
+  --initial-y-offset 0"
 ```
 
 调试物体高度偏移：
 
 ```bash
-python visualize_placed_layout.py \
+python log_filter.py --run "python visualize_placed_layout.py \
   results/layouts/00808-y9hTuugGdiq/batch_<YYYYmmdd_HHMMSS>/layout_000_seed_42.json \
   --scene 00808-y9hTuugGdiq \
   --debug-offset \
   --initial-y-offset 0 \
-  --offset-step 0.02
+  --offset-step 0.02"
 ```
 
 跨 batch 目录比较同一场景的多个 layout：
 
 ```bash
-python visualize_placed_layout.py \
+python log_filter.py --run "python visualize_placed_layout.py \
   results/layouts/00808-y9hTuugGdiq/batch_<YYYYmmdd_HHMMSS>/layout_000_seed_42.json \
   --scene 00808-y9hTuugGdiq \
   --layout-scan-dir results/layouts/00808-y9hTuugGdiq \
   --recursive-layout-scan \
-  --initial-y-offset 0
+  --initial-y-offset 0"
 ```
 
 无窗口截图验收：
 
 ```bash
-python visualize_placed_layout.py \
+python log_filter.py --run "python visualize_placed_layout.py \
   results/layouts/00808-y9hTuugGdiq/batch_<YYYYmmdd_HHMMSS>/layout_000_seed_42.json \
   --scene 00808-y9hTuugGdiq \
   --headless \
   --headless-max-focus 20 \
-  --initial-y-offset 0
+  --initial-y-offset 0"
 ```
 
 ---
@@ -356,7 +364,7 @@ python visualize_placed_layout.py \
 从单个 batch manifest 生成 episode：
 
 ```bash
-python -m benchmark.build_episodes \
+python log_filter.py --run "python -m benchmark.build_episodes \
   --layout-manifest results/layouts/00808-y9hTuugGdiq/batch_<YYYYmmdd_HHMMSS>/manifest.json \
   --version dynamic_household_v1 \
   --split val \
@@ -366,20 +374,20 @@ python -m benchmark.build_episodes \
   --max-subtasks 10 \
   --success-radius 1.2 \
   --max-steps 500 \
-  --seed 42
+  --seed 42"
 ```
 
 从多个 scene 的 manifest 一次生成：
 
 ```bash
-python -m benchmark.build_episodes \
+python log_filter.py --run "python -m benchmark.build_episodes \
   --layout-manifest \
     results/layouts/00808-y9hTuugGdiq/batch_<id_a>/manifest.json \
     results/layouts/00800-TEEsavR23oF/batch_<id_b>/manifest.json \
   --version dynamic_household_v1 \
   --split train \
   --images-dir objects_images \
-  --episodes-per-layout 3
+  --episodes-per-layout 3"
 ```
 
 预期产物：
@@ -396,32 +404,32 @@ benchmark/splits/benchmark_split_<version>.json
 Oracle smoke test：
 
 ```bash
-python -m benchmark.runner \
+python log_filter.py --run "python -m benchmark.runner \
   --episodes benchmark/episodes/dynamic_household_v1/val \
   --output benchmark/eval/dynamic_household_v1/oracle.jsonl \
   --mode oracle \
-  --sample-start-pose
+  --sample-start-pose"
 ```
 
 No-op 失败基线：
 
 ```bash
-python -m benchmark.runner \
+python log_filter.py --run "python -m benchmark.runner \
   --episodes benchmark/episodes/dynamic_household_v1/val \
   --output benchmark/eval/dynamic_household_v1/noop.jsonl \
-  --mode noop
+  --mode noop"
 ```
 
 接入自定义 agent：
 
 ```bash
-python -m benchmark.runner \
+python log_filter.py --run "python -m benchmark.runner \
   --episodes benchmark/episodes/dynamic_household_v1/val \
   --output benchmark/eval/my_agent/run.jsonl \
   --agent-module my_agent_module:create_agent \
   --agent-id my_agent \
   --sample-start-pose \
-  --load-layout-objects
+  --load-layout-objects"
 ```
 
 预期产物：
@@ -437,19 +445,19 @@ benchmark/eval/<version>/*.jsonl
 评测 oracle：
 
 ```bash
-python -m benchmark.evaluate \
+python log_filter.py --run "python -m benchmark.evaluate \
   --episodes benchmark/episodes/dynamic_household_v1/val \
   --trajectories benchmark/eval/dynamic_household_v1/oracle.jsonl \
-  --output-dir benchmark/eval/dynamic_household_v1/oracle
+  --output-dir benchmark/eval/dynamic_household_v1/oracle"
 ```
 
 评测 noop：
 
 ```bash
-python -m benchmark.evaluate \
+python log_filter.py --run "python -m benchmark.evaluate \
   --episodes benchmark/episodes/dynamic_household_v1/val \
   --trajectories benchmark/eval/dynamic_household_v1/noop.jsonl \
-  --output-dir benchmark/eval/dynamic_household_v1/noop
+  --output-dir benchmark/eval/dynamic_household_v1/noop"
 ```
 
 预期产物：
@@ -468,7 +476,7 @@ benchmark/eval/<version>/<run_name>/exploration_curve.json
 如果只想快速从 layout 生成跑到 episode 评测，可按下面顺序执行：
 
 ```bash
-python verify_workflow.py
+python log_filter.py --run "python verify_workflow.py"
 
 python log_filter.py --run "python batch_generate_layouts.py \
   --scene 00808-y9hTuugGdiq \
@@ -476,22 +484,22 @@ python log_filter.py --run "python batch_generate_layouts.py \
   --ssh-password 666666 \
   --vllm-host 127.0.0.1 --vllm-port 8000"
 
-python -m benchmark.build_episodes \
+python log_filter.py --run "python -m benchmark.build_episodes \
   --layout-manifest results/layouts/00808-y9hTuugGdiq/batch_<YYYYmmdd_HHMMSS>/manifest.json \
   --version smoke_v1 \
   --split val \
   --images-dir objects_images \
-  --episodes-per-layout 1
+  --episodes-per-layout 1"
 
-python -m benchmark.runner \
+python log_filter.py --run "python -m benchmark.runner \
   --episodes benchmark/episodes/smoke_v1/val \
   --output benchmark/eval/smoke_v1/oracle.jsonl \
-  --mode oracle
+  --mode oracle"
 
-python -m benchmark.evaluate \
+python log_filter.py --run "python -m benchmark.evaluate \
   --episodes benchmark/episodes/smoke_v1/val \
   --trajectories benchmark/eval/smoke_v1/oracle.jsonl \
-  --output-dir benchmark/eval/smoke_v1/oracle
+  --output-dir benchmark/eval/smoke_v1/oracle"
 ```
 
 将 `<YYYYmmdd_HHMMSS>` 替换为实际生成的 batch 目录名。
