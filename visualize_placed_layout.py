@@ -146,6 +146,8 @@ CAMERA_MOVE_SPEED = 0.18
 ROTATE_SPEED = 2.5
 PITCH_LIMIT = 85.0
 DEFAULT_INITIAL_Y_OFFSET = 2.5
+DEFAULT_OBJECT_MOVE_STEP = 0.08
+DEFAULT_OBJECT_ROTATE_STEP = 5.0
 
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
@@ -206,6 +208,10 @@ def _normalize_pygame_key(key: int) -> int:
         pygame.K_h: ord("h"),
         pygame.K_r: ord("r"),
         pygame.K_f: ord("f"),
+        pygame.K_t: ord("t"),
+        pygame.K_g: ord("g"),
+        pygame.K_y: ord("y"),
+        pygame.K_v: ord("v"),
         pygame.K_p: ord("p"),
         pygame.K_w: ord("w"),
         pygame.K_s: ord("s"),
@@ -227,6 +233,8 @@ def _normalize_pygame_key(key: int) -> int:
         pygame.K_PERIOD: ord("."),
         pygame.K_9: ord("9"),
         pygame.K_0: ord("0"),
+        pygame.K_1: ord("1"),
+        pygame.K_2: ord("2"),
     }
     return mapping.get(key, -1)
 
@@ -397,6 +405,8 @@ def _load_layout_objects(
                     "position": pos,
                     "base_position": list(pos),
                     "debug_offset": debug_offset,
+                    "yaw_deg": float(yaw),
+                    "base_yaw_deg": float(yaw),
                     "target_instance_id": cfg.get("target_instance_id", "?"),
                     "sampled_region_id": cfg.get("sampled_region_id", "?"),
                 }
@@ -561,9 +571,11 @@ def _selected_label(items: Sequence[Dict[str, Any]], selected_idx: int) -> str:
     obj = item["object"]
     pos = obj.translation
     offset = item.get("debug_offset", [0.0, 0.0, 0.0])
+    yaw = float(item.get("yaw_deg", 0.0))
     return (
         f"{selected_idx + 1}/{len(items)} {item['model_id']} "
         f"pos=({float(pos[0]):.2f},{float(pos[1]):.2f},{float(pos[2]):.2f}) "
+        f"yaw={yaw:.1f} "
         f"offset=({float(offset[0]):+.2f},{float(offset[1]):+.2f},{float(offset[2]):+.2f}) "
         f"room={item.get('sampled_region_id')} target={item.get('target_instance_id')}"
     )
@@ -615,6 +627,7 @@ def _build_hud(
     ]
     if debug_offset:
         lines.append(f"Offset debug: ON  scope={offset_scope}  step={offset_step:.3f}m  B=scope  U/O=y +/-  M=save")
+    lines.append("Edit: T/G forward/back  F/Y left/right  U/O up/down  1/2 yaw  V=focus  auto-save")
     return lines
 
 
@@ -687,6 +700,44 @@ def _adjust_selected_object_y(loaded_items: Sequence[Dict[str, Any]], selected_i
     return item
 
 
+def _sync_debug_offset_from_translation(item: Dict[str, Any]) -> None:
+    """Keep debug metadata consistent with the current visible object position."""
+    obj = item["object"]
+    base = np.asarray(item.get("base_position", item.get("position", [0.0, 0.0, 0.0])), dtype=np.float32)
+    current = np.asarray(obj.translation, dtype=np.float32)
+    item["debug_offset"] = [float(v) for v in (current - base)]
+
+
+def _move_selected_object(
+    loaded_items: Sequence[Dict[str, Any]],
+    selected_idx: int,
+    delta: np.ndarray,
+) -> Optional[Dict[str, Any]]:
+    """Move the selected rigid object by a world-space delta and update save metadata."""
+    if not loaded_items:
+        return None
+    item = loaded_items[selected_idx % len(loaded_items)]
+    obj = item["object"]
+    obj.translation = np.asarray(obj.translation, dtype=np.float32) + np.asarray(delta, dtype=np.float32)
+    _sync_debug_offset_from_translation(item)
+    return item
+
+
+def _rotate_selected_object(
+    loaded_items: Sequence[Dict[str, Any]],
+    selected_idx: int,
+    delta_yaw_deg: float,
+) -> Optional[Dict[str, Any]]:
+    """Rotate the selected object around the Habitat Y axis."""
+    if not loaded_items:
+        return None
+    item = loaded_items[selected_idx % len(loaded_items)]
+    yaw = float(item.get("yaw_deg", 0.0)) + float(delta_yaw_deg)
+    item["yaw_deg"] = yaw
+    item["object"].rotation = _yaw_to_magnum_quat(yaw)
+    return item
+
+
 def _adjust_all_objects_y(loaded_items: Sequence[Dict[str, Any]], delta_y: float) -> int:
     """
     批量沿 Y 轴调整所有已加载物体。
@@ -734,9 +785,19 @@ def _save_adjusted_layout(
         obj = item["object"]
         pos = [round(float(obj.translation[0]), 4), round(float(obj.translation[1]), 4), round(float(obj.translation[2]), 4)]
         offset = [round(float(v), 4) for v in item.get("debug_offset", [0.0, 0.0, 0.0])[:3]]
+        yaw = round(float(item.get("yaw_deg", _extract_yaw_deg(objects[idx].get("rotation")))), 4)
+        old_rotation = objects[idx].get("rotation")
+        if isinstance(old_rotation, list) and len(old_rotation) >= 3:
+            rotation = list(old_rotation)
+            rotation[1] = yaw
+            objects[idx]["rotation"] = rotation
+        else:
+            objects[idx]["rotation"] = [0.0, yaw, 0.0]
         objects[idx]["position"] = pos
         objects[idx]["debug_base_position"] = [round(float(v), 4) for v in item.get("base_position", pos)[:3]]
         objects[idx]["debug_visual_offset"] = offset
+        objects[idx]["debug_base_yaw_deg"] = round(float(item.get("base_yaw_deg", yaw)), 4)
+        objects[idx]["debug_yaw_delta_deg"] = round(float(yaw - float(item.get("base_yaw_deg", yaw))), 4)
 
     adjusted_payload["visual_debug_adjustment"] = {
         "tool": "visualize_placed_layout.py",
@@ -745,6 +806,25 @@ def _save_adjusted_layout(
         "note": "position fields include manual visual debug offsets",
     }
     out_path.write_text(json.dumps(adjusted_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return out_path
+
+
+def _resolve_output_layout_path(state: Dict[str, Any]) -> Optional[Path]:
+    if bool(state.get("save_in_place", False)):
+        return Path(state.get("layout_path", "."))
+    value = state.get("output_layout_path")
+    return value if isinstance(value, Path) else None
+
+
+def _save_current_layout(state: Dict[str, Any], loaded_items: Sequence[Dict[str, Any]], reason: str) -> Path:
+    out_path = _save_adjusted_layout(
+        payload=state.get("layout_payload", {}),
+        loaded_items=loaded_items,
+        input_layout_path=Path(state.get("layout_path", ".")),
+        output_layout_path=_resolve_output_layout_path(state),
+    )
+    state["last_saved_layout_path"] = str(out_path)
+    state["last_save_reason"] = reason
     return out_path
 
 
@@ -787,7 +867,7 @@ def _apply_viewer_key(
         state["selected_idx"] = (int(state.get("selected_idx", 0)) - 1) % len(loaded_items)
     if key in (ord("."), ord(">"), ord("0")) and loaded_items:
         state["selected_idx"] = (int(state.get("selected_idx", 0)) + 1) % len(loaded_items)
-    if key == ord("f") and loaded_items:
+    if key == ord("v") and loaded_items:
         camera_pos, yaw, pitch = _focus_object(loaded_items[int(state.get("selected_idx", 0))])
         state["camera_pos"] = camera_pos
         state["yaw"] = yaw
@@ -797,8 +877,16 @@ def _apply_viewer_key(
         out_path = screenshot_dir / f"{scene_name}_layout_view_{int(time.time())}.png"
         cv2.imwrite(str(out_path), state["last_frame"])
         print(f"[OK] Screenshot saved: {out_path}")
+
+    yaw = float(state.get("yaw", 0.0))
+    pitch = float(state.get("pitch", 0.0))
+    camera_pos = np.asarray(state.get("camera_pos", np.zeros(3)), dtype=np.float32)
+    forward, right = _camera_vectors(yaw)
+    selected_idx = int(state.get("selected_idx", 0))
+    object_changed = False
+    changed_item: Optional[Dict[str, Any]] = None
+
     if bool(state.get("debug_offset", False)) and loaded_items:
-        selected_idx = int(state.get("selected_idx", 0))
         step = float(state.get("offset_step", 0.02))
         scope = str(state.get("offset_scope", "selected"))
         if key == ord("b"):
@@ -808,31 +896,56 @@ def _apply_viewer_key(
             if scope == "all":
                 moved = _adjust_all_objects_y(loaded_items, step)
                 print(f"[Debug] all objects y_offset += {step:+.4f} ({moved} moved)")
+                object_changed = moved > 0
             else:
                 item = _adjust_selected_object_y(loaded_items, selected_idx, step)
                 if item is not None:
+                    changed_item = item
+                    object_changed = True
                     print(f"[Debug] {item['model_id']} y_offset={item['debug_offset'][1]:+.4f}")
         if key == ord("o"):
             if scope == "all":
                 moved = _adjust_all_objects_y(loaded_items, -step)
                 print(f"[Debug] all objects y_offset += {-step:+.4f} ({moved} moved)")
+                object_changed = moved > 0
             else:
                 item = _adjust_selected_object_y(loaded_items, selected_idx, -step)
                 if item is not None:
+                    changed_item = item
+                    object_changed = True
                     print(f"[Debug] {item['model_id']} y_offset={item['debug_offset'][1]:+.4f}")
-        if key == ord("m"):
-            out_path = _save_adjusted_layout(
-                payload=state.get("layout_payload", {}),
-                loaded_items=loaded_items,
-                input_layout_path=Path(state.get("layout_path", ".")),
-                output_layout_path=state.get("output_layout_path"),
-            )
-            print(f"[OK] Adjusted layout saved: {out_path}")
 
-    yaw = float(state.get("yaw", 0.0))
-    pitch = float(state.get("pitch", 0.0))
-    camera_pos = np.asarray(state.get("camera_pos", np.zeros(3)), dtype=np.float32)
-    forward, right = _camera_vectors(yaw)
+    if loaded_items and not object_changed:
+        move_step = float(state.get("object_move_step", DEFAULT_OBJECT_MOVE_STEP))
+        rotate_step = float(state.get("object_rotate_step", DEFAULT_OBJECT_ROTATE_STEP))
+        if key == ord("t"):
+            changed_item = _move_selected_object(loaded_items, selected_idx, forward * move_step)
+        elif key == ord("g"):
+            changed_item = _move_selected_object(loaded_items, selected_idx, -forward * move_step)
+        elif key == ord("f"):
+            changed_item = _move_selected_object(loaded_items, selected_idx, -right * move_step)
+        elif key == ord("y"):
+            changed_item = _move_selected_object(loaded_items, selected_idx, right * move_step)
+        elif key == ord("u") and not bool(state.get("debug_offset", False)):
+            changed_item = _move_selected_object(loaded_items, selected_idx, np.array([0.0, move_step, 0.0], dtype=np.float32))
+        elif key == ord("o") and not bool(state.get("debug_offset", False)):
+            changed_item = _move_selected_object(loaded_items, selected_idx, np.array([0.0, -move_step, 0.0], dtype=np.float32))
+        elif key == ord("1"):
+            changed_item = _rotate_selected_object(loaded_items, selected_idx, -rotate_step)
+        elif key == ord("2"):
+            changed_item = _rotate_selected_object(loaded_items, selected_idx, rotate_step)
+        object_changed = changed_item is not None
+
+    if object_changed and bool(state.get("auto_save", True)):
+        out_path = _save_current_layout(state, loaded_items, "object_pose_edit")
+        if changed_item is not None:
+            print(f"[OK] Auto-saved edit: {changed_item['model_id']} -> {out_path}")
+        else:
+            print(f"[OK] Auto-saved edit: {out_path}")
+
+    if key == ord("m"):
+        out_path = _save_current_layout(state, loaded_items, "manual_save")
+        print(f"[OK] Adjusted layout saved: {out_path}")
 
     if key == ord("j"):
         yaw += ROTATE_SPEED
@@ -1168,10 +1281,13 @@ def parse_args() -> argparse.Namespace:
             "Debug keys:\n"
             "  [/]        : switch previous / next layout JSON\n"
             "  ,/. or 9/0 : select previous / next object\n"
-            "  F          : focus selected object\n"
+            "  V          : focus selected object\n"
+            "  T/G        : move selected object forward / back along camera yaw\n"
+            "  F/Y        : move selected object left / right along camera yaw\n"
+            "  U/O        : move selected object up / down\n"
+            "  1/2        : rotate selected object yaw left / right\n"
             "  B          : toggle offset scope between selected and all objects\n"
-            "  U / O      : move current scope up / down by --offset-step meters\n"
-            "  M          : save adjusted layout JSON\n"
+            "  M          : save adjusted layout JSON; object edits auto-save by default\n"
         ),
     )
     parser.add_argument("layout", help="已放置 layout JSON 路径")
@@ -1224,6 +1340,28 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="debug-offset 保存路径；不填则写到原 layout 同目录的 *_offset_debug.json",
     )
+    parser.add_argument(
+        "--object-move-step",
+        type=float,
+        default=DEFAULT_OBJECT_MOVE_STEP,
+        help="选中物体每次平移的距离，单位米；默认 0.08",
+    )
+    parser.add_argument(
+        "--object-rotate-step",
+        type=float,
+        default=DEFAULT_OBJECT_ROTATE_STEP,
+        help="选中物体每次绕 Y 轴旋转的角度，单位度；默认 5",
+    )
+    parser.add_argument(
+        "--no-auto-save",
+        action="store_true",
+        help="关闭物体位姿编辑后的自动保存，只在按 M 时保存",
+    )
+    parser.add_argument(
+        "--save-in-place",
+        action="store_true",
+        help="将编辑结果直接覆盖当前 layout；默认写入 *_offset_debug.json 或 --output-layout 指定路径",
+    )
     return parser.parse_args()
 
 
@@ -1262,6 +1400,16 @@ def main() -> int:
         f"from {layout_scan_dir} recursive={bool(args.recursive_layout_scan)}"
     )
     print(f"[Info] Initial visual y_offset applied to all loaded objects: {float(args.initial_y_offset):+.4f}")
+    if args.save_in_place:
+        print("[Info] Object pose edits will auto-save in place.")
+    elif args.output_layout:
+        print(f"[Info] Object pose edits will auto-save to: {args.output_layout}")
+    else:
+        print("[Info] Object pose edits will auto-save to: <layout_stem>_offset_debug.json")
+    print(
+        "[Info] Object edit keys: T/G forward/back, F/Y left/right, U/O up/down, "
+        f"1/2 yaw; move_step={float(args.object_move_step):.4f}m rotate_step={float(args.object_rotate_step):.2f}deg"
+    )
     stats = payload.get("auto_placement_stats", {})
     if isinstance(stats, dict):
         print(
@@ -1296,15 +1444,21 @@ def main() -> int:
         "skipped": skipped,
         "initial_y_offset": float(args.initial_y_offset),
         "output_layout_path": Path(args.output_layout) if args.output_layout else None,
+        "object_move_step": float(args.object_move_step),
+        "object_rotate_step": float(args.object_rotate_step),
+        "auto_save": not bool(args.no_auto_save),
+        "save_in_place": bool(args.save_in_place),
     }
 
     help_lines = [
         "W/S A/D E/C: move camera",
         "I/K J/L: pitch / yaw",
-        "R: reset view   F: focus selected",
+        "R: reset view   V: focus selected",
         "[/]: previous / next layout",
         ",/. or 9/0: previous / next object",
-        "Debug offset: B toggles selected/all, U/O move y +/- step, M save",
+        "Edit object: T/G forward/back, F/Y left/right, U/O up/down, 1/2 yaw",
+        "Auto-save: ON by default; M manual save; use --no-auto-save to disable",
+        "Debug offset: B toggles selected/all when --debug-offset is enabled",
         "H: help   P: screenshot   ESC/Q: quit",
     ]
 
