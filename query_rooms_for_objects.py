@@ -6,8 +6,8 @@ from __future__ import annotations
 
 逻辑流程：
 1. 读取场景导出的scene_info JSON（或实时导出）
-2. 遍历 objects_images/ 目录中的所有图片
-3. 对每个(场景, 物体图片)对，通过 SSH 密码隧道连接远程 Qwen3-VL
+2. 从统一 object catalog 读取对象；legacy 可带图片，YCB/HSSD 可仅带 semantic_text
+3. 对每个(场景, 物体)对，通过 SSH 密码隧道连接远程 Qwen3-VL
 4. 询问："该物体最有可能出现在房间的哪些地方？前5个房间+3D中心"
 5. 解析回复，提取房间推荐列表
 6. 生成JSON：场景信息 + 查询内容 + Qwen原始/清洗后回复 + 前5房间推荐 + 元数据
@@ -16,7 +16,9 @@ from __future__ import annotations
   python query_rooms_for_objects.py \
     --ssh-password 666666 \
     --vllm-host 127.0.0.1 --vllm-port 8000 \
-    --images-dir ./objects_images \
+    --object-datasets legacy,ycb,hssd \
+    --object-catalog data/object_catalog/object_catalog.json \
+    --images-dir data/object_images/legacy \
     --scenes all \
     --output-dir ./results/scene_info/
 
@@ -25,7 +27,9 @@ from __future__ import annotations
   python query_rooms_for_objects.py \
     --ssh-password 666666 \
     --vllm-host 127.0.0.1 --vllm-port 8000 \
-    --images-dir ./objects_images \
+    --object-datasets legacy,ycb,hssd \
+    --object-catalog data/object_catalog/object_catalog.json \
+    --images-dir data/object_images/legacy \
     --scene 00808-y9hTuugGdiq \
     --output-dir ./results/scene_info/
 """
@@ -48,6 +52,8 @@ from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Any
 
 from hm3d_paths import list_available_scenes, resolve_scene_paths
+from object_catalog import object_entries_from_args
+from project_paths import OBJECT_CATALOG_PATH, resolve_legacy_images_dir, resolve_results_root
 
 try:
     from openai import OpenAI
@@ -63,8 +69,8 @@ except ImportError:
 
 
 # ===== 常量 =====
-DEFAULT_OUTPUT_DIR = "./results/scene_info"
-DEFAULT_IMAGES_DIR = "./objects_images"
+DEFAULT_OUTPUT_DIR = str(resolve_results_root() / "scene_info")
+DEFAULT_IMAGES_DIR = str(resolve_legacy_images_dir())
 DEFAULT_SSH_HOST = "7.216.187.6"
 DEFAULT_SSH_PORT = 30180
 DEFAULT_SSH_USER = "root"
@@ -355,10 +361,11 @@ def check_qwen_endpoint(base_url: str, model: str, timeout_s: float = 10.0) -> b
 
 def query_qwen_for_rooms(
     client: OpenAI,
-    image_path: str,
+    image_path: Optional[str],
     scene_info: Dict[str, Any],
     model: str = "Qwen/Qwen3-VL-235B-A22B-Thinking",
     max_tokens: int = 2048,
+    object_entry: Optional[Dict[str, Any]] = None,
 ) -> Tuple[str, str]:
     """
     Query Qwen3-VL about rooms where object should be placed.
@@ -366,10 +373,12 @@ def query_qwen_for_rooms(
     Returns:
         (raw_output, cleaned_output)
     """
-    try:
-        image_url = _build_image_url(image_path)
-    except Exception as e:
-        raise RuntimeError(f"Failed to build image URL: {e}")
+    image_url = ""
+    if image_path:
+        try:
+            image_url = _build_image_url(image_path)
+        except Exception as e:
+            raise RuntimeError(f"Failed to build image URL: {e}")
     
     room_candidates = []
     for room in scene_info.get("rooms", []):
@@ -394,17 +403,31 @@ def query_qwen_for_rooms(
         )
 
     room_candidates_json = json.dumps(room_candidates, ensure_ascii=False, indent=2)
-    query_text = QWEN_QUERY_TEMPLATE.format(room_candidates_json=room_candidates_json)
+    object_entry = object_entry or {}
+    object_text = str(object_entry.get("semantic_text", "")).strip()
+    object_name = str(
+        object_entry.get("display_name")
+        or object_entry.get("object_name")
+        or object_entry.get("model_id")
+        or Path(str(image_path)).stem
+        or "object"
+    )
+    object_context = (
+        "物体输入信息：\n"
+        f"- object_name: {object_name}\n"
+        f"- dataset: {object_entry.get('dataset', 'legacy')}\n"
+        f"- model_id: {object_entry.get('model_id', object_name)}\n"
+        f"- semantic_text: {object_text or '未提供；请根据物体名称推断。'}\n"
+        f"- has_image: {bool(image_url)}\n\n"
+    )
+    query_text = object_context + QWEN_QUERY_TEMPLATE.format(room_candidates_json=room_candidates_json)
 
+    content: List[Dict[str, Any]] = [{"type": "text", "text": query_text}]
+    if image_url:
+        content.insert(0, {"type": "image_url", "image_url": {"url": image_url}})
     messages = [
         {"role": "system", "content": QWEN_SYSTEM_TEMPLATE},
-        {
-            "role": "user",
-            "content": [
-                {"type": "image_url", "image_url": {"url": image_url}},
-                {"type": "text", "text": query_text},
-            ],
-        }
+        {"role": "user", "content": content},
     ]
     
     try:
@@ -654,9 +677,13 @@ def process_scene(
     tunnel: SSHTunnel,
     client: OpenAI,
     model: str,
+    object_catalog: Optional[str] = None,
+    object_datasets: Optional[List[str]] = None,
+    object_set: Optional[str] = None,
+    limit_objects: int = 0,
 ) -> Dict[str, Any]:
     """
-    Process a single scene: query Qwen for each object image.
+    Process a single scene: query Qwen for each object catalog entry.
     
     Returns:
         {success_count, fail_count, results}
@@ -673,31 +700,49 @@ def process_scene(
         print(f"  [Error] Cannot proceed without scene_info")
         return {"success_count": 0, "fail_count": 0, "results": []}
     
-    # Scan image directory
-    if not os.path.isdir(images_dir):
-        print(f"  [Error] Images directory not found: {images_dir}")
-        return {"success_count": 0, "fail_count": 0, "results": []}
-    
-    image_files = []
-    for ext in ["*.webp", "*.jpg", "*.jpeg", "*.png", "*.bmp"]:
-        image_files.extend(Path(images_dir).glob(ext))
-    image_files = sorted(image_files)
-    
-    if not image_files:
-        print(f"  [Warning] No image files found in {images_dir}")
+    object_entries = object_entries_from_args(
+        catalog_path=object_catalog,
+        datasets=object_datasets,
+        object_set_path=object_set,
+        images_dir=images_dir,
+        limit=limit_objects,
+    )
+
+    if not object_entries:
+        print(f"  [Warning] No object entries found. images_dir={images_dir} catalog={object_catalog}")
         return {"success_count": 0, "fail_count": 0, "results": []}
     
     success_count = 0
     fail_count = 0
     results = []
     
-    for image_path in image_files:
-        object_name = image_path.stem  # filename without extension
-        print(f"  Processing image: {image_path.name} (object: {object_name})")
+    for object_entry in object_entries:
+        object_name = str(
+            object_entry.get("object_name")
+            or object_entry.get("model_id")
+            or object_entry.get("object_key")
+            or f"object_{len(results)}"
+        )
+        image_path_value = str(object_entry.get("image_path", "") or "").strip()
+        image_path = Path(image_path_value) if image_path_value else None
+        has_image = bool(image_path and image_path.is_file())
+        print(
+            "  Processing object: {name} dataset={dataset} input={input_type}".format(
+                name=object_name,
+                dataset=object_entry.get("dataset", "legacy"),
+                input_type="image+text" if has_image else "semantic_text",
+            )
+        )
         
         try:
             # Query Qwen
-            raw_output, cleaned_output = query_qwen_for_rooms(client, str(image_path), scene_info, model)
+            raw_output, cleaned_output = query_qwen_for_rooms(
+                client,
+                str(image_path) if has_image else None,
+                scene_info,
+                model,
+                object_entry=object_entry,
+            )
             
             # Parse recommendations
             recommendations = parse_room_recommendations(cleaned_output, scene_info)
@@ -706,9 +751,15 @@ def process_scene(
             result_json = {
                 "scene_info": {
                     "scene_name": scene_name,
-                    "image": image_path.name,
+                    "image": image_path.name if has_image and image_path else "",
                     "object_name": object_name,
-                    "image_path": str(image_path.resolve()),
+                    "object_key": object_entry.get("object_key", ""),
+                    "dataset": object_entry.get("dataset", "legacy"),
+                    "model_id": object_entry.get("model_id", object_name),
+                    "display_name": object_entry.get("display_name", object_name),
+                    "semantic_text": object_entry.get("semantic_text", ""),
+                    "semantic_source": object_entry.get("semantic_source", ""),
+                    "image_path": str(image_path.resolve()) if has_image and image_path else "",
                     "query_timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
                     "model": model,
                 },
@@ -756,6 +807,10 @@ def main():
     
     # Paths
     parser.add_argument("--images-dir", type=str, default=DEFAULT_IMAGES_DIR, help="Directory containing object images")
+    parser.add_argument("--object-catalog", type=str, default=str(OBJECT_CATALOG_PATH), help="Unified object catalog JSON")
+    parser.add_argument("--object-datasets", type=str, default="legacy", help="Comma-separated datasets to use from catalog: legacy,ycb,hssd")
+    parser.add_argument("--object-set", type=str, default=None, help="Optional JSON list/object set to restrict objects")
+    parser.add_argument("--limit-objects", type=int, default=0, help="Limit number of object entries for smoke tests")
     parser.add_argument("--output-dir", type=str, default=DEFAULT_OUTPUT_DIR, help="Output directory for results")
     
     # SSH tunnel (defaults use password auth: sshpass -e ssh -p DEFAULT_SSH_PORT DEFAULT_SSH_USER@DEFAULT_SSH_HOST)
@@ -831,6 +886,10 @@ def main():
                 tunnel,
                 client,
                 args.model,
+                object_catalog=args.object_catalog,
+                object_datasets=[x.strip() for x in str(args.object_datasets).split(",") if x.strip()],
+                object_set=args.object_set,
+                limit_objects=int(args.limit_objects),
             )
             total_success += result["success_count"]
             total_fail += result["fail_count"]

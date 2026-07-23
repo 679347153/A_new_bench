@@ -118,6 +118,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 from hm3d_paths import resolve_scene_paths
+from project_paths import default_object_config_dirs_str, iter_object_config_dirs, resolve_hm3d_root
 
 try:
     import cv2  # type: ignore[import-not-found]
@@ -305,21 +306,23 @@ def _make_simulator(scene_name: str, data_dir: Path, width: int, height: int) ->
     return habitat_sim.Simulator(habitat_sim.Configuration(sim_cfg, [agent_cfg]))
 
 
-def _load_templates(sim: habitat_sim.Simulator, objects_dir: Path) -> None:
+def _load_templates(sim: habitat_sim.Simulator, objects_dir: Path | str) -> None:
     template_mgr = sim.get_object_template_manager()
-    abs_dir = str(objects_dir.expanduser().resolve())
-    if not os.path.isdir(abs_dir):
-        print(f"[Warning] objects dir not found: {abs_dir}")
+    config_dirs = iter_object_config_dirs(str(objects_dir) or default_object_config_dirs_str())
+    if not config_dirs:
+        print(f"[Warning] no object template configs found under: {objects_dir}")
         return
-    try:
-        if hasattr(template_mgr, "load_configs"):
-            template_mgr.load_configs(abs_dir)
-        elif hasattr(template_mgr, "add_template_search_path"):
-            template_mgr.add_template_search_path(abs_dir)
-        elif hasattr(template_mgr, "load_object_configs"):
-            template_mgr.load_object_configs(abs_dir)
-    except Exception as exc:
-        print(f"[Warning] failed to load object templates: {exc}")
+    for config_dir in config_dirs:
+        abs_dir = str(config_dir.expanduser().resolve())
+        try:
+            if hasattr(template_mgr, "load_configs"):
+                template_mgr.load_configs(abs_dir)
+            elif hasattr(template_mgr, "add_template_search_path"):
+                template_mgr.add_template_search_path(abs_dir)
+            elif hasattr(template_mgr, "load_object_configs"):
+                template_mgr.load_object_configs(abs_dir)
+        except Exception as exc:
+            print(f"[Warning] failed to load object templates from {abs_dir}: {exc}")
 
 
 def _resolve_template_handle(template_mgr: Any, model_id: str) -> Optional[str]:
@@ -1292,8 +1295,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("layout", help="已放置 layout JSON 路径")
     parser.add_argument("--scene", default=None, help="场景名；不填时尝试从 layout 或路径推断")
-    parser.add_argument("--data-dir", default="hm3d", help="HM3D 数据根目录")
-    parser.add_argument("--objects-dir", default="./objects", help="物体模板目录")
+    parser.add_argument("--data-dir", default=str(resolve_hm3d_root()), help="HM3D 数据根目录")
+    parser.add_argument("--objects-dir", default=default_object_config_dirs_str(), help="物体模板目录；可用系统路径分隔符传入多个目录")
     parser.add_argument(
         "--layout-scan-dir",
         default=None,
@@ -1387,7 +1390,7 @@ def main() -> int:
 
     objects = _layout_objects(payload)
     sim = _make_simulator(scene_name, Path(args.data_dir), int(args.width), int(args.height))
-    _load_templates(sim, Path(args.objects_dir))
+    _load_templates(sim, args.objects_dir)
     loaded_items, skipped = _load_layout_objects(sim, objects, initial_y_offset=float(args.initial_y_offset))
     layout_scan_dir = Path(args.layout_scan_dir) if args.layout_scan_dir else layout_path.parent
     layout_files = _list_layout_files(layout_path, layout_scan_dir, bool(args.recursive_layout_scan))

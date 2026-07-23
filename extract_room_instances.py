@@ -55,6 +55,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from hm3d_paths import resolve_scene_paths
+from project_paths import resolve_hm3d_root, resolve_results_root
 
 try:
     import habitat_sim  # type: ignore[import-not-found]
@@ -67,8 +68,8 @@ except ImportError:
     trimesh = None
 
 
-DEFAULT_DATA_DIR = Path(__file__).resolve().parent / "hm3d"
-DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent / "results" / "room_instances"
+DEFAULT_DATA_DIR = resolve_hm3d_root()
+DEFAULT_OUTPUT_DIR = resolve_results_root() / "room_instances"
 
 
 def _warn(message: str) -> None:
@@ -252,6 +253,7 @@ def _load_scene_info(scene_name: str, data_dir: Path, scene_info_path: Optional[
         script_dir,
         data_dir,
         data_dir.parent,
+        resolve_hm3d_root(),
         cwd / "hm3d",
         script_dir / "hm3d",
     ]

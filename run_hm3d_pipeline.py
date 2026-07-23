@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 One-click HM3D minival pipeline:
-1) Build standardized layout under ./hm3d/minival
+1) Build standardized layout under data/scenes/hm3d/minival
 2) Export scene info JSON for all scenes
 3) Render semantic demo frames for scenes with semantic annotations
 """
@@ -14,13 +14,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+from project_paths import resolve_hm3d_root
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 SRC_HAB = SCRIPT_DIR / "hm3d-minival-habitat-v0.2"
 SRC_SEM = SCRIPT_DIR / "hm3d-minival-semantic-annots-v0.2"
 SRC_CFG = SCRIPT_DIR / "hm3d-minival-semantic-configs-v0.2" / "hm3d_annotated_basis.scene_dataset_config.json"
 
-DST_ROOT = SCRIPT_DIR / "hm3d"
+DST_ROOT = resolve_hm3d_root()
 DST_MINIVAL = DST_ROOT / "minival"
 DST_CFG = DST_ROOT / "hm3d_annotated_basis.scene_dataset_config.json"
 

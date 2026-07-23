@@ -21,6 +21,7 @@ from benchmark.schemas import (
     validate_episode,
     write_json,
 )
+from project_paths import resolve_legacy_images_dir
 
 TASK_TYPES = ["open_vocab", "image_goal", "language_goal"]
 
@@ -106,7 +107,7 @@ def make_balanced_subtasks(scene_objects: List[str], rng: random.Random) -> List
         for _ in range(counts[task_type]):
             obj = rng.choice(scene_objects)
             idx += 1
-            image_path = f"objects_images/{obj}.jpg" if task_type == "image_goal" else None
+            image_path = str(resolve_legacy_images_dir() / f"{obj}.jpg") if task_type == "image_goal" else None
             prompt = (
                 f"Find object '{obj}' in the scene"
                 if task_type != "language_goal"

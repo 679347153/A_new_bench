@@ -79,6 +79,7 @@ from extract_room_instances import (
     get_instance_point_cloud,
 )
 from hm3d_paths import resolve_scene_paths
+from project_paths import resolve_results_root
 
 try:
     import habitat_sim  # type: ignore[import-not-found]
@@ -91,7 +92,7 @@ except ImportError:
     OpenAI = None  # type: ignore[assignment]
 
 
-DEFAULT_OUTPUT_DIR = Path("./results/receptacle_queries")
+DEFAULT_OUTPUT_DIR = resolve_results_root() / "receptacle_queries"
 DEFAULT_CANDIDATE_MIN_TOP_AREA_EST = 0.005
 DEFAULT_SURFACE_MIN_AREA = 0.005
 DEFAULT_SURFACE_MIN_SPAN = 0.02

@@ -60,6 +60,7 @@ import cv2
 import numpy as np
 
 from hm3d_paths import list_available_scenes, resolve_scene_paths
+from project_paths import default_object_config_dirs_str, iter_object_config_dirs, resolve_hm3d_root
 
 try:
 	from PIL import Image, ImageDraw, ImageFont
@@ -77,8 +78,8 @@ except ImportError:
 	sys.exit(1)
 
 
-SCENES_DIR = "hm3d"
-OBJECTS_DIR = "./objects"
+SCENES_DIR = str(resolve_hm3d_root())
+OBJECTS_DIR = default_object_config_dirs_str()
 
 AVAILABLE_SCENES = list_available_scenes(require_semantic=True)
 
@@ -363,17 +364,14 @@ def format_room_object_preview(editor_items, indices, max_items=4):
 
 
 def scan_object_templates():
-	if not os.path.isdir(OBJECTS_DIR):
-		raise FileNotFoundError(f"物体模板目录不存在: {OBJECTS_DIR}")
-
 	templates = []
-	for name in sorted(os.listdir(OBJECTS_DIR)):
-		if not name.endswith(".object_config.json"):
-			continue
-		templates.append(name[:-len(".object_config.json")])
+	for config_dir in iter_object_config_dirs(OBJECTS_DIR):
+		for path in sorted(config_dir.glob("*.object_config.json")):
+			templates.append(path.name[:-len(".object_config.json")])
+	templates = sorted(dict.fromkeys(templates))
 
 	if not templates:
-		raise RuntimeError("未在 objects 下发现任何 .object_config.json 模板")
+		raise RuntimeError(f"未在物体模板目录中发现任何 .object_config.json 模板: {OBJECTS_DIR}")
 	return templates
 
 
@@ -651,7 +649,7 @@ def main():
 
 	ui = UI_TEXT[ui_lang]
 
-	if not os.path.isdir("hm3d") or not os.path.isdir("objects"):
+	if not os.path.isdir(SCENES_DIR) or not iter_object_config_dirs(OBJECTS_DIR):
 		print(ui["run_from_root"])
 		sys.exit(1)
 
@@ -717,8 +715,8 @@ def main():
 		# 显式加载物体配置目录
 		try:
 			template_mgr = sim.get_object_template_manager()
-			abs_objects_dir = os.path.abspath(OBJECTS_DIR)
-			if os.path.isdir(abs_objects_dir):
+			for config_dir in iter_object_config_dirs(OBJECTS_DIR):
+				abs_objects_dir = str(config_dir.resolve())
 				# 尝试多种可能的加载方法
 				if hasattr(template_mgr, "load_configs"):
 					template_mgr.load_configs(abs_objects_dir)

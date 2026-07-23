@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Utilities for resolving HM3D scenes across val/minival splits.
 
-The workspace now contains two HM3D splits under ./hm3d:
-- ./hm3d/minival
-- ./hm3d/val
+The workspace now prefers two HM3D splits under data/scenes/hm3d:
+- data/scenes/hm3d/minival
+- data/scenes/hm3d/val
+
+Legacy ./hm3d is still accepted when it exists.
 
 Rules:
 - Prefer val when the same scene exists in both splits.
@@ -17,8 +19,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, List, Optional, Tuple
 
-WORKSPACE_ROOT = Path(__file__).resolve().parent
-HM3D_ROOT = WORKSPACE_ROOT / "hm3d"
+from project_paths import PROJECT_ROOT, resolve_hm3d_root
+
+WORKSPACE_ROOT = PROJECT_ROOT
+HM3D_ROOT = resolve_hm3d_root()
 MINIVAL_ROOT = HM3D_ROOT / "minival"
 VAL_ROOT = HM3D_ROOT / "val"
 

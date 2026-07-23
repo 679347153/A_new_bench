@@ -4,18 +4,21 @@
 
 逻辑流程：
 1. 选择模式：--mode load（读取已有概率）或 generate（随机生成概率）
-2. 加载/生成概率文件：对每个物体，前5个房间各分配一个概率（Σ=1）
-3. 采样物体位置：每个物体根据概率分布选择一个房间，使用房间几何中心作为位置
-4. 生成中间布局JSON
-5. 启动 test_layout.py 进行人工微调
-6. 保存微调结果，循环重复或退出
+2. 从统一 object catalog 读取对象；legacy 可带图片，YCB/HSSD 可仅带 semantic_text
+3. 加载/生成概率文件：对每个物体，前5个房间各分配一个概率（Σ=1）
+4. 采样物体位置：每个物体根据概率分布选择一个房间，使用房间几何中心作为位置
+5. 生成中间布局JSON
+6. 启动 test_layout.py 进行人工微调
+7. 保存微调结果，循环重复或退出
 
 用法：
   # 首次运行：生成概率文件
   python sample_and_place_objects.py \
     --scene 00808-y9hTuugGdiq \
     --mode generate \
-    --images-dir ./objects_images \
+    --object-datasets legacy,ycb,hssd \
+    --object-catalog data/object_catalog/object_catalog.json \
+    --images-dir data/object_images/legacy \
     --rooms-info-dir ./results/scene_info \
     --probabilities-dir ./results/probabilities \
     --layouts-dir ./results/layouts
@@ -39,7 +42,14 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 
 from hm3d_paths import list_available_scenes, resolve_scene_paths
+from object_catalog import object_entries_from_args
 from object_profiles import DEFAULT_OBJECT_PROFILE, get_object_profile
+from project_paths import (
+    OBJECT_CATALOG_PATH,
+    default_object_config_dirs_str,
+    resolve_legacy_images_dir,
+    resolve_results_root,
+)
 
 try:
     import numpy as np
@@ -49,33 +59,38 @@ except ImportError:
 
 
 # ===== 常量 =====
-DEFAULT_ROOMS_INFO_DIR = "./results/scene_info"
-DEFAULT_PROBABILITIES_DIR = "./results/probabilities"
-DEFAULT_LAYOUTS_DIR = "./results/layouts"
-DEFAULT_IMAGES_DIR = "./objects_images"
+DEFAULT_ROOMS_INFO_DIR = str(resolve_results_root() / "scene_info")
+DEFAULT_PROBABILITIES_DIR = str(resolve_results_root() / "probabilities")
+DEFAULT_LAYOUTS_DIR = str(resolve_results_root() / "layouts")
+DEFAULT_IMAGES_DIR = str(resolve_legacy_images_dir())
 
 AVAILABLE_SCENES = list_available_scenes(require_semantic=True)
 
 # ===== 模板映射 =====
 
-def build_object_template_index(objects_dir: str = "./objects") -> Dict[str, str]:
-    """Build case-insensitive map: object stem -> template model_id."""
+def build_object_template_index(objects_dir: str = "") -> Dict[str, str]:
+    """Build case-insensitive map: object stem -> template model_id.
+
+    `objects_dir` may be a single directory or an os.pathsep-separated list.
+    Directories are searched recursively so HSSD's objects/0, objects/1, ...
+    layout can be indexed.
+    """
     index: Dict[str, str] = {}
-    if not os.path.isdir(objects_dir):
-        return index
-
-    for filename in os.listdir(objects_dir):
-        if not filename.endswith(".object_config.json"):
+    roots = [p for p in str(objects_dir or default_object_config_dirs_str()).split(os.pathsep) if p]
+    for root_text in roots:
+        root = Path(root_text).expanduser()
+        if not root.is_dir():
             continue
-        model_id = filename[:-len(".object_config.json")]
-        lower_model = model_id.lower()
-        index[lower_model] = model_id
+        for path in root.rglob("*.object_config.json"):
+            model_id = path.name[:-len(".object_config.json")]
+            lower_model = model_id.lower()
+            index[lower_model] = model_id
 
-        # Add non-_4k alias if template uses _4k suffix.
-        if lower_model.endswith("_4k"):
-            alias = lower_model[:-3]
-            if alias and alias not in index:
-                index[alias] = model_id
+            # Add non-_4k alias if template uses _4k suffix.
+            if lower_model.endswith("_4k"):
+                alias = lower_model[:-3]
+                if alias and alias not in index:
+                    index[alias] = model_id
     return index
 
 
@@ -624,6 +639,11 @@ def sample_object_positions(
     mode: str,
     rooms_info_dir: str,
     probabilities_dir: str,
+    object_catalog: Optional[str] = None,
+    object_datasets: Optional[List[str]] = None,
+    object_set: Optional[str] = None,
+    limit_objects: int = 0,
+    objects_dir: str = "",
 ) -> Optional[Dict]:
     """
     Sample an object position for each image based on probabilities.
@@ -647,22 +667,28 @@ def sample_object_positions(
         }
     """
     
-    # Scan images
-    image_files = []
-    if os.path.isdir(images_dir):
-        for ext in ["*.webp", "*.jpg", "*.jpeg", "*.png", "*.bmp"]:
-            image_files.extend(Path(images_dir).glob(ext))
-    image_files = sorted(image_files)
-    
-    if not image_files:
-        print(f"[Warning] No image files found in {images_dir}")
+    object_entries = object_entries_from_args(
+        catalog_path=object_catalog,
+        datasets=object_datasets,
+        object_set_path=object_set,
+        images_dir=images_dir,
+        limit=limit_objects,
+    )
+
+    if not object_entries:
+        print(f"[Warning] No object entries found. images_dir={images_dir} catalog={object_catalog}")
         return None
 
-    template_index = build_object_template_index("./objects")
+    template_index = build_object_template_index(objects_dir or default_object_config_dirs_str())
     
     sampled_objects = []
-    for obj_idx, image_path in enumerate(image_files):
-        object_name = image_path.stem
+    for obj_idx, object_entry in enumerate(object_entries):
+        object_name = str(
+            object_entry.get("object_name")
+            or object_entry.get("model_id")
+            or object_entry.get("object_key")
+            or f"object_{obj_idx}"
+        )
         
         # Get/create probabilities
         probs_data = get_or_create_probabilities(
@@ -703,12 +729,19 @@ def sample_object_positions(
         room_aabb = sampled_room.get("room_aabb", {})
 
         resolved_model_id = resolve_model_id_for_template(object_name, template_index)
+        if object_entry.get("model_id"):
+            resolved_model_id = resolve_model_id_for_template(str(object_entry.get("model_id")), template_index)
         
         # Create object entry
         obj_entry = {
             "id": obj_idx,
+            "object_key": object_entry.get("object_key", ""),
+            "dataset": object_entry.get("dataset", "legacy"),
             "model_id": resolved_model_id,
-            "name": _prettify_model_name(resolved_model_id),
+            "name": object_entry.get("display_name") or _prettify_model_name(resolved_model_id),
+            "semantic_text": object_entry.get("semantic_text", ""),
+            "semantic_source": object_entry.get("semantic_source", ""),
+            "image_path": object_entry.get("image_path", ""),
             "position": sampled_center,
             "rotation": [0.0, 0.0, 0.0],
             "confidence": float(sampled_confidence),
@@ -837,6 +870,11 @@ def interactive_sampling_loop(
     placement_attempts: int,
     collision_radius_override: Optional[float],
     global_y_lift: float,
+    object_catalog: Optional[str] = None,
+    object_datasets: Optional[List[str]] = None,
+    object_set: Optional[str] = None,
+    limit_objects: int = 0,
+    objects_dir: str = "",
     ui_lang: str = "zh",
 ):
     """
@@ -858,6 +896,11 @@ def interactive_sampling_loop(
             mode,
             rooms_info_dir,
             probabilities_dir,
+            object_catalog=object_catalog,
+            object_datasets=object_datasets,
+            object_set=object_set,
+            limit_objects=limit_objects,
+            objects_dir=objects_dir,
         )
         if not layout_json:
             print("[Error] Failed to sample layout")
@@ -1014,6 +1057,11 @@ def main():
     )
     
     parser.add_argument("--images-dir", default=DEFAULT_IMAGES_DIR, help="Object images directory")
+    parser.add_argument("--object-catalog", default=str(OBJECT_CATALOG_PATH), help="Unified object catalog JSON")
+    parser.add_argument("--object-datasets", default="legacy", help="Comma-separated catalog datasets: legacy,ycb,hssd")
+    parser.add_argument("--object-set", default=None, help="Optional JSON object set")
+    parser.add_argument("--limit-objects", type=int, default=0, help="Limit object count for smoke tests")
+    parser.add_argument("--objects-dir", default=default_object_config_dirs_str(), help="Object template config dir(s), os.pathsep-separated")
     parser.add_argument("--rooms-info-dir", default=DEFAULT_ROOMS_INFO_DIR, help="Room query results directory")
     parser.add_argument("--probabilities-dir", default=DEFAULT_PROBABILITIES_DIR, help="Probabilities directory")
     parser.add_argument("--layouts-dir", default=DEFAULT_LAYOUTS_DIR, help="Layouts output directory")
@@ -1137,18 +1185,23 @@ def main():
     # Run interactive loop
     try:
         interactive_sampling_loop(
-            args.scene,
-            args.images_dir,
-            args.mode,
-            args.rooms_info_dir,
-            args.probabilities_dir,
-            args.layouts_dir,
-            args.placement,
-            args.placement_backend,
-            args.placement_attempts,
-            args.collision_radius_override,
-            args.global_y_lift,
-            args.ui_lang,
+            scene_name=args.scene,
+            images_dir=args.images_dir,
+            mode=args.mode,
+            rooms_info_dir=args.rooms_info_dir,
+            probabilities_dir=args.probabilities_dir,
+            layouts_dir=args.layouts_dir,
+            placement=args.placement,
+            placement_backend=args.placement_backend,
+            placement_attempts=args.placement_attempts,
+            collision_radius_override=args.collision_radius_override,
+            global_y_lift=args.global_y_lift,
+            object_catalog=args.object_catalog,
+            object_datasets=[x.strip() for x in str(args.object_datasets).split(",") if x.strip()],
+            object_set=args.object_set,
+            limit_objects=int(args.limit_objects),
+            objects_dir=args.objects_dir,
+            ui_lang=args.ui_lang,
         )
     except KeyboardInterrupt:
         print("\nInterrupted by user")

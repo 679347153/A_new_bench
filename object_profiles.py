@@ -32,6 +32,8 @@ import math
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
+from project_paths import default_object_config_dirs_str, find_object_config_path, iter_object_config_dirs
+
 
 DEFAULT_OBJECT_PROFILE: Dict[str, Any] = {
     "radius": 0.35,
@@ -80,13 +82,14 @@ def _aliases(model_id: str) -> list[str]:
     return list(dict.fromkeys([x for x in aliases if x]))
 
 
-def _load_profile_overrides(objects_dir: str = "./objects", profile_path: Optional[str] = None) -> Dict[str, Any]:
+def _load_profile_overrides(objects_dir: str = "", profile_path: Optional[str] = None) -> Dict[str, Any]:
     candidates = []
     if profile_path:
         candidates.append(Path(profile_path))
     candidates.append(Path("object_profiles.json"))
-    candidates.append(Path(objects_dir).expanduser().parent / "object_profiles.json")
-    candidates.append(Path(objects_dir).expanduser() / "object_profiles.json")
+    for config_dir in iter_object_config_dirs(objects_dir or default_object_config_dirs_str()):
+        candidates.append(config_dir / "object_profiles.json")
+        candidates.append(config_dir.parent / "object_profiles.json")
 
     for path in candidates:
         try:
@@ -99,18 +102,14 @@ def _load_profile_overrides(objects_dir: str = "./objects", profile_path: Option
 
 
 def _read_object_config(objects_dir: str, model_id: str) -> Dict[str, Any]:
-    root = Path(objects_dir).expanduser()
-    for alias in _aliases(model_id):
-        name = alias if alias.endswith(".object_config.json") else f"{alias}.object_config.json"
-        path = root / Path(name).name
-        if not path.is_file():
-            continue
+    path = find_object_config_path(model_id, objects_dir or default_object_config_dirs_str())
+    if path is not None:
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
             if isinstance(payload, dict):
                 return payload
         except Exception:
-            continue
+            pass
     return {}
 
 
@@ -141,7 +140,7 @@ def _normalize_profile(profile: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
-def get_object_profile(model_id: str, objects_dir: str = "./objects", profile_path: Optional[str] = None) -> Dict[str, Any]:
+def get_object_profile(model_id: str, objects_dir: str = "", profile_path: Optional[str] = None) -> Dict[str, Any]:
     profile = _keyword_profile(model_id)
     overrides = _load_profile_overrides(objects_dir=objects_dir, profile_path=profile_path)
     for alias in _aliases(model_id):

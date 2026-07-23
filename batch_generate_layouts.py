@@ -1,6 +1,35 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+# 中文说明
+# ========
+# `batch_generate_layouts.py` 是本项目批量生成最终场景布局的编排脚本。
+# 它面向“同一场景 + 同一批物体 + 多个随机 seed”的 benchmark 构建需求：
+# 先复用或准备 `scene_info`、房间推荐、概率分布和 receptacle surfaces，
+# 然后循环执行重新采样、物体到承载实例分配、最终自动放置，输出多个 layout。
+#
+# 支持两类对象输入：
+# 1. legacy 对象：优先使用 `data/object_images/legacy` 下的图片输入 Qwen。
+# 2. ycb/hssd 对象：没有图片时，使用 `data/object_catalog/object_catalog.json`
+#    中的 `semantic_text` 作为 text-only 输入传给 Qwen。
+#
+# 常用命令：
+#   python batch_generate_layouts.py --scene 00808-y9hTuugGdiq --num-layouts 10
+#   python batch_generate_layouts.py --scene 00808-y9hTuugGdiq --object-datasets ycb --num-layouts 5
+#   python batch_generate_layouts.py --plan-json scenes_plan.json --object-datasets legacy,ycb,hssd
+#
+# 计划模式 JSON 示例：
+#   {
+#     "num_layouts": 3,
+#     "base_seed": 42,
+#     "object_datasets": "legacy,ycb,hssd",
+#     "scenes": ["00808-y9hTuugGdiq"]
+#   }
+#
+# 输出目录：
+#   results/layouts/<scene>/batch_<YYYYmmdd_HHMMSS>/layout_000_seed_42.json
+#   results/layouts/<scene>/batch_<YYYYmmdd_HHMMSS>/manifest.json
+
 """
 批量生成一个或多个场景下的多个最终物体布局。
 
@@ -206,7 +235,9 @@ from assign_objects_to_receptacle_instances import (
     _safe_int,
 )
 from extract_room_instances import DEFAULT_DATA_DIR
+from object_catalog import object_entries_from_args
 from place_objects_on_instances import place_objects_on_instances
+from project_paths import OBJECT_CATALOG_PATH, default_object_config_dirs_str, resolve_results_root
 from sample_and_place_objects import (
     DEFAULT_IMAGES_DIR,
     DEFAULT_LAYOUTS_DIR,
@@ -253,6 +284,17 @@ def _image_files(images_dir: str) -> List[Path]:
     return sorted(files)
 
 
+def _object_entries(args: argparse.Namespace) -> List[Dict[str, Any]]:
+    datasets = args.object_datasets.split(",") if getattr(args, "object_datasets", "") else None
+    return object_entries_from_args(
+        catalog_path=getattr(args, "object_catalog", None),
+        datasets=datasets,
+        object_set_path=getattr(args, "object_set", None),
+        images_dir=getattr(args, "images_dir", None),
+        limit=int(getattr(args, "limit_objects", 0) or 0),
+    )
+
+
 def _run_command(cmd: Sequence[str], description: str) -> None:
     print(f"[Info] {description}: {' '.join(str(x) for x in cmd)}")
     completed = subprocess.run(list(cmd), check=False)
@@ -292,11 +334,12 @@ def _room_query_path(scene: str, object_name: str, rooms_info_dir: str) -> Path:
     return Path(rooms_info_dir) / scene / f"{object_name}_rooms.json"
 
 
-def _missing_room_queries(scene: str, images_dir: str, rooms_info_dir: str) -> List[str]:
+def _missing_room_queries(scene: str, object_entries: List[Dict[str, Any]], rooms_info_dir: str) -> List[str]:
     missing = []
-    for image_path in _image_files(images_dir):
-        if not _room_query_path(scene, image_path.stem, rooms_info_dir).is_file():
-            missing.append(image_path.stem)
+    for entry in object_entries:
+        object_name = str(entry.get("object_name") or entry.get("model_id") or entry.get("object_key") or "").strip()
+        if object_name and not _room_query_path(scene, object_name, rooms_info_dir).is_file():
+            missing.append(object_name)
     return missing
 
 
@@ -328,7 +371,8 @@ def _append_ssh_args(cmd: List[str], args: argparse.Namespace) -> None:
 
 
 def _ensure_room_queries(args: argparse.Namespace) -> None:
-    missing = _missing_room_queries(args.scene, args.images_dir, args.rooms_info_dir)
+    entries = _object_entries(args)
+    missing = _missing_room_queries(args.scene, entries, args.rooms_info_dir)
     if missing and not args.regenerate_room_queries:
         print(f"[Info] Missing room query files: {len(missing)}; generating room recommendations once.")
     elif args.regenerate_room_queries:
@@ -344,6 +388,10 @@ def _ensure_room_queries(args: argparse.Namespace) -> None:
         args.scene,
         "--images-dir",
         args.images_dir,
+        "--object-catalog",
+        str(args.object_catalog),
+        "--object-datasets",
+        str(args.object_datasets),
         "--output-dir",
         args.rooms_info_dir,
         "--max-tokens",
@@ -352,9 +400,13 @@ def _ensure_room_queries(args: argparse.Namespace) -> None:
     _append_ssh_args(cmd, args)
     if args.skip_api_health_check:
         cmd.append("--skip-api-health-check")
+    if args.object_set:
+        cmd.extend(["--object-set", str(args.object_set)])
+    if int(args.limit_objects) > 0:
+        cmd.extend(["--limit-objects", str(int(args.limit_objects))])
     _run_command(cmd, "Querying object room recommendations")
 
-    still_missing = _missing_room_queries(args.scene, args.images_dir, args.rooms_info_dir)
+    still_missing = _missing_room_queries(args.scene, entries, args.rooms_info_dir)
     if still_missing:
         preview = ", ".join(still_missing[:8])
         raise RuntimeError(f"room query files still missing: {len(still_missing)} preview=[{preview}]")
@@ -366,14 +418,16 @@ def _probability_path(scene: str, object_name: str, probabilities_dir: str) -> P
 
 def _ensure_probabilities(args: argparse.Namespace) -> List[Path]:
     ensured: List[Path] = []
-    image_files = _image_files(args.images_dir)
-    for idx, image_path in enumerate(image_files, start=1):
-        object_name = image_path.stem
-        _progress("probabilities", idx - 1, len(image_files), object_name, enabled=not args.no_progress)
+    entries = _object_entries(args)
+    for idx, entry in enumerate(entries, start=1):
+        object_name = str(entry.get("object_name") or entry.get("model_id") or entry.get("object_key") or "").strip()
+        if not object_name:
+            continue
+        _progress("probabilities", idx - 1, len(entries), object_name, enabled=not args.no_progress)
         prob_path = _probability_path(args.scene, object_name, args.probabilities_dir)
         if prob_path.is_file() and not args.regenerate_probabilities:
             ensured.append(prob_path)
-            _progress("probabilities", idx, len(image_files), f"reuse {object_name}", enabled=not args.no_progress)
+            _progress("probabilities", idx, len(entries), f"reuse {object_name}", enabled=not args.no_progress)
             continue
         data = generate_probabilities(
             object_name=object_name,
@@ -384,22 +438,23 @@ def _ensure_probabilities(args: argparse.Namespace) -> List[Path]:
         if not data or not prob_path.is_file():
             raise RuntimeError(f"failed to generate probability file for {object_name}: {prob_path}")
         ensured.append(prob_path)
-        _progress("probabilities", idx, len(image_files), f"ready {object_name}", enabled=not args.no_progress)
-    _progress("probabilities", len(image_files), len(image_files), "done", enabled=not args.no_progress, done=True)
+        _progress("probabilities", idx, len(entries), f"ready {object_name}", enabled=not args.no_progress)
+    _progress("probabilities", len(entries), len(entries), "done", enabled=not args.no_progress, done=True)
     print(f"[Info] Probability files ready: {len(ensured)}")
     return ensured
 
 
-def _missing_probabilities(scene: str, images_dir: str, probabilities_dir: str) -> List[str]:
+def _missing_probabilities(scene: str, object_entries: List[Dict[str, Any]], probabilities_dir: str) -> List[str]:
     missing = []
-    for image_path in _image_files(images_dir):
-        if not _probability_path(scene, image_path.stem, probabilities_dir).is_file():
-            missing.append(image_path.stem)
+    for entry in object_entries:
+        object_name = str(entry.get("object_name") or entry.get("model_id") or entry.get("object_key") or "").strip()
+        if object_name and not _probability_path(scene, object_name, probabilities_dir).is_file():
+            missing.append(object_name)
     return missing
 
 
 def _default_surfaces_path(scene: str) -> Path:
-    return Path("results") / "receptacle_queries" / scene / f"{scene}_receptacle_surfaces_all_rooms.json"
+    return resolve_results_root() / "receptacle_queries" / scene / f"{scene}_receptacle_surfaces_all_rooms.json"
 
 
 def _ensure_surfaces(args: argparse.Namespace) -> Path:
@@ -538,7 +593,7 @@ def _assign_objects(
             continue
 
         name = str(obj.get("name", model_id or f"obj_{idx}"))
-        image_path = _find_image_for_object(args.images_dir, model_id=model_id, name=name)
+        image_path = _find_image_for_object(args.images_dir, model_id=model_id, name=name) or str(obj.get("image_path", "") or "")
         raw_output = ""
         cleaned_output = ""
         parsed_output: Optional[Dict[str, Any]] = None
@@ -578,6 +633,10 @@ def _assign_objects(
                 "model_id": model_id,
                 "name": name,
                 "image_path": image_path,
+                "object_key": obj.get("object_key", ""),
+                "dataset": obj.get("dataset", ""),
+                "semantic_text": obj.get("semantic_text", ""),
+                "semantic_source": obj.get("semantic_source", ""),
                 "sampled_region_id": room_id,
                 "target_room_id": room_id,
                 "target_instance_id": int(decision["target_instance_id"]),
@@ -791,7 +850,11 @@ def _coerce_scene_entry(entry: Any, defaults: Dict[str, Any], index: int) -> Dic
             "probabilities_dir",
             "layouts_dir",
             "data_dir",
-            "objects_dir",
+        "objects_dir",
+        "object_catalog",
+        "object_datasets",
+        "object_set",
+        "limit_objects",
             "surfaces_json",
         ):
             if key in entry:
@@ -829,6 +892,10 @@ def _load_plan_entries(args: argparse.Namespace) -> Tuple[Path, List[Dict[str, A
             "layouts_dir",
             "data_dir",
             "objects_dir",
+            "object_catalog",
+            "object_datasets",
+            "object_set",
+            "limit_objects",
         ):
             if key in payload:
                 defaults[key] = payload[key]
@@ -852,11 +919,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--base-seed", type=int, default=42, help="Seed for layout_000; later layouts use base_seed + index")
 
     parser.add_argument("--images-dir", default=DEFAULT_IMAGES_DIR, help="Object image directory")
+    parser.add_argument("--object-catalog", default=str(OBJECT_CATALOG_PATH), help="Unified object catalog JSON; built by build_object_catalog.py")
+    parser.add_argument("--object-datasets", default="legacy", help="Comma-separated datasets to use: legacy,ycb,hssd")
+    parser.add_argument("--object-set", default=None, help="Optional JSON/text file listing object keys or names to use")
+    parser.add_argument("--limit-objects", type=int, default=0, help="Limit object count for smoke tests; 0 means all")
     parser.add_argument("--rooms-info-dir", default=DEFAULT_ROOMS_INFO_DIR, help="Scene info / room query output root")
     parser.add_argument("--probabilities-dir", default=DEFAULT_PROBABILITIES_DIR, help="Probability files root")
     parser.add_argument("--layouts-dir", default=DEFAULT_LAYOUTS_DIR, help="Layout output root")
     parser.add_argument("--data-dir", default=str(DEFAULT_DATA_DIR), help="HM3D data root")
-    parser.add_argument("--objects-dir", default="./objects", help="Object template config directory")
+    parser.add_argument("--objects-dir", default=default_object_config_dirs_str(), help="Object template config directory or os.pathsep-separated directories")
     parser.add_argument("--surfaces-json", default=None, help="Existing receptacle surfaces JSON")
 
     parser.add_argument("--regenerate-room-queries", action="store_true", help="Regenerate room recommendation files")
@@ -906,8 +977,12 @@ def _run_scene_batch(args: argparse.Namespace) -> Tuple[int, Path]:
     if not args.scene:
         print("[Error] scene is required for a scene batch", file=sys.stderr)
         return 1, Path()
-    if not _image_files(args.images_dir):
-        print(f"[Error] No object images found in {args.images_dir}", file=sys.stderr)
+    entries = _object_entries(args)
+    if not entries:
+        print(
+            f"[Error] No object entries found. catalog={args.object_catalog} datasets={args.object_datasets} images_dir={args.images_dir}",
+            file=sys.stderr,
+        )
         return 1, Path()
 
     batch_id, batch_dir = _make_batch_dir(args)
@@ -927,7 +1002,7 @@ def _run_scene_batch(args: argparse.Namespace) -> Tuple[int, Path]:
         scene_info_path = _ensure_scene_info(args)
 
         _stage(2, 5, "Prepare room probabilities")
-        missing_probs = _missing_probabilities(args.scene, args.images_dir, args.probabilities_dir)
+        missing_probs = _missing_probabilities(args.scene, entries, args.probabilities_dir)
         if missing_probs or args.regenerate_probabilities:
             print(f"[Info] Probability files missing/regenerating: {len(missing_probs)}")
             _ensure_room_queries(args)
@@ -977,6 +1052,11 @@ def _run_scene_batch(args: argparse.Namespace) -> Tuple[int, Path]:
                     mode="load",
                     rooms_info_dir=args.rooms_info_dir,
                     probabilities_dir=args.probabilities_dir,
+                    object_catalog=args.object_catalog,
+                    object_datasets=args.object_datasets.split(",") if args.object_datasets else None,
+                    object_set=args.object_set,
+                    limit_objects=int(args.limit_objects),
+                    objects_dir=args.objects_dir,
                 )
                 if not sampled_layout or not isinstance(sampled_layout.get("objects"), list):
                     raise RuntimeError("sampling produced no layout objects")

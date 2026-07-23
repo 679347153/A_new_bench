@@ -1,506 +1,255 @@
 # 场景数据集与任务集生成命令指南
 
-本文档按执行顺序汇总本项目中“动态家庭场景 layout 数据集”和“导航任务 episode 集”的生成命令。
+本文按执行顺序汇总本项目从数据整理、对象 catalog 构建、Qwen 房间推荐、概率采样、承载面提取、批量 layout 生成到任务集生成的常用命令。所有命令都通过 `log_filter.py` 包裹，便于压缩 Habitat/OpenGL 的高频日志。
 
-所有可执行命令均统一使用：
+默认 Qwen 连接方式为 SSH 密码登录：
 
-```bash
-python log_filter.py --run "<真实命令>"
-```
+- host: `7.216.187.6`
+- ssh port: `30180`
+- user: `root`
+- password: `666666`
+- remote vLLM API: `127.0.0.1:8000`
 
-这样可以过滤 Habitat/HM3D 高频日志噪声，并在末尾输出过滤统计。
+## 1. 整理项目数据目录
 
-默认示例场景为：
-
-```text
-00808-y9hTuugGdiq
-```
-
-默认远程 Qwen3-VL 连接方式为 SSH 密码登录：
-
-```text
-host: 7.216.187.6
-port: 30180
-user: root
-password: 666666
-remote vLLM: 127.0.0.1:8000
-```
-
-> 说明：相关脚本已内置上述默认值。命令中显式写出 `--ssh-password 666666` 是为了让运行配置更清楚。
-
----
-
-## 0. 环境与输入检查
-
-在项目根目录执行：
+先预览会移动哪些目录：
 
 ```bash
-python log_filter.py --run "python verify_workflow.py"
+python log_filter.py --run "python prepare_project_structure.py --dry-run"
 ```
 
-检查关键输入目录：
+确认无误后执行迁移。迁移后的主要目录为：
+
+- `data/scenes/hm3d`
+- `data/object_datasets/ycb-v1.2`
+- `data/object_datasets/hssd-hab-v0.2.3`
+- `data/object_images/legacy`
+- `data/object_catalog`
+- `data/archives`
 
 ```bash
-python log_filter.py --run "ls hm3d"
-python log_filter.py --run "ls objects"
-python log_filter.py --run "ls objects_images"
+python log_filter.py --run "python prepare_project_structure.py"
 ```
 
-若使用默认密码方式连接 Qwen，Linux 环境需要安装 `sshpass`：
+检查数据目录：
 
 ```bash
-python log_filter.py --run "sshpass -V"
+python log_filter.py --run "python -c \"from project_paths import resolve_hm3d_root, default_object_config_dirs_str; print(resolve_hm3d_root()); print(default_object_config_dirs_str())\""
 ```
 
-手动测试 SSH 登录：
+## 2. 构建对象 Catalog
+
+构建统一对象表。legacy 对象使用图片；YCB/HSSD 没有图片时使用 `semantic_text`。
 
 ```bash
-python log_filter.py --run "SSHPASS=666666 sshpass -e ssh -p 30180 root@7.216.187.6"
+python log_filter.py --run "python build_object_catalog.py --datasets legacy,ycb,hssd --write-missing"
 ```
 
-测试远程 Qwen/vLLM 隧道与图文调用：
+如果只想先检查对象数量，不写文件：
 
 ```bash
-python log_filter.py --run "python qwen3_vl_connect.py \
-  --ssh-password 666666 \
-  --vllm-host 127.0.0.1 \
-  --vllm-port 8000 \
-  --image objects_images/Camera_01.webp \
-  --prompt 'Describe this object briefly.'"
+python log_filter.py --run "python build_object_catalog.py --datasets ycb,hssd --dry-run"
 ```
 
----
+如果 HSSD 对象缺少语义描述，可先导出缺失列表：
 
-## 1. 导出场景语义信息
+```bash
+python log_filter.py --run "python build_object_catalog.py --datasets hssd --write-missing --missing-output data/object_catalog/missing_semantic_text.csv"
+```
+
+## 3. 为 HSSD 补充 Semantic Text
+
+HSSD 没有对象图片且部分配置没有描述性语义文本时，可用配置元数据批量请求 Qwen 生成简短描述。先小批量测试：
+
+```bash
+python log_filter.py --run "python generate_object_semantic_text.py --limit 20 --ssh-password 666666"
+```
+
+确认输出合理后继续生成更多条目：
+
+```bash
+python log_filter.py --run "python generate_object_semantic_text.py --limit 200 --ssh-password 666666"
+```
+
+生成后重建 catalog，让新增描述进入 `object_catalog.json`：
+
+```bash
+python log_filter.py --run "python build_object_catalog.py --datasets legacy,ycb,hssd --write-missing"
+```
+
+如果仍缺少描述，推荐方案是：先用 Habitat-Sim 离屏渲染对象预览图到 `data/object_previews/hssd`，再把“预览图 + config 元数据”一起发给 Qwen 生成更可靠的 `semantic_text`；若远端不可用，则人工编辑 `data/object_catalog/object_text_overrides.json` 覆盖关键对象。
+
+## 4. 导出 Scene Info
 
 单场景导出：
 
 ```bash
-python log_filter.py --run "python export_scene_info.py \
-  --scene 00808-y9hTuugGdiq \
-  --output-dir ./results/scene_info/00808-y9hTuugGdiq"
+python log_filter.py --run "python export_scene_info.py --scene 00808-y9hTuugGdiq --data-dir data/scenes/hm3d --output-dir results/scene_info/00808-y9hTuugGdiq"
 ```
 
-全量导出：
+批量导出所有可用场景：
 
 ```bash
-python log_filter.py --run "python export_scene_info.py \
-  --all \
-  --output-dir ./results/scene_info"
+python log_filter.py --run "python export_scene_info.py --all --data-dir data/scenes/hm3d --output-dir results/scene_info"
 ```
 
-预期产物：
+## 5. 生成对象到房间的推荐
 
-```text
-results/scene_info/<scene>/<scene>_scene_info.json
-```
-
----
-
-## 2. 生成物体房间推荐
-
-对单个场景、同一批 `objects_images` 物体图片生成房间推荐：
+legacy 图片对象：
 
 ```bash
-python log_filter.py --run "python query_rooms_for_objects.py \
-  --ssh-password 666666 \
-  --vllm-host 127.0.0.1 --vllm-port 8000 \
-  --images-dir ./objects_images \
-  --scene 00808-y9hTuugGdiq \
-  --output-dir ./results/scene_info/"
+python log_filter.py --run "python query_rooms_for_objects.py --scene 00808-y9hTuugGdiq --object-datasets legacy --images-dir data/object_images/legacy --output-dir results/scene_info --ssh-password 666666"
 ```
 
-预期产物：
-
-```text
-results/scene_info/<scene>/<object>_rooms.json
-```
-
----
-
-## 3. 生成或复用房间概率分布
-
-首次生成概率，并输出一个初始 layout：
+YCB text-only 对象：
 
 ```bash
-python log_filter.py --run "python sample_and_place_objects.py \
-  --scene 00808-y9hTuugGdiq \
-  --mode generate \
-  --images-dir ./objects_images \
-  --rooms-info-dir ./results/scene_info \
-  --probabilities-dir ./results/probabilities \
-  --layouts-dir ./results/layouts \
-  --placement auto"
+python log_filter.py --run "python query_rooms_for_objects.py --scene 00808-y9hTuugGdiq --object-datasets ycb --object-catalog data/object_catalog/object_catalog.json --output-dir results/scene_info --ssh-password 666666"
 ```
 
-后续复用已有概率重新采样：
+HSSD text-only 小批量测试：
 
 ```bash
-python log_filter.py --run "python sample_and_place_objects.py \
-  --scene 00808-y9hTuugGdiq \
-  --mode load \
-  --images-dir ./objects_images \
-  --rooms-info-dir ./results/scene_info \
-  --probabilities-dir ./results/probabilities \
-  --layouts-dir ./results/layouts \
-  --placement auto"
+python log_filter.py --run "python query_rooms_for_objects.py --scene 00808-y9hTuugGdiq --object-datasets hssd --object-catalog data/object_catalog/object_catalog.json --limit-objects 20 --output-dir results/scene_info --ssh-password 666666"
 ```
 
-预期产物：
-
-```text
-results/probabilities/<scene>/<object>_probs.json
-results/layouts/<scene>/temp_*.json
-```
-
----
-
-## 4. 生成可放置承载面
-
-使用 LLM 辅助筛选承载面：
+混合对象集：
 
 ```bash
-python log_filter.py --run "python query_room_receptacle_objects.py \
-  --scene 00808-y9hTuugGdiq \
-  --data-dir ./hm3d \
-  --scene-info-path ./results/scene_info/00808-y9hTuugGdiq/00808-y9hTuugGdiq_scene_info.json \
-  --output ./results/receptacle_queries/00808-y9hTuugGdiq/00808-y9hTuugGdiq_receptacle_surfaces_all_rooms.json \
-  --ssh-password 666666 \
-  --vllm-host 127.0.0.1 --vllm-port 8000 \
-  --surface-points-per-instance 256 \
-  --surface-min-points 48 \
-  --instance-pointcloud-points 2048"
+python log_filter.py --run "python query_rooms_for_objects.py --scene 00808-y9hTuugGdiq --object-datasets legacy,ycb,hssd --object-catalog data/object_catalog/object_catalog.json --images-dir data/object_images/legacy --limit-objects 50 --output-dir results/scene_info --ssh-password 666666"
 ```
 
-不使用 LLM 的启发式快速版本：
+## 6. 生成或复用概率分布
+
+仅采样生成 layout 草稿，缺失概率时自动根据房间推荐生成：
 
 ```bash
-python log_filter.py --run "python query_room_receptacle_objects.py \
-  --scene 00808-y9hTuugGdiq \
-  --data-dir ./hm3d \
-  --scene-info-path ./results/scene_info/00808-y9hTuugGdiq/00808-y9hTuugGdiq_scene_info.json \
-  --output ./results/receptacle_queries/00808-y9hTuugGdiq/00808-y9hTuugGdiq_receptacle_surfaces_all_rooms.json \
-  --disable-llm"
+python log_filter.py --run "python sample_and_place_objects.py --scene 00808-y9hTuugGdiq --mode generate --object-datasets legacy,ycb,hssd --object-catalog data/object_catalog/object_catalog.json --images-dir data/object_images/legacy --limit-objects 50 --rooms-info-dir results/scene_info --probabilities-dir results/probabilities --layouts-dir results/layouts"
 ```
 
-预期产物：
-
-```text
-results/receptacle_queries/<scene>/<scene>_receptacle_surfaces_all_rooms.json
-results/receptacle_queries/<scene>/surface_pointclouds/*.ply
-```
-
----
-
-## 5. 单次物体到承载实例分配与最终放置
-
-如果已经有 sampled layout，可指定 `--object-layout`：
+后续复用概率分布，只重新 sample：
 
 ```bash
-python log_filter.py --run "python assign_objects_to_receptacle_instances.py \
-  --scene 00808-y9hTuugGdiq \
-  --object-layout ./results/layouts/00808-y9hTuugGdiq/temp_auto_example.json \
-  --surfaces-json ./results/receptacle_queries/00808-y9hTuugGdiq/00808-y9hTuugGdiq_receptacle_surfaces_all_rooms.json \
-  --ssh-password 666666 \
-  --vllm-host 127.0.0.1 --vllm-port 8000"
+python log_filter.py --run "python sample_and_place_objects.py --scene 00808-y9hTuugGdiq --mode load --object-datasets legacy,ycb,hssd --object-catalog data/object_catalog/object_catalog.json --images-dir data/object_images/legacy --limit-objects 50 --rooms-info-dir results/scene_info --probabilities-dir results/probabilities --layouts-dir results/layouts"
 ```
 
-若不提供 `--object-layout`，脚本会按概率现场采样：
+## 7. 提取可放置承载面
+
+默认使用 Qwen 辅助排序承载面：
 
 ```bash
-python log_filter.py --run "python assign_objects_to_receptacle_instances.py \
-  --scene 00808-y9hTuugGdiq \
-  --surfaces-json ./results/receptacle_queries/00808-y9hTuugGdiq/00808-y9hTuugGdiq_receptacle_surfaces_all_rooms.json \
-  --images-dir ./objects_images \
-  --rooms-info-dir ./results/scene_info \
-  --probabilities-dir ./results/probabilities \
-  --ssh-password 666666 \
-  --vllm-host 127.0.0.1 --vllm-port 8000"
+python log_filter.py --run "python query_room_receptacle_objects.py --scene 00808-y9hTuugGdiq --data-dir data/scenes/hm3d --scene-info-path results/scene_info/00808-y9hTuugGdiq/00808-y9hTuugGdiq_scene_info.json --output results/receptacle_queries/00808-y9hTuugGdiq/00808-y9hTuugGdiq_receptacle_surfaces_all_rooms.json --ssh-password 666666"
 ```
 
-预期产物：
-
-```text
-results/object_instance_assignments/<scene>/*_object_instance_plan.json
-results/layouts/<scene>/*assigned_instance_layout.json
-```
-
----
-
-## 6. 批量生成同场景多时间 layout 数据集
-
-推荐直接使用批量脚本。它会尽量复用已有 `scene_info / probabilities / surfaces`，只对每个 layout 重新 sample 和放置。
-
-默认 LLM 版本：
+无远端 LLM 的启发式模式：
 
 ```bash
-python log_filter.py --run "python batch_generate_layouts.py \
-  --scene 00808-y9hTuugGdiq \
-  --num-layouts 10 \
-  --base-seed 42 \
-  --ssh-password 666666 \
-  --vllm-host 127.0.0.1 --vllm-port 8000"
+python log_filter.py --run "python query_room_receptacle_objects.py --scene 00808-y9hTuugGdiq --data-dir data/scenes/hm3d --scene-info-path results/scene_info/00808-y9hTuugGdiq/00808-y9hTuugGdiq_scene_info.json --output results/receptacle_queries/00808-y9hTuugGdiq/00808-y9hTuugGdiq_receptacle_surfaces_all_rooms.json --disable-llm"
+```
+
+## 8. 单次 Assignment + Final Layout
+
+自动生成 surfaces、采样、分配并放置：
+
+```bash
+python log_filter.py --run "python assign_objects_to_receptacle_instances.py --scene 00808-y9hTuugGdiq --object-datasets legacy,ycb,hssd --object-catalog data/object_catalog/object_catalog.json --images-dir data/object_images/legacy --limit-objects 50 --ssh-password 666666"
+```
+
+使用已有 surfaces，启发式分配：
+
+```bash
+python log_filter.py --run "python assign_objects_to_receptacle_instances.py --scene 00808-y9hTuugGdiq --surfaces-json results/receptacle_queries/00808-y9hTuugGdiq/00808-y9hTuugGdiq_receptacle_surfaces_all_rooms.json --object-datasets legacy,ycb,hssd --object-catalog data/object_catalog/object_catalog.json --images-dir data/object_images/legacy --limit-objects 50 --disable-llm"
+```
+
+## 9. 批量生成多个 Layout
+
+同一场景生成 10 个最终 layout，复用已有概率和 surfaces：
+
+```bash
+python log_filter.py --run "python batch_generate_layouts.py --scene 00808-y9hTuugGdiq --num-layouts 10 --object-datasets legacy,ycb,hssd --object-catalog data/object_catalog/object_catalog.json --images-dir data/object_images/legacy --limit-objects 50 --ssh-password 666666"
 ```
 
 无远端 LLM 的快速 smoke test：
 
 ```bash
-python log_filter.py --run "python batch_generate_layouts.py \
-  --scene 00808-y9hTuugGdiq \
-  --num-layouts 2 \
-  --base-seed 42 \
-  --disable-assignment-llm \
-  --disable-surface-llm"
+python log_filter.py --run "python batch_generate_layouts.py --scene 00808-y9hTuugGdiq --num-layouts 2 --object-datasets ycb --object-catalog data/object_catalog/object_catalog.json --disable-assignment-llm --disable-surface-llm"
 ```
 
-强制重算概率和承载面：
+计划模式，读取多场景列表：
 
 ```bash
-python log_filter.py --run "python batch_generate_layouts.py \
-  --scene 00808-y9hTuugGdiq \
-  --num-layouts 10 \
-  --regenerate-probabilities \
-  --regenerate-surfaces \
-  --ssh-password 666666"
+python log_filter.py --run "python batch_generate_layouts.py --plan-json scenes_plan.json --num-layouts 5 --object-datasets legacy,ycb,hssd --object-catalog data/object_catalog/object_catalog.json --images-dir data/object_images/legacy --limit-objects 50 --ssh-password 666666"
 ```
 
-预期产物：
-
-```text
-results/layouts/<scene>/batch_<YYYYmmdd_HHMMSS>/
-  manifest.json
-  layout_000_seed_42.json
-  layout_001_seed_43.json
-  ...
-```
-
----
-
-## 7. 多场景计划模式批量生成
-
-先准备计划文件，例如 `scenes_plan.json`：
+计划文件示例：
 
 ```json
 {
   "num_layouts": 5,
-  "base_seed": 100,
+  "base_seed": 42,
+  "object_datasets": "legacy,ycb,hssd",
+  "limit_objects": 50,
   "scenes": [
     "00808-y9hTuugGdiq",
-    {
-      "scene": "00800-TEEsavR23oF",
-      "num_layouts": 3,
-      "base_seed": 200
-    }
+    {"scene": "00800-TEEsavR23oF", "num_layouts": 3, "base_seed": 100}
   ]
 }
 ```
 
-运行计划：
+## 10. 可视化检查和手动修正
+
+打开单个 layout：
 
 ```bash
-python log_filter.py --run "python batch_generate_layouts.py \
-  --plan-json scenes_plan.json \
-  --ssh-password 666666 \
-  --vllm-host 127.0.0.1 --vllm-port 8000"
+python log_filter.py --run "python visualize_placed_layout.py results/layouts/00808-y9hTuugGdiq/00808-y9hTuugGdiq_assigned_instance_layout.json --scene 00808-y9hTuugGdiq"
 ```
 
-预期产物：
-
-```text
-results/layouts/<scene>/batch_<YYYYmmdd_HHMMSS>/manifest.json
-results/layouts/plan_<YYYYmmdd_HHMMSS>/plan_manifest.json
-```
-
----
-
-## 8. 可视化检查 layout 数据集
-
-严格复现原始 layout：
+打开 batch 中一个 layout，并用 `[` / `]` 切换同目录其他 layout：
 
 ```bash
-python log_filter.py --run "python visualize_placed_layout.py \
-  results/layouts/00808-y9hTuugGdiq/batch_<YYYYmmdd_HHMMSS>/layout_000_seed_42.json \
-  --scene 00808-y9hTuugGdiq \
-  --initial-y-offset 0"
+python log_filter.py --run "python visualize_placed_layout.py results/layouts/00808-y9hTuugGdiq/batch_20260101_120000/layout_000_seed_42.json --scene 00808-y9hTuugGdiq"
 ```
 
-调试物体高度偏移：
+手动调试高度，默认可视化加载时会给所有物体应用 `--initial-y-offset 2.5`：
 
 ```bash
-python log_filter.py --run "python visualize_placed_layout.py \
-  results/layouts/00808-y9hTuugGdiq/batch_<YYYYmmdd_HHMMSS>/layout_000_seed_42.json \
-  --scene 00808-y9hTuugGdiq \
-  --debug-offset \
-  --initial-y-offset 0 \
-  --offset-step 0.02"
+python log_filter.py --run "python visualize_placed_layout.py results/layouts/00808-y9hTuugGdiq/batch_20260101_120000/layout_000_seed_42.json --scene 00808-y9hTuugGdiq --debug-offset --offset-step 0.02"
 ```
 
-跨 batch 目录比较同一场景的多个 layout：
+严格复现原始 layout，不加默认 Y 偏移：
 
 ```bash
-python log_filter.py --run "python visualize_placed_layout.py \
-  results/layouts/00808-y9hTuugGdiq/batch_<YYYYmmdd_HHMMSS>/layout_000_seed_42.json \
-  --scene 00808-y9hTuugGdiq \
-  --layout-scan-dir results/layouts/00808-y9hTuugGdiq \
-  --recursive-layout-scan \
-  --initial-y-offset 0"
+python log_filter.py --run "python visualize_placed_layout.py results/layouts/00808-y9hTuugGdiq/batch_20260101_120000/layout_000_seed_42.json --scene 00808-y9hTuugGdiq --initial-y-offset 0"
 ```
 
-无窗口截图验收：
+使用 `test_layout.py` 手动编辑：
 
 ```bash
-python log_filter.py --run "python visualize_placed_layout.py \
-  results/layouts/00808-y9hTuugGdiq/batch_<YYYYmmdd_HHMMSS>/layout_000_seed_42.json \
-  --scene 00808-y9hTuugGdiq \
-  --headless \
-  --headless-max-focus 20 \
-  --initial-y-offset 0"
+python log_filter.py --run "python test_layout.py 00808-y9hTuugGdiq --layout scene_objects.json --ui-lang zh"
 ```
 
----
+## 11. 生成任务集
 
-## 9. 由 layout 数据集生成导航 episode 任务集
-
-从单个 batch manifest 生成 episode：
+如果已有最终 layout，可以调用当前任务编排脚本生成 benchmark 任务集：
 
 ```bash
-python log_filter.py --run "python -m benchmark.build_episodes \
-  --layout-manifest results/layouts/00808-y9hTuugGdiq/batch_<YYYYmmdd_HHMMSS>/manifest.json \
-  --version dynamic_household_v1 \
-  --split val \
-  --images-dir objects_images \
-  --episodes-per-layout 3 \
-  --min-subtasks 5 \
-  --max-subtasks 10 \
-  --success-radius 1.2 \
-  --max-steps 500 \
-  --seed 42"
+python log_filter.py --run "python orchestrate_sd_ovon_complete.py --scene 00808-y9hTuugGdiq --layout results/layouts/00808-y9hTuugGdiq/00808-y9hTuugGdiq_assigned_instance_layout.json"
 ```
 
-从多个 scene 的 manifest 一次生成：
+如果需要先生成观测数据：
 
 ```bash
-python log_filter.py --run "python -m benchmark.build_episodes \
-  --layout-manifest \
-    results/layouts/00808-y9hTuugGdiq/batch_<id_a>/manifest.json \
-    results/layouts/00800-TEEsavR23oF/batch_<id_b>/manifest.json \
-  --version dynamic_household_v1 \
-  --split train \
-  --images-dir objects_images \
-  --episodes-per-layout 3"
+python log_filter.py --run "python observation_generator.py --scene 00808-y9hTuugGdiq --layout results/layouts/00808-y9hTuugGdiq/00808-y9hTuugGdiq_assigned_instance_layout.json"
 ```
 
-预期产物：
+## 12. 输出结构速览
 
-```text
-benchmark/episodes/<version>/<split>/<scene>/<layout_id>/*.json
-benchmark/splits/benchmark_split_<version>.json
-```
+最终主要产物：
 
----
-
-## 10. 运行任务集并生成轨迹
-
-Oracle smoke test：
-
-```bash
-python log_filter.py --run "python -m benchmark.runner \
-  --episodes benchmark/episodes/dynamic_household_v1/val \
-  --output benchmark/eval/dynamic_household_v1/oracle.jsonl \
-  --mode oracle \
-  --sample-start-pose"
-```
-
-No-op 失败基线：
-
-```bash
-python log_filter.py --run "python -m benchmark.runner \
-  --episodes benchmark/episodes/dynamic_household_v1/val \
-  --output benchmark/eval/dynamic_household_v1/noop.jsonl \
-  --mode noop"
-```
-
-接入自定义 agent：
-
-```bash
-python log_filter.py --run "python -m benchmark.runner \
-  --episodes benchmark/episodes/dynamic_household_v1/val \
-  --output benchmark/eval/my_agent/run.jsonl \
-  --agent-module my_agent_module:create_agent \
-  --agent-id my_agent \
-  --sample-start-pose \
-  --load-layout-objects"
-```
-
-预期产物：
-
-```text
-benchmark/eval/<version>/*.jsonl
-```
-
----
-
-## 11. 离线评测
-
-评测 oracle：
-
-```bash
-python log_filter.py --run "python -m benchmark.evaluate \
-  --episodes benchmark/episodes/dynamic_household_v1/val \
-  --trajectories benchmark/eval/dynamic_household_v1/oracle.jsonl \
-  --output-dir benchmark/eval/dynamic_household_v1/oracle"
-```
-
-评测 noop：
-
-```bash
-python log_filter.py --run "python -m benchmark.evaluate \
-  --episodes benchmark/episodes/dynamic_household_v1/val \
-  --trajectories benchmark/eval/dynamic_household_v1/noop.jsonl \
-  --output-dir benchmark/eval/dynamic_household_v1/noop"
-```
-
-预期产物：
-
-```text
-benchmark/eval/<version>/<run_name>/summary.json
-benchmark/eval/<version>/<run_name>/episode_results.jsonl
-benchmark/eval/<version>/<run_name>/by_task_type.json
-benchmark/eval/<version>/<run_name>/exploration_curve.json
-```
-
----
-
-## 12. 最小推荐流水线
-
-如果只想快速从 layout 生成跑到 episode 评测，可按下面顺序执行：
-
-```bash
-python log_filter.py --run "python verify_workflow.py"
-
-python log_filter.py --run "python batch_generate_layouts.py \
-  --scene 00808-y9hTuugGdiq \
-  --num-layouts 2 \
-  --ssh-password 666666 \
-  --vllm-host 127.0.0.1 --vllm-port 8000"
-
-python log_filter.py --run "python -m benchmark.build_episodes \
-  --layout-manifest results/layouts/00808-y9hTuugGdiq/batch_<YYYYmmdd_HHMMSS>/manifest.json \
-  --version smoke_v1 \
-  --split val \
-  --images-dir objects_images \
-  --episodes-per-layout 1"
-
-python log_filter.py --run "python -m benchmark.runner \
-  --episodes benchmark/episodes/smoke_v1/val \
-  --output benchmark/eval/smoke_v1/oracle.jsonl \
-  --mode oracle"
-
-python log_filter.py --run "python -m benchmark.evaluate \
-  --episodes benchmark/episodes/smoke_v1/val \
-  --trajectories benchmark/eval/smoke_v1/oracle.jsonl \
-  --output-dir benchmark/eval/smoke_v1/oracle"
-```
-
-将 `<YYYYmmdd_HHMMSS>` 替换为实际生成的 batch 目录名。
-
+- `results/scene_info/<scene>/<scene>_scene_info.json`：场景语义、房间和实例明细。
+- `results/scene_info/<scene>/<object>_rooms.json`：每个对象的候选房间推荐。
+- `results/probabilities/<scene>/<object>_probs.json`：对象在候选房间上的采样概率。
+- `results/receptacle_queries/<scene>/<scene>_receptacle_surfaces_all_rooms.json`：每个房间可放置承载面的候选实例和表面点云引用。
+- `results/layouts/<scene>/batch_<time>/layout_<idx>_seed_<seed>.json`：最终布局。
+- `results/layouts/<scene>/batch_<time>/manifest.json`：批量生成摘要、失败原因和复用路径。
+- `benchmark/...`：根据布局和观测生成的任务集、episode 或评测产物。

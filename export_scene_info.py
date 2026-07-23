@@ -39,6 +39,7 @@ from pathlib import Path
 import numpy as np
 
 from hm3d_paths import list_available_scenes, resolve_scene_paths
+from project_paths import resolve_hm3d_root
 
 try:
     import habitat_sim
@@ -48,7 +49,7 @@ except ImportError:
 
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_DATA_DIR = os.path.join(SCRIPT_DIR, "hm3d")
+DEFAULT_DATA_DIR = str(resolve_hm3d_root())
 DEFAULT_DATASET_CONFIG = None
 
 
@@ -495,7 +496,7 @@ def main():
     parser.add_argument("--scene", type=str, help="场景名, 例如 00808-y9hTuugGdiq")
     parser.add_argument("--all", action="store_true", help="导出 data_dir 下所有场景")
     parser.add_argument("--data-dir", type=str, default=DEFAULT_DATA_DIR,
-                        help="场景数据根目录 (默认: 脚本目录下 hm3d，自动合并 val/minival)")
+                        help="场景数据根目录 (默认优先 data/scenes/hm3d，兼容旧 hm3d，自动合并 val/minival)")
     parser.add_argument("--dataset-config", type=str, default=None,
                         help="scene_dataset_config.json 路径（可选；默认按场景 split 自动选择）")
     parser.add_argument("--output-dir", type=str, default=None,

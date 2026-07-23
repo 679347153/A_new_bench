@@ -63,6 +63,7 @@ import numpy as np
 from extract_room_instances import DEFAULT_DATA_DIR
 from hm3d_paths import resolve_scene_paths
 from object_profiles import get_object_profile, surface_requirement
+from project_paths import default_object_config_dirs_str, find_object_config_path, iter_object_config_dirs
 
 try:
     import habitat_sim  # type: ignore[import-not-found]
@@ -77,7 +78,7 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
         return default
 
 
-def _get_profile(model_id: str, objects_dir: str = "./objects") -> Dict[str, Any]:
+def _get_profile(model_id: str, objects_dir: str = "") -> Dict[str, Any]:
     """
     获取物体几何/放置 profile。
 
@@ -533,37 +534,15 @@ def _load_point_cloud_file(path: Path) -> np.ndarray:
 
 def _template_collidable_from_config(objects_dir: str, model_id: str) -> Optional[bool]:
     """Read is_collidable from a local object config when available."""
-    root = Path(objects_dir).expanduser()
     raw = str(model_id).strip()
     if not raw:
         return None
-
-    names = [raw]
-    if raw.endswith(".object_config.json"):
-        names.append(raw.replace(".object_config.json", ""))
-    else:
-        names.append(f"{raw}.object_config.json")
-    if not raw.endswith("_4k") and not raw.endswith("_4k.object_config.json"):
-        names.extend([f"{raw}_4k", f"{raw}_4k.object_config.json"])
-
-    candidates: List[Path] = []
-    for name in names:
-        p = Path(name)
-        if p.suffix == ".json":
-            candidates.append(root / p.name)
-        else:
-            candidates.append(root / f"{p.name}.object_config.json")
-
-    seen = set()
-    for path in candidates:
-        key = str(path)
-        if key in seen or not path.is_file():
-            continue
-        seen.add(key)
+    path = find_object_config_path(raw, objects_dir or default_object_config_dirs_str())
+    if path is not None:
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except Exception:
-            continue
+            return None
         if isinstance(payload, dict) and "is_collidable" in payload:
             return bool(payload.get("is_collidable"))
     return None
@@ -626,25 +605,24 @@ def _make_simulator(scene_name: str, data_dir: Path, enable_physics: bool = True
 
 
 def _load_templates(sim: Any, objects_dir: str) -> None:
-    """从本地 `objects/` 目录加载模板配置到模拟器。"""
+    """Load object template configs from all configured dataset roots."""
     if sim is None:
         return
     try:
         template_mgr = sim.get_object_template_manager()
     except Exception:
         return
-    abs_dir = os.path.abspath(objects_dir)
-    if not os.path.isdir(abs_dir):
-        return
-    try:
-        if hasattr(template_mgr, "load_configs"):
-            template_mgr.load_configs(abs_dir)
-        elif hasattr(template_mgr, "add_template_search_path"):
-            template_mgr.add_template_search_path(abs_dir)
-        elif hasattr(template_mgr, "load_object_configs"):
-            template_mgr.load_object_configs(abs_dir)
-    except Exception:
-        return
+    for config_dir in iter_object_config_dirs(objects_dir or default_object_config_dirs_str()):
+        abs_dir = str(config_dir.expanduser().resolve())
+        try:
+            if hasattr(template_mgr, "load_configs"):
+                template_mgr.load_configs(abs_dir)
+            elif hasattr(template_mgr, "add_template_search_path"):
+                template_mgr.add_template_search_path(abs_dir)
+            elif hasattr(template_mgr, "load_object_configs"):
+                template_mgr.load_object_configs(abs_dir)
+        except Exception:
+            continue
 
 
 def place_objects_on_instances(
@@ -652,7 +630,7 @@ def place_objects_on_instances(
     assignment_plan: Dict[str, Any],
     surfaces_payload: Dict[str, Any],
     data_dir: Path = DEFAULT_DATA_DIR,
-    objects_dir: str = "./objects",
+    objects_dir: str = "",
     min_distance: float = 0.25,
     spawn_height: float = 0.3,
     max_trials_per_object: int = 30,
@@ -971,7 +949,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--surfaces-json", required=True, help="Receptacle surfaces JSON from query_room_receptacle_objects.py")
     parser.add_argument("--output-layout", type=str, default=None, help="Output layout JSON path")
     parser.add_argument("--data-dir", type=str, default=str(DEFAULT_DATA_DIR), help="HM3D root directory")
-    parser.add_argument("--objects-dir", type=str, default="./objects", help="Object template configs directory")
+    parser.add_argument("--objects-dir", type=str, default=default_object_config_dirs_str(), help="Object template config directory or os.pathsep-separated directories")
     parser.add_argument("--min-distance", type=float, default=0.25, help="Minimum pairwise object distance on XZ")
     parser.add_argument("--spawn-height", type=float, default=0.3, help="Spawn height above target surface point")
     parser.add_argument("--max-trials-per-object", type=int, default=30, help="Max candidate points per object")

@@ -29,6 +29,9 @@ import logging
 import time
 from pathlib import Path
 
+from object_catalog import object_entries_from_args
+from project_paths import OBJECT_CATALOG_PATH, resolve_legacy_images_dir
+
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
@@ -244,15 +247,26 @@ class SDOVONPipelineOrchestrator:
 
         # 如果没有 rooms 推理结果，则回退到图片名，保证后续 stage 有可处理对象。
         if not objects:
-            img_dir = Path("objects_images")
-            for idx, p in enumerate(sorted(img_dir.glob("*"))):
-                if p.suffix.lower() not in {".jpg", ".jpeg", ".png", ".webp"}:
-                    continue
+            entries = object_entries_from_args(
+                catalog_path=OBJECT_CATALOG_PATH,
+                datasets=("legacy", "ycb", "hssd"),
+                images_dir=resolve_legacy_images_dir(),
+                limit=50,
+            )
+            for idx, entry in enumerate(entries):
+                object_name = str(
+                    entry.get("object_name")
+                    or entry.get("model_id")
+                    or entry.get("object_key")
+                    or f"object_{idx}"
+                )
                 objects.append(
                     {
                         "object_id": idx,
-                        "name": p.stem,
-                        "model_id": p.stem,
+                        "name": object_name,
+                        "model_id": str(entry.get("model_id", object_name)),
+                        "dataset": entry.get("dataset", ""),
+                        "semantic_text": entry.get("semantic_text", ""),
                         "confidence": 0.5,
                         "recommended_rooms": [],
                     }

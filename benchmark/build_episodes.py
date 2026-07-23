@@ -16,6 +16,7 @@ from .schemas import (
     validate_episode,
     write_json,
 )
+from project_paths import resolve_legacy_images_dir
 
 IMAGE_EXTENSIONS = (".webp", ".jpg", ".jpeg", ".png", ".bmp")
 
@@ -385,7 +386,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--version", default="v2", help="Benchmark version name")
     parser.add_argument("--split", choices=("train", "val", "test"), default="val")
     parser.add_argument("--output-root", default="benchmark/episodes")
-    parser.add_argument("--images-dir", default="objects_images")
+    parser.add_argument("--images-dir", default=str(resolve_legacy_images_dir()))
     parser.add_argument("--episodes-per-layout", type=int, default=3)
     parser.add_argument("--min-subtasks", type=int, default=5)
     parser.add_argument("--max-subtasks", type=int, default=10)

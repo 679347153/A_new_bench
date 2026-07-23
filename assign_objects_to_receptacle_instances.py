@@ -77,6 +77,7 @@ from object_profiles import (
     surface_requirement,
 )
 from place_objects_on_instances import place_objects_on_instances
+from project_paths import OBJECT_CATALOG_PATH, default_object_config_dirs_str
 from sample_and_place_objects import (
     DEFAULT_IMAGES_DIR,
     DEFAULT_PROBABILITIES_DIR,
@@ -396,7 +397,7 @@ def _candidate_fits_profile(candidate: Dict[str, Any], profile: Dict[str, Any]) 
 def _filter_surface_candidates_for_object(
     candidates: List[Dict[str, Any]],
     model_id: str,
-    objects_dir: str = "./objects",
+    objects_dir: str = "",
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     profile = get_object_profile(model_id, objects_dir=objects_dir)
     req = surface_requirement(profile)
@@ -670,6 +671,11 @@ def _load_or_sample_objects(args: argparse.Namespace) -> List[Dict[str, Any]]:
             mode=args.sampling_mode,
             rooms_info_dir=args.rooms_info_dir,
             probabilities_dir=args.probabilities_dir,
+            object_catalog=args.object_catalog,
+            object_datasets=args.object_datasets.split(",") if args.object_datasets else None,
+            object_set=args.object_set,
+            limit_objects=int(args.limit_objects),
+            objects_dir=args.objects_dir,
         )
         if payload is None:
             return []
@@ -691,7 +697,7 @@ def _query_assignment_for_object(
     image_path: Optional[str],
     candidates: List[Dict[str, Any]],
     max_tokens: int,
-    objects_dir: str = "./objects",
+    objects_dir: str = "",
 ) -> Tuple[str, str, Optional[Dict[str, Any]]]:
     """
     对单个物体在单个房间内发起目标实例分配查询。
@@ -703,6 +709,10 @@ def _query_assignment_for_object(
         "model_id": object_entry.get("model_id"),
         "name": object_entry.get("name"),
         "confidence": object_entry.get("confidence", 0.5),
+        "object_key": object_entry.get("object_key", ""),
+        "dataset": object_entry.get("dataset", ""),
+        "semantic_text": object_entry.get("semantic_text", ""),
+        "semantic_source": object_entry.get("semantic_source", ""),
         "image_path": image_path or "",
         "object_profile": get_object_profile(str(object_entry.get("model_id", "")), objects_dir=objects_dir),
     }
@@ -752,6 +762,10 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--object-layout", type=str, default=None, help="Optional sampled layout json with objects + sampled_region_id")
     parser.add_argument("--images-dir", type=str, default=DEFAULT_IMAGES_DIR, help="Object images directory")
+    parser.add_argument("--object-catalog", type=str, default=str(OBJECT_CATALOG_PATH), help="Unified object catalog JSON; built by build_object_catalog.py")
+    parser.add_argument("--object-datasets", type=str, default="legacy", help="Comma-separated datasets to use: legacy,ycb,hssd")
+    parser.add_argument("--object-set", type=str, default=None, help="Optional JSON/text file listing object keys or names to use")
+    parser.add_argument("--limit-objects", type=int, default=0, help="Limit object count for smoke tests; 0 means all")
     parser.add_argument("--sampling-mode", choices=["load", "generate"], default="load", help="Sampling mode when --object-layout is absent")
     parser.add_argument("--rooms-info-dir", type=str, default=DEFAULT_ROOMS_INFO_DIR, help="Room query results dir for sampling")
     parser.add_argument("--probabilities-dir", type=str, default=DEFAULT_PROBABILITIES_DIR, help="Probability files dir for sampling")
@@ -762,7 +776,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--skip-placement", action="store_true", help="Only output assignment plan and skip calling file2")
 
     parser.add_argument("--data-dir", type=str, default=str(DEFAULT_DATA_DIR), help="HM3D root dir")
-    parser.add_argument("--objects-dir", type=str, default="./objects", help="Object template configs directory for file2")
+    parser.add_argument("--objects-dir", type=str, default=default_object_config_dirs_str(), help="Object template config directory or os.pathsep-separated directories")
     parser.add_argument("--min-distance", type=float, default=0.25, help="Minimum object pair distance in placement")
     parser.add_argument("--spawn-height", type=float, default=0.3, help="Spawn height above target surface in placement")
     parser.add_argument("--max-trials-per-object", type=int, default=30, help="Max surface points tried per object in placement")
@@ -879,7 +893,7 @@ def main() -> int:
 
         model_id = str(obj.get("model_id", ""))
         name = str(obj.get("name", model_id or f"obj_{idx}"))
-        image_path = _find_image_for_object(args.images_dir, model_id=model_id, name=name)
+        image_path = _find_image_for_object(args.images_dir, model_id=model_id, name=name) or str(obj.get("image_path", "") or "")
 
         raw_output = ""
         cleaned_output = ""
@@ -914,6 +928,10 @@ def main() -> int:
                 "model_id": model_id,
                 "name": name,
                 "image_path": image_path,
+                "object_key": obj.get("object_key", ""),
+                "dataset": obj.get("dataset", ""),
+                "semantic_text": obj.get("semantic_text", ""),
+                "semantic_source": obj.get("semantic_source", ""),
                 "sampled_region_id": room_id,
                 "target_room_id": room_id,
                 "target_instance_id": int(decision["target_instance_id"]),
