@@ -316,7 +316,7 @@ def _ensure_scene_info(args: argparse.Namespace) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     cmd = [
         sys.executable,
-        "export_scene_info.py",
+        str(Path(__file__).with_name("export_scene_info.py")),
         "--scene",
         args.scene,
         "--data-dir",
@@ -383,7 +383,7 @@ def _ensure_room_queries(args: argparse.Namespace) -> None:
 
     cmd = [
         sys.executable,
-        "query_rooms_for_objects.py",
+        str(Path(__file__).with_name("query_rooms_for_objects.py")),
         "--scene",
         args.scene,
         "--images-dir",
@@ -473,7 +473,7 @@ def _ensure_surfaces(args: argparse.Namespace) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     cmd = [
         sys.executable,
-        "query_room_receptacle_objects.py",
+        str(Path(__file__).with_name("query_room_receptacle_objects.py")),
         "--scene",
         args.scene,
         "--data-dir",

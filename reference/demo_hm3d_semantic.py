@@ -1,4 +1,5 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
+import _path_setup  # noqa: F401
 """
 HM3DSem 语义数据读取演示脚本
 用途：用 Habitat 加载 HM3D 场景，渲染 RGB 图 + 彩色语义分割图，并打印语义物体列表。
@@ -17,7 +18,7 @@ import sys
 
 import numpy as np
 
-from hm3d_paths import list_available_scenes, resolve_scene_paths
+from core.hm3d_paths import list_available_scenes, resolve_scene_paths
 
 try:
     import habitat_sim

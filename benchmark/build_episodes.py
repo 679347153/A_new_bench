@@ -16,7 +16,7 @@ from .schemas import (
     validate_episode,
     write_json,
 )
-from project_paths import resolve_legacy_images_dir
+from core.project_paths import resolve_legacy_images_dir
 
 IMAGE_EXTENSIONS = (".webp", ".jpg", ".jpeg", ".png", ".bmp")
 

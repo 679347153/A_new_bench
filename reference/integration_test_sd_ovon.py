@@ -1,4 +1,5 @@
-﻿"""
+import _path_setup  # noqa: F401
+"""
 SD-OVON: Mock vs Production 切换指南与集成测试
 
 演示如何在快速原型 (mock/stub) 和完整生产版本之间无缝切换。

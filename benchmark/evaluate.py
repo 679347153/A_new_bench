@@ -15,6 +15,7 @@ from .metrics import (
     exploration_curve,
 )
 from .schemas import Episode, Pose, Subtask, SubtaskTrace, Trajectory, read_episode, read_trajectory_jsonl
+from core.project_paths import default_object_config_dirs_str, resolve_hm3d_root
 
 
 def _iter_episode_paths(root: Path) -> List[Path]:
@@ -194,8 +195,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--episodes", required=True, help="Episode JSON file or directory")
     parser.add_argument("--trajectories", required=True, help="Trajectory JSONL produced by benchmark.runner or compatible agent")
     parser.add_argument("--output-dir", default="benchmark/eval/latest")
-    parser.add_argument("--data-dir", default="hm3d")
-    parser.add_argument("--objects-dir", default="objects")
+    parser.add_argument("--data-dir", default=str(resolve_hm3d_root()))
+    parser.add_argument("--objects-dir", default=default_object_config_dirs_str())
     parser.add_argument("--euclidean-fallback", action=argparse.BooleanOptionalAction, default=True)
     return parser.parse_args(argv)
 

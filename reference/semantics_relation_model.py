@@ -1,3 +1,4 @@
+import _path_setup  # noqa: F401
 """
 Semantics Relation Model (Phase 3.4)
 
@@ -9,7 +10,7 @@ from typing import Dict, List, Any, Tuple, Optional
 import json
 import os
 import numpy as np
-from sd_ovon_config import SDOVONConfig
+from core.sd_ovon_config import SDOVONConfig
 
 
 class SemanticsRelationModel:

@@ -55,7 +55,7 @@ def safe_output_name(text: str) -> str:
 
 def _load_json(path: Path) -> Dict[str, Any]:
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
         return payload if isinstance(payload, dict) else {}
     except Exception:
         return {}

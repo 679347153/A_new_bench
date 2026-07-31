@@ -841,7 +841,7 @@ def launch_editor(scene_name: str, layout_json_path: str, ui_lang: str = "zh") -
 
     cmd = [
         sys.executable,
-        "test_layout.py",
+        str(Path(__file__).with_name("test_layout.py")),
         scene_name,
         "--layout", layout_json_path,
         "--ui-lang", ui_lang,

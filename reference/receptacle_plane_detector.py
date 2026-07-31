@@ -1,3 +1,4 @@
+import _path_setup  # noqa: F401
 """
 Receptacle Plane Detector (Phase 3.3)
 
@@ -9,8 +10,8 @@ from typing import Dict, List, Any, Optional, Tuple
 import json
 import os
 import numpy as np
-from sd_ovon_config import SDOVONConfig
-from pipeline_schema import SchemaValidator
+from core.sd_ovon_config import SDOVONConfig
+from core.pipeline_schema import SchemaValidator
 
 
 class ReceptaclePlaneDetector:

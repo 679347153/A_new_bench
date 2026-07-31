@@ -204,7 +204,7 @@
 
 执行示例：
 ```bash
-python batch_generate_layouts.py \
+python core/batch_generate_layouts.py \
   --scene 00808-y9hTuugGdiq \
   --num-layouts 10 \
   --ssh-password 666666
@@ -212,7 +212,7 @@ python batch_generate_layouts.py \
 
 启发式快速验证：
 ```bash
-python batch_generate_layouts.py \
+python core/batch_generate_layouts.py \
   --scene 00808-y9hTuugGdiq \
   --num-layouts 2 \
   --disable-assignment-llm \
@@ -238,7 +238,7 @@ python batch_generate_layouts.py \
 
 执行示例：
 ```bash
-python visualize_placed_layout.py \
+python core/visualize_placed_layout.py \
   results/layouts/00808-y9hTuugGdiq/00808-y9hTuugGdiq_assigned_instance_layout.json \
   --scene 00808-y9hTuugGdiq \
   --debug-offset --offset-step 0.02
@@ -246,7 +246,7 @@ python visualize_placed_layout.py \
 
 严格复现原始 layout：
 ```bash
-python visualize_placed_layout.py \
+python core/visualize_placed_layout.py \
   results/layouts/00808-y9hTuugGdiq/batch_<YYYYmmdd_HHMMSS>/layout_000_seed_42.json \
   --scene 00808-y9hTuugGdiq \
   --initial-y-offset 0
@@ -254,7 +254,7 @@ python visualize_placed_layout.py \
 
 跨 batch 比较：
 ```bash
-python visualize_placed_layout.py \
+python core/visualize_placed_layout.py \
   results/layouts/00808-y9hTuugGdiq/batch_<YYYYmmdd_HHMMSS>/layout_000_seed_42.json \
   --scene 00808-y9hTuugGdiq \
   --layout-scan-dir results/layouts/00808-y9hTuugGdiq \
@@ -282,15 +282,15 @@ python visualize_placed_layout.py \
 
 执行指引：
 1. 管道过滤（已有日志文件）：
-   - `python log_filter.py < raw.log > clean.log`
+   - `python core/log_filter.py < raw.log > clean.log`
 2. 实时过滤（包裹脚本运行）：
-   - `python log_filter.py --run "python query_room_receptacle_objects.py --scene 00808-y9hTuugGdiq --disable-llm"`
+   - `python core/log_filter.py --run "python core/query_room_receptacle_objects.py --scene 00808-y9hTuugGdiq --disable-llm"`
 3. 额外添加自定义噪声规则：
-   - `python log_filter.py --run "python your_script.py" --drop-regex "some noisy regex"`
+   - `python core/log_filter.py --run "python your_script.py" --drop-regex "some noisy regex"`
 4. 关闭内置规则，仅使用自定义规则：
-   - `python log_filter.py --no-default-rules --drop-regex "regex1" < raw.log > clean.log`
+   - `python core/log_filter.py --no-default-rules --drop-regex "regex1" < raw.log > clean.log`
 5. 不输出统计摘要：
-   - `python log_filter.py --run "python your_script.py" --no-summary`
+   - `python core/log_filter.py --run "python your_script.py" --no-summary`
 
 ## 4. 数据流与产物
 
@@ -317,7 +317,7 @@ python visualize_placed_layout.py \
 
 ### 4.3 终端输出治理产物
 1. 日志清洗脚本：`log_filter.py`
-2. 可选清洗输出：用户可自行重定向为 `clean.log`（例如 `python log_filter.py < raw.log > clean.log`）
+2. 可选清洗输出：用户可自行重定向为 `clean.log`（例如 `python core/log_filter.py < raw.log > clean.log`）
 
 ## 5. 工作流状态（现状与目标）
 

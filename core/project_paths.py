@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Iterable, List, Optional, Sequence
 
 
-PROJECT_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 DATA_ROOT = Path(os.environ.get("BENCH_DATA_ROOT", PROJECT_ROOT / "data")).expanduser()
 RESULTS_ROOT = Path(os.environ.get("BENCH_RESULTS_ROOT", PROJECT_ROOT / "results")).expanduser()

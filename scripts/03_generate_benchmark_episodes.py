@@ -21,7 +21,7 @@ from benchmark.schemas import (
     validate_episode,
     write_json,
 )
-from project_paths import resolve_legacy_images_dir
+from core.project_paths import resolve_legacy_images_dir
 
 TASK_TYPES = ["open_vocab", "image_goal", "language_goal"]
 

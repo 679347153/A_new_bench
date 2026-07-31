@@ -58,8 +58,7 @@ from project_paths import OBJECT_CATALOG_PATH, resolve_legacy_images_dir, resolv
 try:
     from openai import OpenAI
 except ImportError:
-    print("Error: openai package not found. Install with: pip install openai")
-    sys.exit(1)
+    OpenAI = None  # type: ignore[assignment]
 
 try:
     import habitat_sim
@@ -847,6 +846,9 @@ def main():
         sys.exit(1)
     if args.scene and args.scene not in AVAILABLE_SCENES:
         print(f"[Error] Scene not found in merged valid scenes: {args.scene}")
+        sys.exit(1)
+    if OpenAI is None:
+        print("[Error] openai package not found. Install with: pip install openai")
         sys.exit(1)
 
     scenes_to_process = [args.scene] if args.scene else AVAILABLE_SCENES

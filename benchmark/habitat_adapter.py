@@ -8,7 +8,8 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 import numpy as np
 
-from hm3d_paths import resolve_scene_paths
+from core.hm3d_paths import resolve_scene_paths
+from core.project_paths import default_object_config_dirs_str, iter_object_config_dirs, resolve_hm3d_root
 
 try:
     import habitat_sim  # type: ignore[import-not-found]
@@ -73,8 +74,8 @@ class HabitatLayoutAdapter:
         self,
         scene_name: str,
         layout_path: Optional[Path] = None,
-        data_dir: Path = Path("hm3d"),
-        objects_dir: Path = Path("objects"),
+        data_dir: Path = resolve_hm3d_root(),
+        objects_dir: Path = Path(default_object_config_dirs_str()),
         enable_physics: bool = False,
         load_layout_objects: bool = True,
         require_habitat: bool = True,
@@ -126,16 +127,19 @@ class HabitatLayoutAdapter:
         return habitat_sim.Simulator(habitat_sim.Configuration(sim_cfg, [agent_cfg]))
 
     def _load_templates(self) -> None:
-        if self.sim is None or not self.objects_dir.is_dir():
+        if self.sim is None:
             return
         mgr = self.sim.get_object_template_manager()
-        try:
-            if hasattr(mgr, "load_configs"):
-                mgr.load_configs(str(self.objects_dir.resolve()))
-            elif hasattr(mgr, "add_template_search_path"):
-                mgr.add_template_search_path(str(self.objects_dir.resolve()))
-        except Exception:
-            return
+        for config_dir in iter_object_config_dirs(str(self.objects_dir)):
+            try:
+                if hasattr(mgr, "load_configs"):
+                    mgr.load_configs(str(config_dir.resolve()))
+                elif hasattr(mgr, "add_template_search_path"):
+                    mgr.add_template_search_path(str(config_dir.resolve()))
+                elif hasattr(mgr, "load_object_configs"):
+                    mgr.load_object_configs(str(config_dir.resolve()))
+            except Exception:
+                continue
 
     def load_layout(self, layout_path: Path) -> int:
         if self.sim is None:
@@ -224,8 +228,8 @@ def shortest_path_sum_euclidean(start_pose: Pose, subtasks: Iterable[Subtask]) -
 
 def episode_shortest_path_sum(
     episode: Episode,
-    data_dir: Path = Path("hm3d"),
-    objects_dir: Path = Path("objects"),
+    data_dir: Path = resolve_hm3d_root(),
+    objects_dir: Path = Path(default_object_config_dirs_str()),
     use_euclidean_fallback: bool = True,
 ) -> float:
     try:

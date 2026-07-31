@@ -1,3 +1,4 @@
+import _path_setup  # noqa: F401
 """
 本文件作用总览（Phase 3.1 Coverage Sampling）
 
@@ -18,7 +19,7 @@ from typing import Dict, List, Tuple, Any, Optional
 import numpy as np
 import json
 import os
-from sd_ovon_config import SDOVONConfig
+from core.sd_ovon_config import SDOVONConfig
 
 
 class CoverageSampler:

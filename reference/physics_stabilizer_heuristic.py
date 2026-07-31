@@ -1,3 +1,4 @@
+import _path_setup  # noqa: F401
 """
 Physics Stabilizer Heuristic (Phase 3.4 补强)
 
@@ -9,7 +10,7 @@ from typing import Dict, List, Any, Optional, Tuple
 import json
 import os
 import numpy as np
-from sd_ovon_config import SDOVONConfig
+from core.sd_ovon_config import SDOVONConfig
 
 
 class PhysicsStabilizerHeuristic:

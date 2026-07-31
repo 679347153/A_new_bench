@@ -10,6 +10,7 @@ from typing import Any, Dict, Iterable, List, Optional, Protocol, Sequence
 
 from .habitat_adapter import HabitatLayoutAdapter, euclidean_distance
 from .schemas import Episode, Pose, Subtask, SubtaskTrace, Trajectory, TrajectoryStep, read_episode, to_json_dict
+from core.project_paths import default_object_config_dirs_str, resolve_hm3d_root
 
 
 class AgentAdapter(Protocol):
@@ -217,8 +218,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--mode", choices=("oracle", "noop"), default="oracle")
     parser.add_argument("--agent-id", default="oracle")
     parser.add_argument("--agent-module", default=None, help="Optional module:factory returning an external AgentAdapter")
-    parser.add_argument("--data-dir", default="hm3d")
-    parser.add_argument("--objects-dir", default="objects")
+    parser.add_argument("--data-dir", default=str(resolve_hm3d_root()))
+    parser.add_argument("--objects-dir", default=default_object_config_dirs_str())
     parser.add_argument("--step-size", type=float, default=0.25)
     parser.add_argument("--sample-start-pose", action="store_true")
     parser.add_argument("--load-layout-objects", action="store_true")

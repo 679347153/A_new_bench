@@ -1,4 +1,5 @@
-﻿"""
+import _path_setup  # noqa: F401
+"""
 Run SD-OVON Pipeline
 
 端到端编排脚本，串联 3.1 到 3.4 流程和编辑器交互。
@@ -13,16 +14,16 @@ from typing import Dict, List, Any, Optional
 import argparse
 
 # 导入各阶段模块
-from sd_ovon_config import SDOVONConfig
+from core.sd_ovon_config import SDOVONConfig
 from coverage_sampler import CoverageSampler, run_coverage_sampler
 from observation_generator import ObservationGenerator, generate_observations
-from instance_fusion_stub import InstanceFusionStub, extract_and_fuse_instances
+from core.instance_fusion_stub import InstanceFusionStub, extract_and_fuse_instances
 from receptacle_plane_detector import ReceptaclePlaneDetector, detect_receptacles
 from semantics_relation_model import SemanticsRelationModel
 from semantics_aware_placer import SemanticsAwarePlacer, place_objects_semantically
 from physics_stabilizer_heuristic import PhysicsStabilizerHeuristic, check_placement_stability
 from mock_room_recommender import MockRoomRecommender, generate_mock_recommendations
-from hm3d_paths import resolve_scene_paths
+from core.hm3d_paths import resolve_scene_paths
 
 
 class SDOVONPipeline:

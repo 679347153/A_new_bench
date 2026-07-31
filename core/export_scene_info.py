@@ -44,8 +44,7 @@ from project_paths import resolve_hm3d_root
 try:
     import habitat_sim
 except ImportError:
-    print("Error: habitat_sim not found. 请在 agentrag 环境中运行。")
-    sys.exit(1)
+    habitat_sim = None
 
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -505,6 +504,9 @@ def main():
 
     if not args.scene and not args.all:
         parser.error("请指定 --scene 或 --all")
+    if habitat_sim is None:
+        print("Error: habitat_sim not found. 请在 Habitat/agentrag 环境中运行导出。")
+        sys.exit(1)
 
     data_dir = args.data_dir
     if not os.path.isdir(data_dir):

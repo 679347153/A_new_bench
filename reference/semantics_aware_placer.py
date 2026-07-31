@@ -1,3 +1,4 @@
+import _path_setup  # noqa: F401
 """
 Semantics-Aware Placer (Phase 3.4)
 
@@ -10,9 +11,9 @@ import json
 import os
 import numpy as np
 import math
-from sd_ovon_config import SDOVONConfig
+from core.sd_ovon_config import SDOVONConfig
 from semantics_relation_model import SemanticsRelationModel
-from pipeline_schema import SchemaValidator
+from core.pipeline_schema import SchemaValidator
 
 
 class SemanticsAwarePlacer:

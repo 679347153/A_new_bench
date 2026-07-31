@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """用 viser 可视化 extract_room_instances.py 导出的实例点云，支持手动/自动/交互三种匹配模式。
 
 本文件解决的问题
@@ -79,6 +79,7 @@
 """
 
 from __future__ import annotations
+import _path_setup  # noqa: F401
 
 import argparse
 import json
@@ -89,7 +90,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from hm3d_paths import resolve_scene_paths
+from core.hm3d_paths import resolve_scene_paths
 
 try:
     import viser  # type: ignore[import-not-found]

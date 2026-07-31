@@ -7,16 +7,19 @@ One-click HM3D minival pipeline:
 """
 
 from __future__ import annotations
+import _path_setup  # noqa: F401
 
+import argparse
 import json
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
-from project_paths import resolve_hm3d_root
+from core.project_paths import PROJECT_ROOT, resolve_hm3d_root
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+CORE_DIR = PROJECT_ROOT / "core"
 SRC_HAB = SCRIPT_DIR / "hm3d-minival-habitat-v0.2"
 SRC_SEM = SCRIPT_DIR / "hm3d-minival-semantic-annots-v0.2"
 SRC_CFG = SCRIPT_DIR / "hm3d-minival-semantic-configs-v0.2" / "hm3d_annotated_basis.scene_dataset_config.json"
@@ -80,7 +83,7 @@ def build_standard_layout() -> tuple[list[str], list[str], list[str]]:
 
 def run_command(cmd: list[str]) -> None:
     print("[RUN]", " ".join(cmd))
-    completed = subprocess.run(cmd, cwd=SCRIPT_DIR, check=False)
+    completed = subprocess.run(cmd, cwd=PROJECT_ROOT, check=False)
     if completed.returncode != 0:
         raise RuntimeError(f"Command failed with code {completed.returncode}: {' '.join(cmd)}")
 
@@ -90,7 +93,7 @@ def export_all_scene_info() -> None:
     run_command(
         [
             sys.executable,
-            "export_scene_info.py",
+            str(CORE_DIR / "export_scene_info.py"),
             "--all",
             "--data-dir",
             str(DST_MINIVAL),
@@ -111,7 +114,7 @@ def render_semantic_demos(semantic_scenes: list[str], frames: int = 6) -> dict[s
         scene_out.mkdir(parents=True, exist_ok=True)
         cmd = [
             sys.executable,
-            "demo_hm3d_semantic.py",
+            str(SCRIPT_DIR / "demo_hm3d_semantic.py"),
             "--scene",
             scene,
             "--save-dir",
@@ -153,15 +156,43 @@ def write_report(
     print(f"[OK] Report written: {REPORT_PATH}")
 
 
-def main() -> None:
+def build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description=(
+            "One-click reference HM3D minival pipeline. "
+            "It expects the original minival source folders beside this script, "
+            "then exports scene info through core/export_scene_info.py."
+        )
+    )
+    parser.add_argument(
+        "--frames",
+        type=int,
+        default=6,
+        help="Number of semantic demo frames rendered per semantic-ready scene",
+    )
+    parser.add_argument(
+        "--skip-semantic-demos",
+        action="store_true",
+        help="Only build the standardized layout and export scene_info JSON",
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = build_arg_parser().parse_args(argv)
+
     print("[STEP] Build standardized hm3d/minival layout")
     all_scenes, semantic_ready_scenes, semantic_missing_scenes = build_standard_layout()
 
     print("[STEP] Export scene info for all scenes")
     export_all_scene_info()
 
-    print("[STEP] Render semantic demos for semantic-ready scenes")
-    semantic_render_status = render_semantic_demos(semantic_ready_scenes)
+    if args.skip_semantic_demos:
+        print("[STEP] Skip semantic demos")
+        semantic_render_status = {}
+    else:
+        print("[STEP] Render semantic demos for semantic-ready scenes")
+        semantic_render_status = render_semantic_demos(semantic_ready_scenes, frames=args.frames)
 
     write_report(
         all_scenes,

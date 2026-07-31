@@ -94,7 +94,7 @@ def _load_profile_overrides(objects_dir: str = "", profile_path: Optional[str] =
     for path in candidates:
         try:
             if path.is_file():
-                payload = json.loads(path.read_text(encoding="utf-8"))
+                payload = json.loads(path.read_text(encoding="utf-8-sig"))
                 return payload if isinstance(payload, dict) else {}
         except Exception:
             continue
@@ -105,7 +105,7 @@ def _read_object_config(objects_dir: str, model_id: str) -> Dict[str, Any]:
     path = find_object_config_path(model_id, objects_dir or default_object_config_dirs_str())
     if path is not None:
         try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
+            payload = json.loads(path.read_text(encoding="utf-8-sig"))
             if isinstance(payload, dict):
                 return payload
         except Exception:

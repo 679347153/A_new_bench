@@ -594,7 +594,7 @@ def _resolve_or_generate_surfaces_json(args: argparse.Namespace) -> Path:
 
     cmd: List[str] = [
         sys.executable,
-        "query_room_receptacle_objects.py",
+        str(Path(__file__).with_name("query_room_receptacle_objects.py")),
         "--scene",
         str(args.scene),
         "--data-dir",

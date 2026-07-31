@@ -1,4 +1,4 @@
-# HM3D 物体房间推理与概率采样布局系统
+﻿# HM3D 物体房间推理与概率采样布局系统
 
 ## 项目简介
 
@@ -65,7 +65,7 @@ pip install habitat-sim
 - --timeout：默认 3600 秒
 
 ### 单场景示例
-python query_rooms_for_objects.py \
+python core/query_rooms_for_objects.py \
   --ssh-password 666666 \
   --vllm-host 127.0.0.1 --vllm-port 8000 \
   --images-dir ./objects_images \
@@ -73,7 +73,7 @@ python query_rooms_for_objects.py \
   --output-dir ./results/scene_info/
 
 ### 全量场景示例
-python query_rooms_for_objects.py \
+python core/query_rooms_for_objects.py \
   --ssh-password 666666 \
   --scenes all \
   --output-dir ./results/scene_info/
@@ -97,7 +97,7 @@ python query_rooms_for_objects.py \
 - --ui-lang：zh 或 en，默认 zh
 
 ### 首次运行（生成概率）
-python sample_and_place_objects.py \
+python core/sample_and_place_objects.py \
   --scene 00808-y9hTuugGdiq \
   --mode generate \
   --images-dir ./objects_images \
@@ -107,7 +107,7 @@ python sample_and_place_objects.py \
   --placement auto
 
 ### 后续迭代（读取已有概率）
-python sample_and_place_objects.py \
+python core/sample_and_place_objects.py \
   --scene 00808-y9hTuugGdiq \
   --mode load \
   --probabilities-dir ./results/probabilities \
@@ -209,7 +209,7 @@ objects_images/
 
 ### 2）生成房间推荐（Qwen）
 
-python query_rooms_for_objects.py \
+python core/query_rooms_for_objects.py \
   --ssh-password 666666 \
   --vllm-host 127.0.0.1 --vllm-port 8000 \
   --images-dir ./objects_images \
@@ -222,7 +222,7 @@ results/scene_info/00808-y9hTuugGdiq/mug_01_rooms.json
 
 ### 3）首次采样并打开编辑器（generate）
 
-python sample_and_place_objects.py \
+python core/sample_and_place_objects.py \
   --scene 00808-y9hTuugGdiq \
   --mode generate \
   --images-dir ./objects_images \
@@ -366,7 +366,7 @@ python scripts/05_evaluate_benchmark.py \
 ### 快速复跑布局（与 benchmark 并行）
 
 ```bash
-python sample_and_place_objects.py \
+python core/sample_and_place_objects.py \
   --scene 00808-y9hTuugGdiq \
   --mode load \
   --probabilities-dir ./results/probabilities \

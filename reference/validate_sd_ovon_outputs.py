@@ -1,3 +1,4 @@
+import _path_setup  # noqa: F401
 """
 Validate SD-OVON Outputs
 
@@ -8,7 +9,7 @@ from typing import Dict, List, Any, Optional
 import json
 import os
 import numpy as np
-from sd_ovon_config import SDOVONConfig
+from core.sd_ovon_config import SDOVONConfig
 
 
 class OutputValidator:

@@ -1,4 +1,4 @@
-# HM3D 语义布局主线 + SD-OVON 链路协同流程（自动放置版）
+﻿# HM3D 语义布局主线 + SD-OVON 链路协同流程（自动放置版）
 
 ## 1. 目标与范围
 
@@ -91,13 +91,13 @@ python run_hm3d_pipeline.py
 单场景：
 
 ```bash
-python export_scene_info.py --scene 00808-y9hTuugGdiq
+python core/export_scene_info.py --scene 00808-y9hTuugGdiq
 ```
 
 全量：
 
 ```bash
-python export_scene_info.py --all
+python core/export_scene_info.py --all
 ```
 
 ---
@@ -107,7 +107,7 @@ python export_scene_info.py --all
 单场景示例：
 
 ```bash
-python query_rooms_for_objects.py \
+python core/query_rooms_for_objects.py \
   --ssh-password 666666 \
   --vllm-host 127.0.0.1 --vllm-port 8000 \
   --images-dir ./objects_images \
@@ -128,7 +128,7 @@ python query_rooms_for_objects.py \
 按每个物体采样出的目标房间自动放置（逐房间处理）：
 
 ```bash
-python sample_and_place_objects.py \
+python core/sample_and_place_objects.py \
   --scene 00808-y9hTuugGdiq \
   --mode generate \
   --images-dir ./objects_images \
@@ -144,7 +144,7 @@ python sample_and_place_objects.py \
 读取已生成概率并自动放置示例：
 
 ```bash
-python sample_and_place_objects.py \
+python core/sample_and_place_objects.py \
   --scene 00808-y9hTuugGdiq \
   --mode load \
   --probabilities-dir ./results/probabilities \
@@ -164,7 +164,7 @@ python sample_and_place_objects.py \
 #### 3.2 人工微调模式
 
 ```bash
-python sample_and_place_objects.py \
+python core/sample_and_place_objects.py \
   --scene 00808-y9hTuugGdiq \
   --mode load \
   --probabilities-dir ./results/probabilities \
@@ -252,14 +252,14 @@ python -c "import json; from orchestrate_sd_ovon_complete import SDOVONPipelineO
 ```bash
 python verify_workflow.py
 
-python query_rooms_for_objects.py \
+python core/query_rooms_for_objects.py \
   --ssh-password 666666 \
   --vllm-host 127.0.0.1 --vllm-port 8000 \
   --images-dir ./objects_images \
   --scene 00808-y9hTuugGdiq \
   --output-dir ./results/scene_info/
 
-python sample_and_place_objects.py \
+python core/sample_and_place_objects.py \
   --scene 00808-y9hTuugGdiq \
   --mode generate \
   --rooms-info-dir ./results/scene_info \

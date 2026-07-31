@@ -540,7 +540,7 @@ def _template_collidable_from_config(objects_dir: str, model_id: str) -> Optiona
     path = find_object_config_path(raw, objects_dir or default_object_config_dirs_str())
     if path is not None:
         try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
+            payload = json.loads(path.read_text(encoding="utf-8-sig"))
         except Exception:
             return None
         if isinstance(payload, dict) and "is_collidable" in payload:
