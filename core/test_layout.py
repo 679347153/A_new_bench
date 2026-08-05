@@ -44,9 +44,9 @@ Interactive layout editor.
 - HUD 文本是叠加在图像上的 2D 文本，不是 Habitat 场景中的 3D 文本。
 
 示例:
-	python test_layout.py 00808-y9hTuugGdiq --layout scene_objects_v2.json
-	python test_layout.py 00808-y9hTuugGdiq --ui-lang zh --font-path C:/Windows/Fonts/msyh.ttc
-	python test_layout.py  00808-y9hTuugGdiq
+	python core/test_layout.py 00808-y9hTuugGdiq --layout scene_objects_v2.json
+	python core/test_layout.py 00808-y9hTuugGdiq --ui-lang zh --font-path C:/Windows/Fonts/msyh.ttc
+	python core/test_layout.py 00808-y9hTuugGdiq
 """
 
 import argparse
@@ -56,8 +56,12 @@ import os
 import sys
 import time
 
-import cv2
 import numpy as np
+
+try:
+	import cv2
+except ImportError:
+	cv2 = None
 
 from hm3d_paths import list_available_scenes, resolve_scene_paths
 from project_paths import default_object_config_dirs_str, iter_object_config_dirs, resolve_hm3d_root
@@ -74,14 +78,15 @@ try:
 	import habitat_sim
 	import habitat_sim.utils.common as utils
 except ImportError:
-	print("Error: habitat_sim not found. Run this in the correct environment.")
-	sys.exit(1)
+	mn = None
+	habitat_sim = None
+	utils = None
 
 
 SCENES_DIR = str(resolve_hm3d_root())
 OBJECTS_DIR = default_object_config_dirs_str()
 
-AVAILABLE_SCENES = list_available_scenes(require_semantic=True)
+AVAILABLE_SCENES = list_available_scenes(require_semantic=False)
 
 DISPLAY_WIDTH = 1280
 DISPLAY_HEIGHT = 720
@@ -117,6 +122,10 @@ UI_TEXT = {
 			"ESC/Q          Quit",
 		],
 		"run_from_root": "Please run this script from the project root.",
+		"opencv_missing": "OpenCV (cv2) is not available in this Python environment. Install a GUI-enabled OpenCV build, for example: pip install opencv-python",
+		"habitat_missing": "habitat_sim is not available in this Python environment. Run this script inside the habitat conda environment.",
+		"no_scenes": "No HM3D scenes found under: {path}",
+		"no_templates": "No object templates found under: {path}",
 		"window_title": "Layout Editor  [H]Help  [M]Save  [ESC/Q]Quit",
 		"loading_scene": "\\n>>> Loading scene: {scene}",
 		"layout_loaded": "    Layout: {name}  (loaded {loaded} / skipped {skipped})",
@@ -161,6 +170,10 @@ UI_TEXT = {
 			"ESC/Q          退出",
 		],
 		"run_from_root": "请在项目根目录下运行此脚本",
+		"opencv_missing": "当前 Python 环境缺少 OpenCV (cv2)。请安装带 GUI 的 OpenCV，例如: pip install opencv-python",
+		"habitat_missing": "当前 Python 环境缺少 habitat_sim。请在 habitat conda 环境中运行此脚本。",
+		"no_scenes": "未找到 HM3D 场景目录: {path}",
+		"no_templates": "未找到物体模板目录: {path}",
 		"window_title": "布局编辑器  [H]帮助  [M]保存  [ESC/Q]退出",
 		"loading_scene": "\\n>>> 加载场景: {scene}",
 		"layout_loaded": "    布局: {name}  (加载 {loaded} / 跳过 {skipped})",
@@ -649,7 +662,22 @@ def main():
 
 	ui = UI_TEXT[ui_lang]
 
-	if not os.path.isdir(SCENES_DIR) or not iter_object_config_dirs(OBJECTS_DIR):
+	if cv2 is None:
+		print(ui["opencv_missing"])
+		sys.exit(1)
+
+	if habitat_sim is None:
+		print(ui["habitat_missing"])
+		sys.exit(1)
+
+	if not os.path.isdir(SCENES_DIR) or not AVAILABLE_SCENES:
+		print(ui["no_scenes"].format(path=SCENES_DIR))
+		print(ui["run_from_root"])
+		sys.exit(1)
+
+	object_config_dirs = iter_object_config_dirs(OBJECTS_DIR)
+	if not object_config_dirs:
+		print(ui["no_templates"].format(path=OBJECTS_DIR))
 		print(ui["run_from_root"])
 		sys.exit(1)
 
@@ -671,8 +699,23 @@ def main():
 		current_layout_path = get_default_layout_path(AVAILABLE_SCENES[scene_idx], args.layout)
 
 	win = ui["window_title"]
-	cv2.namedWindow(win, cv2.WINDOW_NORMAL)
-	cv2.resizeWindow(win, DISPLAY_WIDTH, DISPLAY_HEIGHT)
+	try:
+		cv2.namedWindow(win, cv2.WINDOW_NORMAL)
+		cv2.resizeWindow(win, DISPLAY_WIDTH, DISPLAY_HEIGHT)
+	except Exception as exc:
+		print("[Error] OpenCV HighGUI window creation failed.")
+		print(f"[Error] {exc}")
+		try:
+			print(f"[Diag] cv2 version: {getattr(cv2, '__version__', 'unknown')}")
+			build_info = cv2.getBuildInformation()
+			for line in build_info.splitlines():
+				if line.strip().startswith("GUI:"):
+					print(f"[Diag] {line.strip()}")
+					break
+		except Exception:
+			pass
+		print("[Hint] Install a GUI-enabled OpenCV build in the habitat environment, or remove opencv-python-headless if it shadows opencv-python.")
+		sys.exit(1)
 
 	sim = None
 	scene_layout_files = []

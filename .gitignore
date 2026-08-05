@@ -29,6 +29,7 @@ data/object_catalog/object_catalog.json
 data/object_catalog/hssd_semantic_text.jsonl
 data/object_catalog/missing_semantic_text.csv
 
+paper/
 
 # Generated outputs
 scene_info_export/
