@@ -1,0 +1,32 @@
+# Pipeline Bugs And Results
+
+run_id: run_20260805_174136
+status: ok
+log_file: C:\Users\Dell\Downloads\A数据集\semantic\results\pipeline_runs\run_20260805_174136\pipeline.log
+summary_file: C:\Users\Dell\Downloads\A数据集\semantic\results\pipeline_runs\run_20260805_174136\run_summary.json
+
+## Outputs
+- benchmark_version: run_20260805_174136
+- episodes_dir: C:\Users\Dell\Downloads\A数据集\semantic\benchmark\episodes\run_20260805_174136\val
+- layout_manifests:
+  - C:\Users\Dell\Downloads\A数据集\semantic\results\layouts\00808-y9hTuugGdiq\batch_DRY_RUN\manifest.json
+- layout_success_count: 0
+- oracle_eval_dir: C:\Users\Dell\Downloads\A数据集\semantic\results\pipeline_runs\run_20260805_174136\oracle_eval
+- oracle_trajectories: C:\Users\Dell\Downloads\A数据集\semantic\results\pipeline_runs\run_20260805_174136\oracle_trajectories.jsonl
+- run_dir: C:\Users\Dell\Downloads\A数据集\semantic\results\pipeline_runs\run_20260805_174136
+
+## Stage Results
+- build_object_catalog: exit_code=0 duration=0.0
+  result: dry-run: command not executed
+- batch_generate_layouts: exit_code=0 duration=0.0
+  result: dry-run: command not executed
+- build_benchmark_episodes: exit_code=0 duration=0.0
+  result: dry-run: command not executed
+- run_oracle_agent: exit_code=0 duration=0.0
+  result: dry-run: command not executed
+- evaluate_oracle_agent: exit_code=0 duration=0.0
+  result: dry-run: command not executed
+
+## Bugs / Warnings / Failures
+- none captured yet
+

@@ -1,0 +1,19 @@
+# Pipeline Bugs And Results
+
+run_id: quick_catalog_check
+status: ok
+log_file: C:\Users\Dell\Downloads\A数据集\semantic\results\pipeline_runs\quick_catalog_check\pipeline.log
+summary_file: C:\Users\Dell\Downloads\A数据集\semantic\results\pipeline_runs\quick_catalog_check\run_summary.json
+
+## Outputs
+- run_dir: C:\Users\Dell\Downloads\A数据集\semantic\results\pipeline_runs\quick_catalog_check
+
+## Stage Results
+- build_object_catalog: exit_code=0 duration=13.319
+  result: [Info] Objects discovered: 8282
+  result: [Info] Missing semantic text: 8205
+  result: [OK] Dry run complete
+
+## Bugs / Warnings / Failures
+- none captured yet
+

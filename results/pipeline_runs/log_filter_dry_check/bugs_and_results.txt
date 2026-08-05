@@ -1,0 +1,25 @@
+# Pipeline Bugs And Results
+
+run_id: log_filter_dry_check
+status: ok
+log_file: C:\Users\Dell\Downloads\A数据集\semantic\results\pipeline_runs\log_filter_dry_check\pipeline.log
+summary_file: C:\Users\Dell\Downloads\A数据集\semantic\results\pipeline_runs\log_filter_dry_check\run_summary.json
+log_filter: {'enabled': True, 'wrapper': 'core/log_filter.py --run', 'note': 'Subprocess output is filtered with the same default Habitat/HM3D suppression rules as core/log_filter.py unless --no-log-filter is set.'}
+
+## Outputs
+- layout_manifests:
+  - C:\Users\Dell\Downloads\A数据集\semantic\results\layouts\00808-y9hTuugGdiq\batch_DRY_RUN\manifest.json
+- layout_success_count: 0
+- run_dir: C:\Users\Dell\Downloads\A数据集\semantic\results\pipeline_runs\log_filter_dry_check
+
+## Stage Results
+- build_object_catalog: exit_code=0 duration=0.0
+  log_filter_applied: True
+  result: dry-run: command not executed
+- batch_generate_layouts: exit_code=0 duration=0.0
+  log_filter_applied: True
+  result: dry-run: command not executed
+
+## Bugs / Warnings / Failures
+- none captured yet
+

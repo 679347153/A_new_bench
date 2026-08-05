@@ -1,0 +1,21 @@
+# Pipeline Bugs And Results
+
+run_id: run_20260805_174114
+status: failed
+log_file: C:\Users\Dell\Downloads\A数据集\semantic\results\pipeline_runs\run_20260805_174114\pipeline.log
+summary_file: C:\Users\Dell\Downloads\A数据集\semantic\results\pipeline_runs\run_20260805_174114\run_summary.json
+
+## Outputs
+- layout_manifests:
+- layout_success_count: 0
+- run_dir: C:\Users\Dell\Downloads\A数据集\semantic\results\pipeline_runs\run_20260805_174114
+
+## Stage Results
+- build_object_catalog: exit_code=0 duration=0.0
+  result: dry-run: command not executed
+- batch_generate_layouts: exit_code=0 duration=0.0
+  result: dry-run: command not executed
+
+## Bugs / Warnings / Failures
+- none captured yet
+
