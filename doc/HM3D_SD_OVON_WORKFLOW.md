@@ -273,3 +273,27 @@ python -c "import json; from orchestrate_sd_ovon_complete import SDOVONPipelineO
 ```
 
 以上流程跑通后，再切换 production 模式和更复杂场景。
+
+---
+
+## 8. 当前工程同步更新（2026-08-13）
+
+当前 HM3D 工作流已从“房间推荐 + 概率采样 + SD-OVON 协同”扩展为：
+
+1. 普通 3D 自动放置链路：`query_rooms_for_objects.py`、`query_room_receptacle_objects.py`、`assign_objects_to_receptacle_instances.py`、`place_objects_on_instances.py`。
+2. 批量独立 layout 链路：`batch_generate_layouts.py`，用于复用 scene_info、概率和 surfaces 生成多个最终 3D layout。
+3. Lifespan 长期语义演化链路：`lifespan_generate_layouts.py`，用于生成同一家庭在多天/整月内的长期语义状态轨迹。
+
+Lifespan 当前状态：
+
+- 已实现 household selection、relationship graph、daily routine、monthly important events、object lifespan profiles、event log、state history、snapshot requests。
+- 输出目录为 `results/lifespan/<scene>/<sequence_id>/`。
+- 当前为 semantic-only MVP，`layouts/snapshot_*.json` 不能直接作为 Habitat 3D layout；需要后续把 `snapshot_requests.json` 接入 instance assignment 和 physical placement。
+
+推荐先运行：
+
+```bash
+python core/log_filter.py --run "python core/lifespan_generate_layouts.py --scene 00808-y9hTuugGdiq --duration-days 3 --snapshots-per-day 07:00,18:00 --object-limit 10 --disable-lifespan-llm --sequence-id smoke_lifespan_test"
+```
+
+完整更新后的命令顺序见 `doc/DATASET_TASK_GENERATION_COMMANDS.md`。

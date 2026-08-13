@@ -436,3 +436,39 @@ A: 自动降级到 mock 模式。查看日志了解具体原因。
 **维护者:** SD-OVON Team  
 **最后更新:** 2026-04-15  
 **版本:** 1.0 (Mock → Production Migration)
+
+---
+
+## 当前工程同步更新（2026-08-13）
+
+本文档仍用于说明 SD-OVON mock 到 production 的迁移关系，但当前项目已经完成一次更大的工程整理：
+
+1. 核心 Python 脚本已集中到 `core/`。
+2. 数据目录统一迁移到 `data/`，包括 HM3D、object datasets、object images、object catalog、lifespan 配置等。
+3. 文档集中在 `doc/`。
+4. 新增 `doc/DATASET_TASK_GENERATION_COMMANDS.md` 作为当前最完整的执行命令指南。
+5. 新增 Lifespan semantic-only MVP，用于长期家庭语义演化建模。
+
+新增 Lifespan 相关文件：
+
+```text
+core/lifespan_generate_layouts.py
+core/lifespan_schema.py
+core/lifespan_household_generator.py
+core/lifespan_profiles.py
+core/lifespan_event_generator.py
+core/lifespan_state_engine.py
+data/lifespan/resident_persona_profiles.json
+data/lifespan/default_lifespan_config.json
+data/lifespan/activity_templates.json
+```
+
+迁移后的默认 Qwen 连接为：
+
+```text
+root@7.216.187.6:30180
+password: 666666
+remote vLLM API: 127.0.0.1:8000
+```
+
+注意：Lifespan 当前输出是 semantic-only，不替代 SD-OVON/自动放置链路中的 3D grounding。下一阶段应把 `results/lifespan/<scene>/<sequence_id>/snapshot_requests.json` 接到 instance assignment 和 physical placement。

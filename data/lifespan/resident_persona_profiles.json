@@ -1,0 +1,5499 @@
+{
+  "schema_version": "1.1",
+  "description": "Household resident and visitor persona pool for lifespan household dynamics generation. Profiles are designed to cover common family-scene roles and activity patterns. Version 1.1 adds explicit name, age, gender, routine_preferences, personality, occupation, thoughts, and preferences fields for LLM household planning.",
+  "intended_use": [
+    "sample persistent residents for a household",
+    "assign object ownership and room preferences",
+    "generate weekly routines and household events",
+    "control activity-driven object movement in lifespan layouts"
+  ],
+  "profiles": [
+    {
+      "profile_id": "persona_001_infant",
+      "display_name": "Infant",
+      "role_type": "resident_child",
+      "age_range": [
+        0,
+        1
+      ],
+      "life_stage": "infant",
+      "household_roles": [
+        "young_child"
+      ],
+      "occupation_or_status": "dependent",
+      "typical_schedule": "frequent naps, feeding, bathing, and supervised play throughout the day",
+      "active_time_windows": [
+        "06:00-09:00",
+        "11:00-13:00",
+        "16:00-20:00"
+      ],
+      "primary_rooms": [
+        "nursery",
+        "bedroom",
+        "living room",
+        "bathroom"
+      ],
+      "secondary_rooms": [
+        "kitchen"
+      ],
+      "owned_object_categories": [
+        "bottle",
+        "blanket",
+        "toy",
+        "diaper bag",
+        "baby monitor"
+      ],
+      "frequently_moved_objects": [
+        "bottle",
+        "blanket",
+        "toy"
+      ],
+      "activity_preferences": [
+        "feeding",
+        "sleeping",
+        "supervised_play",
+        "bathing"
+      ],
+      "tidiness": "none_self",
+      "mobility": "carried_or_crawling",
+      "care_needs": "high",
+      "social_pattern": "always dependent on caregiver",
+      "object_behavior_notes": "Objects tend to move between bedroom, sofa, crib area, and changing surfaces.",
+      "name": "Lily Martinez",
+      "age": 0,
+      "gender": "female",
+      "occupation": "dependent",
+      "personality": [
+        "calm",
+        "sensitive",
+        "comfort-seeking"
+      ],
+      "thoughts": "Nonverbal infant whose needs are expressed through feeding, sleep, and caregiver attention.",
+      "routine_preferences": {
+        "typical_schedule": "frequent naps, feeding, bathing, and supervised play throughout the day",
+        "active_time_windows": [
+          "06:00-09:00",
+          "11:00-13:00",
+          "16:00-20:00"
+        ],
+        "preferred_activities": [
+          "feeding",
+          "sleeping",
+          "supervised_play",
+          "bathing"
+        ],
+        "routine_notes": "Objects tend to move between bedroom, sofa, crib area, and changing surfaces."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "nursery",
+          "bedroom",
+          "living room",
+          "bathroom"
+        ],
+        "secondary_rooms": [
+          "kitchen"
+        ],
+        "preferred_objects": [
+          "bottle",
+          "blanket",
+          "toy"
+        ],
+        "owned_object_categories": [
+          "bottle",
+          "blanket",
+          "toy",
+          "diaper bag",
+          "baby monitor"
+        ],
+        "activity_preferences": [
+          "feeding",
+          "sleeping",
+          "supervised_play",
+          "bathing"
+        ],
+        "social_pattern": "always dependent on caregiver",
+        "tidiness": "none_self"
+      }
+    },
+    {
+      "profile_id": "persona_002_toddler",
+      "display_name": "Toddler",
+      "role_type": "resident_child",
+      "age_range": [
+        2,
+        3
+      ],
+      "life_stage": "toddler",
+      "household_roles": [
+        "young_child"
+      ],
+      "occupation_or_status": "dependent",
+      "typical_schedule": "wake early, meals with family, play blocks, nap, evening bath",
+      "active_time_windows": [
+        "06:30-08:30",
+        "10:00-12:00",
+        "15:00-19:30"
+      ],
+      "primary_rooms": [
+        "bedroom",
+        "living room",
+        "play room",
+        "bathroom"
+      ],
+      "secondary_rooms": [
+        "kitchen",
+        "dining room"
+      ],
+      "owned_object_categories": [
+        "toy",
+        "picture book",
+        "sippy cup",
+        "small blanket"
+      ],
+      "frequently_moved_objects": [
+        "toy",
+        "picture book",
+        "sippy cup"
+      ],
+      "activity_preferences": [
+        "floor_play",
+        "snack",
+        "storybook",
+        "nap"
+      ],
+      "tidiness": "low",
+      "mobility": "walks_with_supervision",
+      "care_needs": "high",
+      "social_pattern": "caregiver-led activities",
+      "object_behavior_notes": "Small objects often appear on low tables, floor areas, sofa edges, and bedroom surfaces.",
+      "name": "Noah Johnson",
+      "age": 2,
+      "gender": "male",
+      "occupation": "dependent",
+      "personality": [
+        "curious",
+        "impulsive",
+        "playful"
+      ],
+      "thoughts": "I want nearby adults, familiar toys, snacks, and places where I can safely explore.",
+      "routine_preferences": {
+        "typical_schedule": "wake early, meals with family, play blocks, nap, evening bath",
+        "active_time_windows": [
+          "06:30-08:30",
+          "10:00-12:00",
+          "15:00-19:30"
+        ],
+        "preferred_activities": [
+          "floor_play",
+          "snack",
+          "storybook",
+          "nap"
+        ],
+        "routine_notes": "Small objects often appear on low tables, floor areas, sofa edges, and bedroom surfaces."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "bedroom",
+          "living room",
+          "play room",
+          "bathroom"
+        ],
+        "secondary_rooms": [
+          "kitchen",
+          "dining room"
+        ],
+        "preferred_objects": [
+          "toy",
+          "picture book",
+          "sippy cup"
+        ],
+        "owned_object_categories": [
+          "toy",
+          "picture book",
+          "sippy cup",
+          "small blanket"
+        ],
+        "activity_preferences": [
+          "floor_play",
+          "snack",
+          "storybook",
+          "nap"
+        ],
+        "social_pattern": "caregiver-led activities",
+        "tidiness": "low"
+      }
+    },
+    {
+      "profile_id": "persona_003_preschool_child",
+      "display_name": "Preschool Child",
+      "role_type": "resident_child",
+      "age_range": [
+        4,
+        5
+      ],
+      "life_stage": "preschool",
+      "household_roles": [
+        "child"
+      ],
+      "occupation_or_status": "preschool student",
+      "typical_schedule": "morning preschool, afternoon play, early dinner and bedtime",
+      "active_time_windows": [
+        "07:00-08:30",
+        "15:30-19:30"
+      ],
+      "primary_rooms": [
+        "bedroom",
+        "living room",
+        "play room",
+        "dining room"
+      ],
+      "secondary_rooms": [
+        "bathroom",
+        "kitchen"
+      ],
+      "owned_object_categories": [
+        "toy",
+        "storybook",
+        "crayon",
+        "backpack",
+        "snack bowl"
+      ],
+      "frequently_moved_objects": [
+        "toy",
+        "storybook",
+        "backpack"
+      ],
+      "activity_preferences": [
+        "drawing",
+        "pretend_play",
+        "snack",
+        "family_meal"
+      ],
+      "tidiness": "low",
+      "mobility": "independent_child",
+      "care_needs": "medium",
+      "social_pattern": "plays near family members",
+      "object_behavior_notes": "Backpacks and toys tend to accumulate near entry, bedroom, and living room.",
+      "name": "Emma Nguyen",
+      "age": 4,
+      "gender": "female",
+      "occupation": "preschool student",
+      "personality": [
+        "imaginative",
+        "social",
+        "easily distracted"
+      ],
+      "thoughts": "I like pretend play, picture books, drawing, and staying near family activity.",
+      "routine_preferences": {
+        "typical_schedule": "morning preschool, afternoon play, early dinner and bedtime",
+        "active_time_windows": [
+          "07:00-08:30",
+          "15:30-19:30"
+        ],
+        "preferred_activities": [
+          "drawing",
+          "pretend_play",
+          "snack",
+          "family_meal"
+        ],
+        "routine_notes": "Backpacks and toys tend to accumulate near entry, bedroom, and living room."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "bedroom",
+          "living room",
+          "play room",
+          "dining room"
+        ],
+        "secondary_rooms": [
+          "bathroom",
+          "kitchen"
+        ],
+        "preferred_objects": [
+          "toy",
+          "storybook",
+          "backpack"
+        ],
+        "owned_object_categories": [
+          "toy",
+          "storybook",
+          "crayon",
+          "backpack",
+          "snack bowl"
+        ],
+        "activity_preferences": [
+          "drawing",
+          "pretend_play",
+          "snack",
+          "family_meal"
+        ],
+        "social_pattern": "plays near family members",
+        "tidiness": "low"
+      }
+    },
+    {
+      "profile_id": "persona_004_elementary_student",
+      "display_name": "Elementary Student",
+      "role_type": "resident_child",
+      "age_range": [
+        6,
+        10
+      ],
+      "life_stage": "school_age",
+      "household_roles": [
+        "child",
+        "student"
+      ],
+      "occupation_or_status": "elementary school student",
+      "typical_schedule": "school day, homework at table or desk, evening entertainment",
+      "active_time_windows": [
+        "06:45-08:00",
+        "15:30-20:30"
+      ],
+      "primary_rooms": [
+        "bedroom",
+        "dining room",
+        "living room",
+        "study"
+      ],
+      "secondary_rooms": [
+        "kitchen",
+        "bathroom"
+      ],
+      "owned_object_categories": [
+        "backpack",
+        "notebook",
+        "pencil case",
+        "tablet",
+        "water bottle"
+      ],
+      "frequently_moved_objects": [
+        "backpack",
+        "notebook",
+        "tablet",
+        "water bottle"
+      ],
+      "activity_preferences": [
+        "homework",
+        "snack",
+        "reading",
+        "screen_time"
+      ],
+      "tidiness": "medium_low",
+      "mobility": "independent",
+      "care_needs": "medium",
+      "social_pattern": "family-centered",
+      "object_behavior_notes": "School items move between entryway, bedroom, dining table, and study surfaces.",
+      "name": "Ethan Kim",
+      "age": 8,
+      "gender": "male",
+      "occupation": "elementary school student",
+      "personality": [
+        "energetic",
+        "friendly",
+        "routine-learning"
+      ],
+      "thoughts": "After school I want snacks, homework help, and time with a tablet or toys.",
+      "routine_preferences": {
+        "typical_schedule": "school day, homework at table or desk, evening entertainment",
+        "active_time_windows": [
+          "06:45-08:00",
+          "15:30-20:30"
+        ],
+        "preferred_activities": [
+          "homework",
+          "snack",
+          "reading",
+          "screen_time"
+        ],
+        "routine_notes": "School items move between entryway, bedroom, dining table, and study surfaces."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "bedroom",
+          "dining room",
+          "living room",
+          "study"
+        ],
+        "secondary_rooms": [
+          "kitchen",
+          "bathroom"
+        ],
+        "preferred_objects": [
+          "backpack",
+          "notebook",
+          "tablet",
+          "water bottle"
+        ],
+        "owned_object_categories": [
+          "backpack",
+          "notebook",
+          "pencil case",
+          "tablet",
+          "water bottle"
+        ],
+        "activity_preferences": [
+          "homework",
+          "snack",
+          "reading",
+          "screen_time"
+        ],
+        "social_pattern": "family-centered",
+        "tidiness": "medium_low"
+      }
+    },
+    {
+      "profile_id": "persona_005_middle_school_student",
+      "display_name": "Middle School Student",
+      "role_type": "resident_child",
+      "age_range": [
+        11,
+        13
+      ],
+      "life_stage": "early_teen",
+      "household_roles": [
+        "student"
+      ],
+      "occupation_or_status": "middle school student",
+      "typical_schedule": "school, homework, hobbies, evening digital entertainment",
+      "active_time_windows": [
+        "06:30-08:00",
+        "16:00-22:00"
+      ],
+      "primary_rooms": [
+        "bedroom",
+        "study",
+        "living room"
+      ],
+      "secondary_rooms": [
+        "kitchen",
+        "dining room",
+        "bathroom"
+      ],
+      "owned_object_categories": [
+        "backpack",
+        "laptop",
+        "tablet",
+        "headphones",
+        "sports bag"
+      ],
+      "frequently_moved_objects": [
+        "laptop",
+        "headphones",
+        "backpack",
+        "sports bag"
+      ],
+      "activity_preferences": [
+        "homework",
+        "gaming",
+        "video_call",
+        "snack"
+      ],
+      "tidiness": "medium_low",
+      "mobility": "independent",
+      "care_needs": "low_medium",
+      "social_pattern": "often uses private bedroom",
+      "object_behavior_notes": "Digital devices and bags shift between bedroom, sofa, desk, and entry area.",
+      "name": "Ava Patel",
+      "age": 12,
+      "gender": "female",
+      "occupation": "middle school student",
+      "personality": [
+        "studious",
+        "private",
+        "digitally engaged"
+      ],
+      "thoughts": "I want my school items nearby, but I also like retreating to my room after shared family time.",
+      "routine_preferences": {
+        "typical_schedule": "school, homework, hobbies, evening digital entertainment",
+        "active_time_windows": [
+          "06:30-08:00",
+          "16:00-22:00"
+        ],
+        "preferred_activities": [
+          "homework",
+          "gaming",
+          "video_call",
+          "snack"
+        ],
+        "routine_notes": "Digital devices and bags shift between bedroom, sofa, desk, and entry area."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "bedroom",
+          "study",
+          "living room"
+        ],
+        "secondary_rooms": [
+          "kitchen",
+          "dining room",
+          "bathroom"
+        ],
+        "preferred_objects": [
+          "laptop",
+          "headphones",
+          "backpack",
+          "sports bag"
+        ],
+        "owned_object_categories": [
+          "backpack",
+          "laptop",
+          "tablet",
+          "headphones",
+          "sports bag"
+        ],
+        "activity_preferences": [
+          "homework",
+          "gaming",
+          "video_call",
+          "snack"
+        ],
+        "social_pattern": "often uses private bedroom",
+        "tidiness": "medium_low"
+      }
+    },
+    {
+      "profile_id": "persona_006_high_school_student",
+      "display_name": "High School Student",
+      "role_type": "resident_child",
+      "age_range": [
+        14,
+        18
+      ],
+      "life_stage": "teen",
+      "household_roles": [
+        "student"
+      ],
+      "occupation_or_status": "high school student",
+      "typical_schedule": "early school commute, homework, late study, weekend social activities",
+      "active_time_windows": [
+        "06:00-07:30",
+        "16:30-23:30"
+      ],
+      "primary_rooms": [
+        "bedroom",
+        "study",
+        "living room"
+      ],
+      "secondary_rooms": [
+        "kitchen",
+        "dining room"
+      ],
+      "owned_object_categories": [
+        "laptop",
+        "phone",
+        "backpack",
+        "charger",
+        "textbook",
+        "water bottle"
+      ],
+      "frequently_moved_objects": [
+        "phone",
+        "laptop",
+        "charger",
+        "textbook",
+        "water bottle"
+      ],
+      "activity_preferences": [
+        "late_study",
+        "snack",
+        "music",
+        "screen_time"
+      ],
+      "tidiness": "variable",
+      "mobility": "independent",
+      "care_needs": "low",
+      "social_pattern": "private-room heavy with family meals",
+      "object_behavior_notes": "Charging devices and study materials often remain on desk, bed, sofa, or dining table.",
+      "name": "Lucas Garcia",
+      "age": 16,
+      "gender": "male",
+      "occupation": "high school student",
+      "personality": [
+        "independent",
+        "night-oriented",
+        "focused under pressure"
+      ],
+      "thoughts": "I balance homework, music, messages, and late study, so my devices and chargers move often.",
+      "routine_preferences": {
+        "typical_schedule": "early school commute, homework, late study, weekend social activities",
+        "active_time_windows": [
+          "06:00-07:30",
+          "16:30-23:30"
+        ],
+        "preferred_activities": [
+          "late_study",
+          "snack",
+          "music",
+          "screen_time"
+        ],
+        "routine_notes": "Charging devices and study materials often remain on desk, bed, sofa, or dining table."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "bedroom",
+          "study",
+          "living room"
+        ],
+        "secondary_rooms": [
+          "kitchen",
+          "dining room"
+        ],
+        "preferred_objects": [
+          "phone",
+          "laptop",
+          "charger",
+          "textbook",
+          "water bottle"
+        ],
+        "owned_object_categories": [
+          "laptop",
+          "phone",
+          "backpack",
+          "charger",
+          "textbook",
+          "water bottle"
+        ],
+        "activity_preferences": [
+          "late_study",
+          "snack",
+          "music",
+          "screen_time"
+        ],
+        "social_pattern": "private-room heavy with family meals",
+        "tidiness": "variable"
+      }
+    },
+    {
+      "profile_id": "persona_007_college_student_at_home",
+      "display_name": "College Student Living At Home",
+      "role_type": "resident_young_adult",
+      "age_range": [
+        18,
+        24
+      ],
+      "life_stage": "young_adult",
+      "household_roles": [
+        "student",
+        "adult_child"
+      ],
+      "occupation_or_status": "college student",
+      "typical_schedule": "variable classes, late-night study, irregular meals",
+      "active_time_windows": [
+        "08:00-11:00",
+        "14:00-17:00",
+        "20:00-01:00"
+      ],
+      "primary_rooms": [
+        "bedroom",
+        "study",
+        "kitchen"
+      ],
+      "secondary_rooms": [
+        "living room",
+        "dining room"
+      ],
+      "owned_object_categories": [
+        "laptop",
+        "phone",
+        "charger",
+        "mug",
+        "notebook",
+        "backpack"
+      ],
+      "frequently_moved_objects": [
+        "laptop",
+        "mug",
+        "charger",
+        "notebook"
+      ],
+      "activity_preferences": [
+        "online_class",
+        "study",
+        "coffee",
+        "late_snack"
+      ],
+      "tidiness": "medium_low",
+      "mobility": "independent",
+      "care_needs": "none",
+      "social_pattern": "irregular home presence",
+      "object_behavior_notes": "Mugs and electronics often drift between bedroom desk, kitchen counter, and dining table.",
+      "name": "Maya Thompson",
+      "age": 20,
+      "gender": "female",
+      "occupation": "college student",
+      "personality": [
+        "flexible",
+        "creative",
+        "late-night focused"
+      ],
+      "thoughts": "My schedule changes by class workload, and I often carry my laptop, mug, and notebook between rooms.",
+      "routine_preferences": {
+        "typical_schedule": "variable classes, late-night study, irregular meals",
+        "active_time_windows": [
+          "08:00-11:00",
+          "14:00-17:00",
+          "20:00-01:00"
+        ],
+        "preferred_activities": [
+          "online_class",
+          "study",
+          "coffee",
+          "late_snack"
+        ],
+        "routine_notes": "Mugs and electronics often drift between bedroom desk, kitchen counter, and dining table."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "bedroom",
+          "study",
+          "kitchen"
+        ],
+        "secondary_rooms": [
+          "living room",
+          "dining room"
+        ],
+        "preferred_objects": [
+          "laptop",
+          "mug",
+          "charger",
+          "notebook"
+        ],
+        "owned_object_categories": [
+          "laptop",
+          "phone",
+          "charger",
+          "mug",
+          "notebook",
+          "backpack"
+        ],
+        "activity_preferences": [
+          "online_class",
+          "study",
+          "coffee",
+          "late_snack"
+        ],
+        "social_pattern": "irregular home presence",
+        "tidiness": "medium_low"
+      }
+    },
+    {
+      "profile_id": "persona_008_remote_worker_parent",
+      "display_name": "Remote Worker Parent",
+      "role_type": "resident_adult",
+      "age_range": [
+        28,
+        45
+      ],
+      "life_stage": "adult",
+      "household_roles": [
+        "parent",
+        "worker"
+      ],
+      "occupation_or_status": "remote office worker",
+      "typical_schedule": "morning family routine, work from home, lunch break, evening childcare",
+      "active_time_windows": [
+        "06:30-08:30",
+        "09:00-17:30",
+        "18:00-22:30"
+      ],
+      "primary_rooms": [
+        "home office",
+        "study",
+        "kitchen",
+        "living room"
+      ],
+      "secondary_rooms": [
+        "bedroom",
+        "dining room"
+      ],
+      "owned_object_categories": [
+        "laptop",
+        "phone",
+        "mug",
+        "notebook",
+        "headphones"
+      ],
+      "frequently_moved_objects": [
+        "mug",
+        "phone",
+        "notebook",
+        "headphones"
+      ],
+      "activity_preferences": [
+        "work",
+        "coffee",
+        "video_call",
+        "family_dinner",
+        "tidying"
+      ],
+      "tidiness": "medium_high",
+      "mobility": "independent",
+      "care_needs": "none",
+      "social_pattern": "high weekday home presence",
+      "object_behavior_notes": "Work objects remain near desk, while mugs and notebooks move between kitchen, office, and dining table.",
+      "name": "Daniel Chen",
+      "age": 37,
+      "gender": "male",
+      "occupation": "remote office worker",
+      "personality": [
+        "organized",
+        "work-focused",
+        "caregiving"
+      ],
+      "thoughts": "I need a stable work setup but still coordinate meals, childcare, and family routines.",
+      "routine_preferences": {
+        "typical_schedule": "morning family routine, work from home, lunch break, evening childcare",
+        "active_time_windows": [
+          "06:30-08:30",
+          "09:00-17:30",
+          "18:00-22:30"
+        ],
+        "preferred_activities": [
+          "work",
+          "coffee",
+          "video_call",
+          "family_dinner",
+          "tidying"
+        ],
+        "routine_notes": "Work objects remain near desk, while mugs and notebooks move between kitchen, office, and dining table."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "home office",
+          "study",
+          "kitchen",
+          "living room"
+        ],
+        "secondary_rooms": [
+          "bedroom",
+          "dining room"
+        ],
+        "preferred_objects": [
+          "mug",
+          "phone",
+          "notebook",
+          "headphones"
+        ],
+        "owned_object_categories": [
+          "laptop",
+          "phone",
+          "mug",
+          "notebook",
+          "headphones"
+        ],
+        "activity_preferences": [
+          "work",
+          "coffee",
+          "video_call",
+          "family_dinner",
+          "tidying"
+        ],
+        "social_pattern": "high weekday home presence",
+        "tidiness": "medium_high"
+      }
+    },
+    {
+      "profile_id": "persona_009_commuter_parent",
+      "display_name": "Commuter Parent",
+      "role_type": "resident_adult",
+      "age_range": [
+        30,
+        50
+      ],
+      "life_stage": "adult",
+      "household_roles": [
+        "parent",
+        "worker"
+      ],
+      "occupation_or_status": "office commuter",
+      "typical_schedule": "early departure, evening return, family dinner, light chores",
+      "active_time_windows": [
+        "06:00-08:00",
+        "18:00-23:00"
+      ],
+      "primary_rooms": [
+        "kitchen",
+        "entryway",
+        "bedroom",
+        "living room"
+      ],
+      "secondary_rooms": [
+        "dining room",
+        "bathroom"
+      ],
+      "owned_object_categories": [
+        "keys",
+        "wallet",
+        "bag",
+        "phone",
+        "travel mug"
+      ],
+      "frequently_moved_objects": [
+        "keys",
+        "bag",
+        "phone",
+        "travel mug"
+      ],
+      "activity_preferences": [
+        "breakfast",
+        "commute_prep",
+        "dinner",
+        "laundry"
+      ],
+      "tidiness": "medium",
+      "mobility": "independent",
+      "care_needs": "none",
+      "social_pattern": "weekday away from home",
+      "object_behavior_notes": "Entryway drop zones and kitchen counters are strong priors for daily carry objects.",
+      "name": "Sarah Miller",
+      "age": 41,
+      "gender": "female",
+      "occupation": "office commuter",
+      "personality": [
+        "practical",
+        "time-conscious",
+        "family-oriented"
+      ],
+      "thoughts": "I leave early and return with daily carry items, so entryway drop zones matter.",
+      "routine_preferences": {
+        "typical_schedule": "early departure, evening return, family dinner, light chores",
+        "active_time_windows": [
+          "06:00-08:00",
+          "18:00-23:00"
+        ],
+        "preferred_activities": [
+          "breakfast",
+          "commute_prep",
+          "dinner",
+          "laundry"
+        ],
+        "routine_notes": "Entryway drop zones and kitchen counters are strong priors for daily carry objects."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "kitchen",
+          "entryway",
+          "bedroom",
+          "living room"
+        ],
+        "secondary_rooms": [
+          "dining room",
+          "bathroom"
+        ],
+        "preferred_objects": [
+          "keys",
+          "bag",
+          "phone",
+          "travel mug"
+        ],
+        "owned_object_categories": [
+          "keys",
+          "wallet",
+          "bag",
+          "phone",
+          "travel mug"
+        ],
+        "activity_preferences": [
+          "breakfast",
+          "commute_prep",
+          "dinner",
+          "laundry"
+        ],
+        "social_pattern": "weekday away from home",
+        "tidiness": "medium"
+      }
+    },
+    {
+      "profile_id": "persona_010_stay_at_home_parent",
+      "display_name": "Stay-at-home Parent",
+      "role_type": "resident_adult",
+      "age_range": [
+        25,
+        45
+      ],
+      "life_stage": "adult",
+      "household_roles": [
+        "parent",
+        "caregiver"
+      ],
+      "occupation_or_status": "home caregiver",
+      "typical_schedule": "childcare, cooking, errands, cleaning, family coordination",
+      "active_time_windows": [
+        "06:00-22:30"
+      ],
+      "primary_rooms": [
+        "kitchen",
+        "living room",
+        "bedroom",
+        "laundry room"
+      ],
+      "secondary_rooms": [
+        "bathroom",
+        "dining room",
+        "entryway"
+      ],
+      "owned_object_categories": [
+        "phone",
+        "planner",
+        "laundry basket",
+        "cleaning supplies",
+        "mug"
+      ],
+      "frequently_moved_objects": [
+        "phone",
+        "planner",
+        "mug",
+        "laundry basket"
+      ],
+      "activity_preferences": [
+        "cooking",
+        "childcare",
+        "cleaning",
+        "grocery_planning"
+      ],
+      "tidiness": "high",
+      "mobility": "independent",
+      "care_needs": "none",
+      "social_pattern": "frequent whole-house movement",
+      "object_behavior_notes": "Household management objects move across kitchen, living room, laundry, and entryway.",
+      "name": "Priya Shah",
+      "age": 34,
+      "gender": "female",
+      "occupation": "home caregiver",
+      "personality": [
+        "nurturing",
+        "highly active",
+        "order-restoring"
+      ],
+      "thoughts": "I keep the household running by moving between cooking, childcare, laundry, and cleanup.",
+      "routine_preferences": {
+        "typical_schedule": "childcare, cooking, errands, cleaning, family coordination",
+        "active_time_windows": [
+          "06:00-22:30"
+        ],
+        "preferred_activities": [
+          "cooking",
+          "childcare",
+          "cleaning",
+          "grocery_planning"
+        ],
+        "routine_notes": "Household management objects move across kitchen, living room, laundry, and entryway."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "kitchen",
+          "living room",
+          "bedroom",
+          "laundry room"
+        ],
+        "secondary_rooms": [
+          "bathroom",
+          "dining room",
+          "entryway"
+        ],
+        "preferred_objects": [
+          "phone",
+          "planner",
+          "mug",
+          "laundry basket"
+        ],
+        "owned_object_categories": [
+          "phone",
+          "planner",
+          "laundry basket",
+          "cleaning supplies",
+          "mug"
+        ],
+        "activity_preferences": [
+          "cooking",
+          "childcare",
+          "cleaning",
+          "grocery_planning"
+        ],
+        "social_pattern": "frequent whole-house movement",
+        "tidiness": "high"
+      }
+    },
+    {
+      "profile_id": "persona_011_single_professional",
+      "display_name": "Single Professional",
+      "role_type": "resident_adult",
+      "age_range": [
+        25,
+        40
+      ],
+      "life_stage": "adult",
+      "household_roles": [
+        "single_resident",
+        "worker"
+      ],
+      "occupation_or_status": "full-time professional",
+      "typical_schedule": "workday outside home or hybrid, evening cooking or delivery, weekend chores",
+      "active_time_windows": [
+        "06:30-08:30",
+        "18:00-00:00"
+      ],
+      "primary_rooms": [
+        "bedroom",
+        "kitchen",
+        "living room",
+        "home office"
+      ],
+      "secondary_rooms": [
+        "bathroom",
+        "entryway"
+      ],
+      "owned_object_categories": [
+        "laptop",
+        "phone",
+        "keys",
+        "bag",
+        "mug",
+        "book"
+      ],
+      "frequently_moved_objects": [
+        "phone",
+        "keys",
+        "bag",
+        "mug"
+      ],
+      "activity_preferences": [
+        "work",
+        "simple_cooking",
+        "streaming",
+        "reading"
+      ],
+      "tidiness": "medium",
+      "mobility": "independent",
+      "care_needs": "none",
+      "social_pattern": "occasional guests",
+      "object_behavior_notes": "Daily carry items cluster near entry and living room; work items may be stable near desk.",
+      "name": "Alex Morgan",
+      "age": 31,
+      "gender": "nonbinary",
+      "occupation": "full-time professional",
+      "personality": [
+        "self-directed",
+        "balanced",
+        "low-clutter"
+      ],
+      "thoughts": "I prefer simple routines, clear surfaces, and predictable places for keys, bag, and laptop.",
+      "routine_preferences": {
+        "typical_schedule": "workday outside home or hybrid, evening cooking or delivery, weekend chores",
+        "active_time_windows": [
+          "06:30-08:30",
+          "18:00-00:00"
+        ],
+        "preferred_activities": [
+          "work",
+          "simple_cooking",
+          "streaming",
+          "reading"
+        ],
+        "routine_notes": "Daily carry items cluster near entry and living room; work items may be stable near desk."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "bedroom",
+          "kitchen",
+          "living room",
+          "home office"
+        ],
+        "secondary_rooms": [
+          "bathroom",
+          "entryway"
+        ],
+        "preferred_objects": [
+          "phone",
+          "keys",
+          "bag",
+          "mug"
+        ],
+        "owned_object_categories": [
+          "laptop",
+          "phone",
+          "keys",
+          "bag",
+          "mug",
+          "book"
+        ],
+        "activity_preferences": [
+          "work",
+          "simple_cooking",
+          "streaming",
+          "reading"
+        ],
+        "social_pattern": "occasional guests",
+        "tidiness": "medium"
+      }
+    },
+    {
+      "profile_id": "persona_012_young_couple_partner_a",
+      "display_name": "Young Couple Partner A",
+      "role_type": "resident_adult",
+      "age_range": [
+        24,
+        36
+      ],
+      "life_stage": "adult",
+      "household_roles": [
+        "partner",
+        "worker"
+      ],
+      "occupation_or_status": "hybrid worker",
+      "typical_schedule": "hybrid work, shared meals, evening entertainment",
+      "active_time_windows": [
+        "07:00-09:00",
+        "09:30-17:30",
+        "18:00-23:30"
+      ],
+      "primary_rooms": [
+        "home office",
+        "kitchen",
+        "living room",
+        "bedroom"
+      ],
+      "secondary_rooms": [
+        "dining room"
+      ],
+      "owned_object_categories": [
+        "laptop",
+        "phone",
+        "mug",
+        "book",
+        "gym bag"
+      ],
+      "frequently_moved_objects": [
+        "mug",
+        "phone",
+        "book",
+        "gym bag"
+      ],
+      "activity_preferences": [
+        "work",
+        "coffee",
+        "exercise_prep",
+        "shared_dinner"
+      ],
+      "tidiness": "medium_high",
+      "mobility": "independent",
+      "care_needs": "none",
+      "social_pattern": "shared household routines",
+      "object_behavior_notes": "Personal mug and laptop create strong office-kitchen movement patterns.",
+      "name": "Olivia Brooks",
+      "age": 29,
+      "gender": "female",
+      "occupation": "hybrid worker",
+      "personality": [
+        "collaborative",
+        "tidy",
+        "career-focused"
+      ],
+      "thoughts": "I share the home with my partner and switch between work, exercise, coffee, and dinner routines.",
+      "routine_preferences": {
+        "typical_schedule": "hybrid work, shared meals, evening entertainment",
+        "active_time_windows": [
+          "07:00-09:00",
+          "09:30-17:30",
+          "18:00-23:30"
+        ],
+        "preferred_activities": [
+          "work",
+          "coffee",
+          "exercise_prep",
+          "shared_dinner"
+        ],
+        "routine_notes": "Personal mug and laptop create strong office-kitchen movement patterns."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "home office",
+          "kitchen",
+          "living room",
+          "bedroom"
+        ],
+        "secondary_rooms": [
+          "dining room"
+        ],
+        "preferred_objects": [
+          "mug",
+          "phone",
+          "book",
+          "gym bag"
+        ],
+        "owned_object_categories": [
+          "laptop",
+          "phone",
+          "mug",
+          "book",
+          "gym bag"
+        ],
+        "activity_preferences": [
+          "work",
+          "coffee",
+          "exercise_prep",
+          "shared_dinner"
+        ],
+        "social_pattern": "shared household routines",
+        "tidiness": "medium_high"
+      }
+    },
+    {
+      "profile_id": "persona_013_young_couple_partner_b",
+      "display_name": "Young Couple Partner B",
+      "role_type": "resident_adult",
+      "age_range": [
+        24,
+        36
+      ],
+      "life_stage": "adult",
+      "household_roles": [
+        "partner",
+        "worker"
+      ],
+      "occupation_or_status": "service or shift worker",
+      "typical_schedule": "variable shifts, late return, shared rest days",
+      "active_time_windows": [
+        "10:00-12:00",
+        "16:00-19:00",
+        "22:00-01:00"
+      ],
+      "primary_rooms": [
+        "bedroom",
+        "kitchen",
+        "living room",
+        "entryway"
+      ],
+      "secondary_rooms": [
+        "bathroom",
+        "dining room"
+      ],
+      "owned_object_categories": [
+        "phone",
+        "keys",
+        "uniform bag",
+        "water bottle",
+        "snack container"
+      ],
+      "frequently_moved_objects": [
+        "keys",
+        "uniform bag",
+        "water bottle",
+        "snack container"
+      ],
+      "activity_preferences": [
+        "late_meal",
+        "rest",
+        "commute_prep",
+        "laundry"
+      ],
+      "tidiness": "medium",
+      "mobility": "independent",
+      "care_needs": "none",
+      "social_pattern": "asynchronous with partner",
+      "object_behavior_notes": "Late-shift objects tend to appear near entryway, bedroom chair, and kitchen counter.",
+      "name": "Marcus Reed",
+      "age": 32,
+      "gender": "male",
+      "occupation": "service or shift worker",
+      "personality": [
+        "adaptable",
+        "shift-driven",
+        "relaxed"
+      ],
+      "thoughts": "My work hours vary, so late meals, laundry, and entryway objects are common in my routine.",
+      "routine_preferences": {
+        "typical_schedule": "variable shifts, late return, shared rest days",
+        "active_time_windows": [
+          "10:00-12:00",
+          "16:00-19:00",
+          "22:00-01:00"
+        ],
+        "preferred_activities": [
+          "late_meal",
+          "rest",
+          "commute_prep",
+          "laundry"
+        ],
+        "routine_notes": "Late-shift objects tend to appear near entryway, bedroom chair, and kitchen counter."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "bedroom",
+          "kitchen",
+          "living room",
+          "entryway"
+        ],
+        "secondary_rooms": [
+          "bathroom",
+          "dining room"
+        ],
+        "preferred_objects": [
+          "keys",
+          "uniform bag",
+          "water bottle",
+          "snack container"
+        ],
+        "owned_object_categories": [
+          "phone",
+          "keys",
+          "uniform bag",
+          "water bottle",
+          "snack container"
+        ],
+        "activity_preferences": [
+          "late_meal",
+          "rest",
+          "commute_prep",
+          "laundry"
+        ],
+        "social_pattern": "asynchronous with partner",
+        "tidiness": "medium"
+      }
+    },
+    {
+      "profile_id": "persona_014_elderly_independent",
+      "display_name": "Independent Elder",
+      "role_type": "resident_elder",
+      "age_range": [
+        65,
+        80
+      ],
+      "life_stage": "older_adult",
+      "household_roles": [
+        "retired_resident"
+      ],
+      "occupation_or_status": "retired",
+      "typical_schedule": "early wake, breakfast, reading, light chores, early evening routine",
+      "active_time_windows": [
+        "06:00-12:00",
+        "15:00-21:00"
+      ],
+      "primary_rooms": [
+        "bedroom",
+        "kitchen",
+        "living room",
+        "bathroom"
+      ],
+      "secondary_rooms": [
+        "dining room",
+        "balcony",
+        "study"
+      ],
+      "owned_object_categories": [
+        "glasses",
+        "medicine box",
+        "book",
+        "mug",
+        "remote control"
+      ],
+      "frequently_moved_objects": [
+        "glasses",
+        "medicine box",
+        "book",
+        "mug"
+      ],
+      "activity_preferences": [
+        "reading",
+        "tea",
+        "medication",
+        "light_cleaning"
+      ],
+      "tidiness": "high",
+      "mobility": "independent_slow",
+      "care_needs": "low",
+      "social_pattern": "regular daytime presence",
+      "object_behavior_notes": "Medicine, glasses, books, and mugs have stable repeated locations.",
+      "name": "Helen Wilson",
+      "age": 72,
+      "gender": "female",
+      "occupation": "retired",
+      "personality": [
+        "steady",
+        "careful",
+        "reflective"
+      ],
+      "thoughts": "I like predictable morning routines, tea, reading, medication, and accessible surfaces.",
+      "routine_preferences": {
+        "typical_schedule": "early wake, breakfast, reading, light chores, early evening routine",
+        "active_time_windows": [
+          "06:00-12:00",
+          "15:00-21:00"
+        ],
+        "preferred_activities": [
+          "reading",
+          "tea",
+          "medication",
+          "light_cleaning"
+        ],
+        "routine_notes": "Medicine, glasses, books, and mugs have stable repeated locations."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "bedroom",
+          "kitchen",
+          "living room",
+          "bathroom"
+        ],
+        "secondary_rooms": [
+          "dining room",
+          "balcony",
+          "study"
+        ],
+        "preferred_objects": [
+          "glasses",
+          "medicine box",
+          "book",
+          "mug"
+        ],
+        "owned_object_categories": [
+          "glasses",
+          "medicine box",
+          "book",
+          "mug",
+          "remote control"
+        ],
+        "activity_preferences": [
+          "reading",
+          "tea",
+          "medication",
+          "light_cleaning"
+        ],
+        "social_pattern": "regular daytime presence",
+        "tidiness": "high"
+      }
+    },
+    {
+      "profile_id": "persona_015_elderly_assisted",
+      "display_name": "Assisted Elder",
+      "role_type": "resident_elder",
+      "age_range": [
+        75,
+        90
+      ],
+      "life_stage": "older_adult",
+      "household_roles": [
+        "retired_resident",
+        "care_recipient"
+      ],
+      "occupation_or_status": "retired",
+      "typical_schedule": "structured meals, medication, rest, supervised mobility, television",
+      "active_time_windows": [
+        "07:00-11:00",
+        "14:00-20:30"
+      ],
+      "primary_rooms": [
+        "bedroom",
+        "living room",
+        "bathroom"
+      ],
+      "secondary_rooms": [
+        "kitchen",
+        "dining room"
+      ],
+      "owned_object_categories": [
+        "medicine box",
+        "walker",
+        "blanket",
+        "glasses",
+        "remote control"
+      ],
+      "frequently_moved_objects": [
+        "medicine box",
+        "blanket",
+        "glasses",
+        "remote control"
+      ],
+      "activity_preferences": [
+        "medication",
+        "rest",
+        "watch_tv",
+        "assisted_meal"
+      ],
+      "tidiness": "medium_high",
+      "mobility": "limited",
+      "care_needs": "medium_high",
+      "social_pattern": "caregiver-supported",
+      "object_behavior_notes": "Frequently used objects should stay within accessible surfaces near bed, sofa, and dining seat.",
+      "name": "Robert Davis",
+      "age": 83,
+      "gender": "male",
+      "occupation": "retired",
+      "personality": [
+        "quiet",
+        "dependent on structure",
+        "comfort-oriented"
+      ],
+      "thoughts": "I rely on nearby support objects, medication reminders, and familiar paths between sofa, bed, and bathroom.",
+      "routine_preferences": {
+        "typical_schedule": "structured meals, medication, rest, supervised mobility, television",
+        "active_time_windows": [
+          "07:00-11:00",
+          "14:00-20:30"
+        ],
+        "preferred_activities": [
+          "medication",
+          "rest",
+          "watch_tv",
+          "assisted_meal"
+        ],
+        "routine_notes": "Frequently used objects should stay within accessible surfaces near bed, sofa, and dining seat."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "bedroom",
+          "living room",
+          "bathroom"
+        ],
+        "secondary_rooms": [
+          "kitchen",
+          "dining room"
+        ],
+        "preferred_objects": [
+          "medicine box",
+          "blanket",
+          "glasses",
+          "remote control"
+        ],
+        "owned_object_categories": [
+          "medicine box",
+          "walker",
+          "blanket",
+          "glasses",
+          "remote control"
+        ],
+        "activity_preferences": [
+          "medication",
+          "rest",
+          "watch_tv",
+          "assisted_meal"
+        ],
+        "social_pattern": "caregiver-supported",
+        "tidiness": "medium_high"
+      }
+    },
+    {
+      "profile_id": "persona_016_grandparent_live_in",
+      "display_name": "Live-in Grandparent",
+      "role_type": "resident_elder",
+      "age_range": [
+        60,
+        78
+      ],
+      "life_stage": "older_adult",
+      "household_roles": [
+        "grandparent",
+        "caregiver",
+        "retired_resident"
+      ],
+      "occupation_or_status": "retired or part-time caregiver",
+      "typical_schedule": "early chores, childcare support, cooking help, afternoon rest",
+      "active_time_windows": [
+        "05:30-12:00",
+        "15:00-21:00"
+      ],
+      "primary_rooms": [
+        "kitchen",
+        "living room",
+        "bedroom",
+        "dining room"
+      ],
+      "secondary_rooms": [
+        "bathroom",
+        "entryway"
+      ],
+      "owned_object_categories": [
+        "reading glasses",
+        "tea cup",
+        "medicine box",
+        "cooking utensil",
+        "book"
+      ],
+      "frequently_moved_objects": [
+        "tea cup",
+        "reading glasses",
+        "book",
+        "cooking utensil"
+      ],
+      "activity_preferences": [
+        "tea",
+        "cooking",
+        "childcare",
+        "reading"
+      ],
+      "tidiness": "high",
+      "mobility": "independent_slow",
+      "care_needs": "low_medium",
+      "social_pattern": "high daytime family interaction",
+      "object_behavior_notes": "Objects show repeated paths between kitchen, dining table, sofa, and bedroom.",
+      "name": "Mei Lin",
+      "age": 68,
+      "gender": "female",
+      "occupation": "retired or part-time caregiver",
+      "personality": [
+        "warm",
+        "helpful",
+        "traditional"
+      ],
+      "thoughts": "I enjoy helping with cooking and children while keeping my glasses, tea, and medicine close.",
+      "routine_preferences": {
+        "typical_schedule": "early chores, childcare support, cooking help, afternoon rest",
+        "active_time_windows": [
+          "05:30-12:00",
+          "15:00-21:00"
+        ],
+        "preferred_activities": [
+          "tea",
+          "cooking",
+          "childcare",
+          "reading"
+        ],
+        "routine_notes": "Objects show repeated paths between kitchen, dining table, sofa, and bedroom."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "kitchen",
+          "living room",
+          "bedroom",
+          "dining room"
+        ],
+        "secondary_rooms": [
+          "bathroom",
+          "entryway"
+        ],
+        "preferred_objects": [
+          "tea cup",
+          "reading glasses",
+          "book",
+          "cooking utensil"
+        ],
+        "owned_object_categories": [
+          "reading glasses",
+          "tea cup",
+          "medicine box",
+          "cooking utensil",
+          "book"
+        ],
+        "activity_preferences": [
+          "tea",
+          "cooking",
+          "childcare",
+          "reading"
+        ],
+        "social_pattern": "high daytime family interaction",
+        "tidiness": "high"
+      }
+    },
+    {
+      "profile_id": "persona_017_night_shift_nurse",
+      "display_name": "Night Shift Healthcare Worker",
+      "role_type": "resident_adult",
+      "age_range": [
+        25,
+        55
+      ],
+      "life_stage": "adult",
+      "household_roles": [
+        "worker"
+      ],
+      "occupation_or_status": "night shift nurse",
+      "typical_schedule": "sleeps during day, leaves in evening, returns early morning",
+      "active_time_windows": [
+        "06:30-08:30",
+        "17:00-20:00"
+      ],
+      "primary_rooms": [
+        "bedroom",
+        "bathroom",
+        "kitchen",
+        "entryway"
+      ],
+      "secondary_rooms": [
+        "living room"
+      ],
+      "owned_object_categories": [
+        "work bag",
+        "uniform",
+        "water bottle",
+        "phone",
+        "keys"
+      ],
+      "frequently_moved_objects": [
+        "work bag",
+        "uniform",
+        "water bottle",
+        "keys"
+      ],
+      "activity_preferences": [
+        "sleep_recovery",
+        "meal_prep",
+        "commute_prep",
+        "laundry"
+      ],
+      "tidiness": "medium_high",
+      "mobility": "independent",
+      "care_needs": "none",
+      "social_pattern": "asynchronous household rhythm",
+      "object_behavior_notes": "Shift-related objects cluster near bedroom, laundry, bathroom, and entryway at unusual times.",
+      "name": "Grace Anderson",
+      "age": 39,
+      "gender": "female",
+      "occupation": "night shift nurse",
+      "personality": [
+        "resilient",
+        "disciplined",
+        "asynchronous"
+      ],
+      "thoughts": "Because I work nights, my sleep, laundry, and meal routines happen at unusual household times.",
+      "routine_preferences": {
+        "typical_schedule": "sleeps during day, leaves in evening, returns early morning",
+        "active_time_windows": [
+          "06:30-08:30",
+          "17:00-20:00"
+        ],
+        "preferred_activities": [
+          "sleep_recovery",
+          "meal_prep",
+          "commute_prep",
+          "laundry"
+        ],
+        "routine_notes": "Shift-related objects cluster near bedroom, laundry, bathroom, and entryway at unusual times."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "bedroom",
+          "bathroom",
+          "kitchen",
+          "entryway"
+        ],
+        "secondary_rooms": [
+          "living room"
+        ],
+        "preferred_objects": [
+          "work bag",
+          "uniform",
+          "water bottle",
+          "keys"
+        ],
+        "owned_object_categories": [
+          "work bag",
+          "uniform",
+          "water bottle",
+          "phone",
+          "keys"
+        ],
+        "activity_preferences": [
+          "sleep_recovery",
+          "meal_prep",
+          "commute_prep",
+          "laundry"
+        ],
+        "social_pattern": "asynchronous household rhythm",
+        "tidiness": "medium_high"
+      }
+    },
+    {
+      "profile_id": "persona_018_freelancer",
+      "display_name": "Freelancer",
+      "role_type": "resident_adult",
+      "age_range": [
+        22,
+        45
+      ],
+      "life_stage": "adult",
+      "household_roles": [
+        "worker"
+      ],
+      "occupation_or_status": "freelance creative worker",
+      "typical_schedule": "flexible work blocks, irregular meals, late-night tasks",
+      "active_time_windows": [
+        "10:00-14:00",
+        "16:00-19:00",
+        "21:00-02:00"
+      ],
+      "primary_rooms": [
+        "home office",
+        "bedroom",
+        "living room",
+        "kitchen"
+      ],
+      "secondary_rooms": [
+        "dining room"
+      ],
+      "owned_object_categories": [
+        "laptop",
+        "sketchbook",
+        "camera",
+        "mug",
+        "headphones"
+      ],
+      "frequently_moved_objects": [
+        "laptop",
+        "camera",
+        "mug",
+        "sketchbook"
+      ],
+      "activity_preferences": [
+        "creative_work",
+        "coffee",
+        "late_snack",
+        "media_review"
+      ],
+      "tidiness": "medium_low",
+      "mobility": "independent",
+      "care_needs": "none",
+      "social_pattern": "irregular but home-centered",
+      "object_behavior_notes": "Work objects frequently migrate between desk, sofa, dining table, and kitchen counter.",
+      "name": "Jordan Lee",
+      "age": 28,
+      "gender": "nonbinary",
+      "occupation": "freelance creative worker",
+      "personality": [
+        "creative",
+        "irregular",
+        "immersive"
+      ],
+      "thoughts": "I work in flexible blocks and often carry creative tools, camera, laptop, and coffee through shared rooms.",
+      "routine_preferences": {
+        "typical_schedule": "flexible work blocks, irregular meals, late-night tasks",
+        "active_time_windows": [
+          "10:00-14:00",
+          "16:00-19:00",
+          "21:00-02:00"
+        ],
+        "preferred_activities": [
+          "creative_work",
+          "coffee",
+          "late_snack",
+          "media_review"
+        ],
+        "routine_notes": "Work objects frequently migrate between desk, sofa, dining table, and kitchen counter."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "home office",
+          "bedroom",
+          "living room",
+          "kitchen"
+        ],
+        "secondary_rooms": [
+          "dining room"
+        ],
+        "preferred_objects": [
+          "laptop",
+          "camera",
+          "mug",
+          "sketchbook"
+        ],
+        "owned_object_categories": [
+          "laptop",
+          "sketchbook",
+          "camera",
+          "mug",
+          "headphones"
+        ],
+        "activity_preferences": [
+          "creative_work",
+          "coffee",
+          "late_snack",
+          "media_review"
+        ],
+        "social_pattern": "irregular but home-centered",
+        "tidiness": "medium_low"
+      }
+    },
+    {
+      "profile_id": "persona_019_home_chef",
+      "display_name": "Cooking Enthusiast",
+      "role_type": "resident_adult",
+      "age_range": [
+        25,
+        60
+      ],
+      "life_stage": "adult",
+      "household_roles": [
+        "cook",
+        "resident"
+      ],
+      "occupation_or_status": "varied",
+      "typical_schedule": "regular meal planning, extended cooking sessions, pantry organization",
+      "active_time_windows": [
+        "07:00-09:00",
+        "12:00-14:00",
+        "17:00-21:00"
+      ],
+      "primary_rooms": [
+        "kitchen",
+        "dining room"
+      ],
+      "secondary_rooms": [
+        "pantry",
+        "living room"
+      ],
+      "owned_object_categories": [
+        "cookbook",
+        "knife",
+        "mixing bowl",
+        "spice jar",
+        "apron"
+      ],
+      "frequently_moved_objects": [
+        "cookbook",
+        "mixing bowl",
+        "spice jar",
+        "apron"
+      ],
+      "activity_preferences": [
+        "cooking",
+        "baking",
+        "grocery_planning",
+        "cleaning_kitchen"
+      ],
+      "tidiness": "medium_high",
+      "mobility": "independent",
+      "care_needs": "none",
+      "social_pattern": "family meal organizer",
+      "object_behavior_notes": "Kitchen objects shift between storage, counter, dining table, and sink area.",
+      "name": "Antonio Rossi",
+      "age": 46,
+      "gender": "male",
+      "occupation": "varied",
+      "personality": [
+        "expressive",
+        "food-centered",
+        "social"
+      ],
+      "thoughts": "Cooking is a main rhythm for me, so kitchen tools and meal objects move frequently.",
+      "routine_preferences": {
+        "typical_schedule": "regular meal planning, extended cooking sessions, pantry organization",
+        "active_time_windows": [
+          "07:00-09:00",
+          "12:00-14:00",
+          "17:00-21:00"
+        ],
+        "preferred_activities": [
+          "cooking",
+          "baking",
+          "grocery_planning",
+          "cleaning_kitchen"
+        ],
+        "routine_notes": "Kitchen objects shift between storage, counter, dining table, and sink area."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "kitchen",
+          "dining room"
+        ],
+        "secondary_rooms": [
+          "pantry",
+          "living room"
+        ],
+        "preferred_objects": [
+          "cookbook",
+          "mixing bowl",
+          "spice jar",
+          "apron"
+        ],
+        "owned_object_categories": [
+          "cookbook",
+          "knife",
+          "mixing bowl",
+          "spice jar",
+          "apron"
+        ],
+        "activity_preferences": [
+          "cooking",
+          "baking",
+          "grocery_planning",
+          "cleaning_kitchen"
+        ],
+        "social_pattern": "family meal organizer",
+        "tidiness": "medium_high"
+      }
+    },
+    {
+      "profile_id": "persona_020_minimalist_adult",
+      "display_name": "Minimalist Adult",
+      "role_type": "resident_adult",
+      "age_range": [
+        25,
+        55
+      ],
+      "life_stage": "adult",
+      "household_roles": [
+        "resident"
+      ],
+      "occupation_or_status": "varied",
+      "typical_schedule": "structured routine, low clutter, frequent returning of items",
+      "active_time_windows": [
+        "06:30-08:30",
+        "18:00-22:30"
+      ],
+      "primary_rooms": [
+        "bedroom",
+        "kitchen",
+        "living room"
+      ],
+      "secondary_rooms": [
+        "home office",
+        "bathroom"
+      ],
+      "owned_object_categories": [
+        "phone",
+        "keys",
+        "book",
+        "mug",
+        "laptop"
+      ],
+      "frequently_moved_objects": [
+        "phone",
+        "keys",
+        "mug"
+      ],
+      "activity_preferences": [
+        "reading",
+        "simple_cooking",
+        "tidying",
+        "work"
+      ],
+      "tidiness": "very_high",
+      "mobility": "independent",
+      "care_needs": "none",
+      "social_pattern": "low visitor frequency",
+      "object_behavior_notes": "Objects have strong home anchors and high probability of returning after use.",
+      "name": "Claire Bennett",
+      "age": 35,
+      "gender": "female",
+      "occupation": "varied",
+      "personality": [
+        "minimalist",
+        "disciplined",
+        "calm"
+      ],
+      "thoughts": "I prefer returning things to their home locations and keeping only a few objects in use.",
+      "routine_preferences": {
+        "typical_schedule": "structured routine, low clutter, frequent returning of items",
+        "active_time_windows": [
+          "06:30-08:30",
+          "18:00-22:30"
+        ],
+        "preferred_activities": [
+          "reading",
+          "simple_cooking",
+          "tidying",
+          "work"
+        ],
+        "routine_notes": "Objects have strong home anchors and high probability of returning after use."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "bedroom",
+          "kitchen",
+          "living room"
+        ],
+        "secondary_rooms": [
+          "home office",
+          "bathroom"
+        ],
+        "preferred_objects": [
+          "phone",
+          "keys",
+          "mug"
+        ],
+        "owned_object_categories": [
+          "phone",
+          "keys",
+          "book",
+          "mug",
+          "laptop"
+        ],
+        "activity_preferences": [
+          "reading",
+          "simple_cooking",
+          "tidying",
+          "work"
+        ],
+        "social_pattern": "low visitor frequency",
+        "tidiness": "very_high"
+      }
+    },
+    {
+      "profile_id": "persona_021_cluttered_hobbyist",
+      "display_name": "Cluttered Hobbyist",
+      "role_type": "resident_adult",
+      "age_range": [
+        20,
+        65
+      ],
+      "life_stage": "adult",
+      "household_roles": [
+        "resident",
+        "hobbyist"
+      ],
+      "occupation_or_status": "varied",
+      "typical_schedule": "hobby sessions in evenings or weekends, variable cleanup",
+      "active_time_windows": [
+        "18:00-00:00",
+        "10:00-18:00 weekend"
+      ],
+      "primary_rooms": [
+        "living room",
+        "study",
+        "garage",
+        "bedroom"
+      ],
+      "secondary_rooms": [
+        "kitchen",
+        "dining room"
+      ],
+      "owned_object_categories": [
+        "toolbox",
+        "craft kit",
+        "camera",
+        "game controller",
+        "book"
+      ],
+      "frequently_moved_objects": [
+        "craft kit",
+        "camera",
+        "game controller",
+        "book"
+      ],
+      "activity_preferences": [
+        "hobby_project",
+        "gaming",
+        "media",
+        "weekend_project"
+      ],
+      "tidiness": "low",
+      "mobility": "independent",
+      "care_needs": "none",
+      "social_pattern": "activity-specific clutter",
+      "object_behavior_notes": "Objects can remain on tables or floors for multiple snapshots before cleanup.",
+      "name": "Samir Khan",
+      "age": 44,
+      "gender": "male",
+      "occupation": "varied",
+      "personality": [
+        "curious",
+        "project-driven",
+        "clutter-tolerant"
+      ],
+      "thoughts": "When I work on hobbies, materials may stay out until I finish or decide to clean.",
+      "routine_preferences": {
+        "typical_schedule": "hobby sessions in evenings or weekends, variable cleanup",
+        "active_time_windows": [
+          "18:00-00:00",
+          "10:00-18:00 weekend"
+        ],
+        "preferred_activities": [
+          "hobby_project",
+          "gaming",
+          "media",
+          "weekend_project"
+        ],
+        "routine_notes": "Objects can remain on tables or floors for multiple snapshots before cleanup."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "living room",
+          "study",
+          "garage",
+          "bedroom"
+        ],
+        "secondary_rooms": [
+          "kitchen",
+          "dining room"
+        ],
+        "preferred_objects": [
+          "craft kit",
+          "camera",
+          "game controller",
+          "book"
+        ],
+        "owned_object_categories": [
+          "toolbox",
+          "craft kit",
+          "camera",
+          "game controller",
+          "book"
+        ],
+        "activity_preferences": [
+          "hobby_project",
+          "gaming",
+          "media",
+          "weekend_project"
+        ],
+        "social_pattern": "activity-specific clutter",
+        "tidiness": "low"
+      }
+    },
+    {
+      "profile_id": "persona_022_roommate_student",
+      "display_name": "Student Roommate",
+      "role_type": "resident_roommate",
+      "age_range": [
+        18,
+        28
+      ],
+      "life_stage": "young_adult",
+      "household_roles": [
+        "roommate",
+        "student"
+      ],
+      "occupation_or_status": "student",
+      "typical_schedule": "classes, shared kitchen use, private room study",
+      "active_time_windows": [
+        "08:00-10:00",
+        "16:00-23:30"
+      ],
+      "primary_rooms": [
+        "private bedroom",
+        "kitchen",
+        "living room"
+      ],
+      "secondary_rooms": [
+        "bathroom",
+        "dining room"
+      ],
+      "owned_object_categories": [
+        "laptop",
+        "backpack",
+        "mug",
+        "food container",
+        "headphones"
+      ],
+      "frequently_moved_objects": [
+        "laptop",
+        "backpack",
+        "mug",
+        "food container"
+      ],
+      "activity_preferences": [
+        "study",
+        "quick_meal",
+        "shared_living_room",
+        "late_snack"
+      ],
+      "tidiness": "medium_low",
+      "mobility": "independent",
+      "care_needs": "none",
+      "social_pattern": "shared spaces with private ownership",
+      "object_behavior_notes": "Personal objects should usually return to private bedroom but may linger in shared kitchen.",
+      "name": "Zoe Carter",
+      "age": 21,
+      "gender": "female",
+      "occupation": "student",
+      "personality": [
+        "social",
+        "busy",
+        "casually messy"
+      ],
+      "thoughts": "As a student roommate, I move between my private room, shared kitchen, and study surfaces.",
+      "routine_preferences": {
+        "typical_schedule": "classes, shared kitchen use, private room study",
+        "active_time_windows": [
+          "08:00-10:00",
+          "16:00-23:30"
+        ],
+        "preferred_activities": [
+          "study",
+          "quick_meal",
+          "shared_living_room",
+          "late_snack"
+        ],
+        "routine_notes": "Personal objects should usually return to private bedroom but may linger in shared kitchen."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "private bedroom",
+          "kitchen",
+          "living room"
+        ],
+        "secondary_rooms": [
+          "bathroom",
+          "dining room"
+        ],
+        "preferred_objects": [
+          "laptop",
+          "backpack",
+          "mug",
+          "food container"
+        ],
+        "owned_object_categories": [
+          "laptop",
+          "backpack",
+          "mug",
+          "food container",
+          "headphones"
+        ],
+        "activity_preferences": [
+          "study",
+          "quick_meal",
+          "shared_living_room",
+          "late_snack"
+        ],
+        "social_pattern": "shared spaces with private ownership",
+        "tidiness": "medium_low"
+      }
+    },
+    {
+      "profile_id": "persona_023_roommate_professional",
+      "display_name": "Professional Roommate",
+      "role_type": "resident_roommate",
+      "age_range": [
+        23,
+        40
+      ],
+      "life_stage": "adult",
+      "household_roles": [
+        "roommate",
+        "worker"
+      ],
+      "occupation_or_status": "full-time worker",
+      "typical_schedule": "commute or hybrid work, shared chores, private evening routine",
+      "active_time_windows": [
+        "06:30-08:30",
+        "18:00-23:30"
+      ],
+      "primary_rooms": [
+        "private bedroom",
+        "kitchen",
+        "entryway"
+      ],
+      "secondary_rooms": [
+        "living room",
+        "bathroom"
+      ],
+      "owned_object_categories": [
+        "keys",
+        "bag",
+        "laptop",
+        "mug",
+        "meal container"
+      ],
+      "frequently_moved_objects": [
+        "keys",
+        "bag",
+        "mug",
+        "meal container"
+      ],
+      "activity_preferences": [
+        "meal_prep",
+        "work",
+        "shared_chore",
+        "streaming"
+      ],
+      "tidiness": "medium",
+      "mobility": "independent",
+      "care_needs": "none",
+      "social_pattern": "moderate shared-space use",
+      "object_behavior_notes": "Shared-space placement should preserve ownership distinction.",
+      "name": "Brian Scott",
+      "age": 29,
+      "gender": "male",
+      "occupation": "full-time worker",
+      "personality": [
+        "respectful",
+        "routine-based",
+        "moderately tidy"
+      ],
+      "thoughts": "I share common areas but keep most personal work and commute objects tied to my own room.",
+      "routine_preferences": {
+        "typical_schedule": "commute or hybrid work, shared chores, private evening routine",
+        "active_time_windows": [
+          "06:30-08:30",
+          "18:00-23:30"
+        ],
+        "preferred_activities": [
+          "meal_prep",
+          "work",
+          "shared_chore",
+          "streaming"
+        ],
+        "routine_notes": "Shared-space placement should preserve ownership distinction."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "private bedroom",
+          "kitchen",
+          "entryway"
+        ],
+        "secondary_rooms": [
+          "living room",
+          "bathroom"
+        ],
+        "preferred_objects": [
+          "keys",
+          "bag",
+          "mug",
+          "meal container"
+        ],
+        "owned_object_categories": [
+          "keys",
+          "bag",
+          "laptop",
+          "mug",
+          "meal container"
+        ],
+        "activity_preferences": [
+          "meal_prep",
+          "work",
+          "shared_chore",
+          "streaming"
+        ],
+        "social_pattern": "moderate shared-space use",
+        "tidiness": "medium"
+      }
+    },
+    {
+      "profile_id": "persona_024_live_in_caregiver",
+      "display_name": "Live-in Caregiver",
+      "role_type": "resident_caregiver",
+      "age_range": [
+        25,
+        60
+      ],
+      "life_stage": "adult",
+      "household_roles": [
+        "caregiver",
+        "resident_worker"
+      ],
+      "occupation_or_status": "live-in caregiver",
+      "typical_schedule": "assists meals, medication, mobility, laundry, and evening care",
+      "active_time_windows": [
+        "06:00-22:00"
+      ],
+      "primary_rooms": [
+        "bedroom",
+        "kitchen",
+        "bathroom",
+        "living room"
+      ],
+      "secondary_rooms": [
+        "laundry room",
+        "entryway"
+      ],
+      "owned_object_categories": [
+        "phone",
+        "notebook",
+        "medicine organizer",
+        "laundry basket"
+      ],
+      "frequently_moved_objects": [
+        "notebook",
+        "medicine organizer",
+        "laundry basket",
+        "phone"
+      ],
+      "activity_preferences": [
+        "care_support",
+        "medication",
+        "cleaning",
+        "meal_assist"
+      ],
+      "tidiness": "high",
+      "mobility": "independent",
+      "care_needs": "none",
+      "social_pattern": "care-recipient centered",
+      "object_behavior_notes": "Care-related objects move predictably between kitchen, bedroom, bathroom, and sofa area.",
+      "name": "Rosa Hernandez",
+      "age": 52,
+      "gender": "female",
+      "occupation": "live-in caregiver",
+      "personality": [
+        "attentive",
+        "responsible",
+        "methodical"
+      ],
+      "thoughts": "My routine centers on care tasks, medication timing, laundry, and keeping essential items reachable.",
+      "routine_preferences": {
+        "typical_schedule": "assists meals, medication, mobility, laundry, and evening care",
+        "active_time_windows": [
+          "06:00-22:00"
+        ],
+        "preferred_activities": [
+          "care_support",
+          "medication",
+          "cleaning",
+          "meal_assist"
+        ],
+        "routine_notes": "Care-related objects move predictably between kitchen, bedroom, bathroom, and sofa area."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "bedroom",
+          "kitchen",
+          "bathroom",
+          "living room"
+        ],
+        "secondary_rooms": [
+          "laundry room",
+          "entryway"
+        ],
+        "preferred_objects": [
+          "notebook",
+          "medicine organizer",
+          "laundry basket",
+          "phone"
+        ],
+        "owned_object_categories": [
+          "phone",
+          "notebook",
+          "medicine organizer",
+          "laundry basket"
+        ],
+        "activity_preferences": [
+          "care_support",
+          "medication",
+          "cleaning",
+          "meal_assist"
+        ],
+        "social_pattern": "care-recipient centered",
+        "tidiness": "high"
+      }
+    },
+    {
+      "profile_id": "persona_025_part_time_caregiver",
+      "display_name": "Part-time Caregiver",
+      "role_type": "recurring_visitor",
+      "age_range": [
+        25,
+        65
+      ],
+      "life_stage": "adult",
+      "household_roles": [
+        "caregiver",
+        "visitor_worker"
+      ],
+      "occupation_or_status": "part-time caregiver",
+      "typical_schedule": "visits on scheduled mornings or afternoons for assistance",
+      "active_time_windows": [
+        "09:00-12:00",
+        "14:00-17:00"
+      ],
+      "primary_rooms": [
+        "entryway",
+        "bedroom",
+        "bathroom",
+        "kitchen"
+      ],
+      "secondary_rooms": [
+        "living room"
+      ],
+      "owned_object_categories": [
+        "care bag",
+        "phone",
+        "notebook"
+      ],
+      "frequently_moved_objects": [
+        "care bag",
+        "notebook"
+      ],
+      "activity_preferences": [
+        "assisted_cleaning",
+        "medication_check",
+        "meal_assist"
+      ],
+      "tidiness": "high",
+      "mobility": "independent",
+      "care_needs": "none",
+      "social_pattern": "scheduled recurring visitor",
+      "object_behavior_notes": "Temporary visitor objects appear near entry and care activity rooms during visit windows.",
+      "name": "Nina Brown",
+      "age": 43,
+      "gender": "female",
+      "occupation": "part-time caregiver",
+      "personality": [
+        "professional",
+        "gentle",
+        "scheduled"
+      ],
+      "thoughts": "I visit at set times and bring only a few care-related objects into the home.",
+      "routine_preferences": {
+        "typical_schedule": "visits on scheduled mornings or afternoons for assistance",
+        "active_time_windows": [
+          "09:00-12:00",
+          "14:00-17:00"
+        ],
+        "preferred_activities": [
+          "assisted_cleaning",
+          "medication_check",
+          "meal_assist"
+        ],
+        "routine_notes": "Temporary visitor objects appear near entry and care activity rooms during visit windows."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "entryway",
+          "bedroom",
+          "bathroom",
+          "kitchen"
+        ],
+        "secondary_rooms": [
+          "living room"
+        ],
+        "preferred_objects": [
+          "care bag",
+          "notebook"
+        ],
+        "owned_object_categories": [
+          "care bag",
+          "phone",
+          "notebook"
+        ],
+        "activity_preferences": [
+          "assisted_cleaning",
+          "medication_check",
+          "meal_assist"
+        ],
+        "social_pattern": "scheduled recurring visitor",
+        "tidiness": "high"
+      }
+    },
+    {
+      "profile_id": "persona_026_housekeeper",
+      "display_name": "Housekeeper",
+      "role_type": "recurring_visitor",
+      "age_range": [
+        25,
+        65
+      ],
+      "life_stage": "adult",
+      "household_roles": [
+        "service_worker"
+      ],
+      "occupation_or_status": "housekeeper",
+      "typical_schedule": "weekly or biweekly cleaning visit",
+      "active_time_windows": [
+        "09:00-15:00"
+      ],
+      "primary_rooms": [
+        "kitchen",
+        "bathroom",
+        "living room",
+        "bedroom"
+      ],
+      "secondary_rooms": [
+        "laundry room",
+        "entryway"
+      ],
+      "owned_object_categories": [
+        "cleaning supplies",
+        "vacuum",
+        "trash bag"
+      ],
+      "frequently_moved_objects": [
+        "cleaning supplies",
+        "vacuum",
+        "trash bag"
+      ],
+      "activity_preferences": [
+        "cleaning",
+        "laundry",
+        "trash_removal",
+        "surface_reset"
+      ],
+      "tidiness": "very_high_effect",
+      "mobility": "independent",
+      "care_needs": "none",
+      "social_pattern": "scheduled recurring visitor",
+      "object_behavior_notes": "Cleaning events should return many displaced objects to home anchors.",
+      "name": "Patricia Green",
+      "age": 50,
+      "gender": "female",
+      "occupation": "housekeeper",
+      "personality": [
+        "efficient",
+        "detail-oriented",
+        "reset-focused"
+      ],
+      "thoughts": "I clean rooms in a sequence and return many displaced objects to stable places.",
+      "routine_preferences": {
+        "typical_schedule": "weekly or biweekly cleaning visit",
+        "active_time_windows": [
+          "09:00-15:00"
+        ],
+        "preferred_activities": [
+          "cleaning",
+          "laundry",
+          "trash_removal",
+          "surface_reset"
+        ],
+        "routine_notes": "Cleaning events should return many displaced objects to home anchors."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "kitchen",
+          "bathroom",
+          "living room",
+          "bedroom"
+        ],
+        "secondary_rooms": [
+          "laundry room",
+          "entryway"
+        ],
+        "preferred_objects": [
+          "cleaning supplies",
+          "vacuum",
+          "trash bag"
+        ],
+        "owned_object_categories": [
+          "cleaning supplies",
+          "vacuum",
+          "trash bag"
+        ],
+        "activity_preferences": [
+          "cleaning",
+          "laundry",
+          "trash_removal",
+          "surface_reset"
+        ],
+        "social_pattern": "scheduled recurring visitor",
+        "tidiness": "very_high_effect"
+      }
+    },
+    {
+      "profile_id": "persona_027_babysitter",
+      "display_name": "Babysitter",
+      "role_type": "recurring_visitor",
+      "age_range": [
+        16,
+        35
+      ],
+      "life_stage": "teen_or_young_adult",
+      "household_roles": [
+        "childcare_visitor"
+      ],
+      "occupation_or_status": "babysitter",
+      "typical_schedule": "evening or weekend childcare visit",
+      "active_time_windows": [
+        "17:00-23:00",
+        "09:00-13:00 weekend"
+      ],
+      "primary_rooms": [
+        "entryway",
+        "living room",
+        "bedroom",
+        "kitchen"
+      ],
+      "secondary_rooms": [
+        "bathroom",
+        "play room"
+      ],
+      "owned_object_categories": [
+        "phone",
+        "bag",
+        "book"
+      ],
+      "frequently_moved_objects": [
+        "phone",
+        "bag",
+        "book",
+        "toy"
+      ],
+      "activity_preferences": [
+        "childcare",
+        "snack_prep",
+        "storytime",
+        "cleanup"
+      ],
+      "tidiness": "medium_high",
+      "mobility": "independent",
+      "care_needs": "none",
+      "social_pattern": "temporary evening visitor",
+      "object_behavior_notes": "Visitor bag appears near entry or sofa; child objects move during supervised play.",
+      "name": "Chloe Adams",
+      "age": 19,
+      "gender": "female",
+      "occupation": "babysitter",
+      "personality": [
+        "patient",
+        "playful",
+        "responsible"
+      ],
+      "thoughts": "During babysitting visits I keep a bag nearby and help children move between snacks, play, and bedtime.",
+      "routine_preferences": {
+        "typical_schedule": "evening or weekend childcare visit",
+        "active_time_windows": [
+          "17:00-23:00",
+          "09:00-13:00 weekend"
+        ],
+        "preferred_activities": [
+          "childcare",
+          "snack_prep",
+          "storytime",
+          "cleanup"
+        ],
+        "routine_notes": "Visitor bag appears near entry or sofa; child objects move during supervised play."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "entryway",
+          "living room",
+          "bedroom",
+          "kitchen"
+        ],
+        "secondary_rooms": [
+          "bathroom",
+          "play room"
+        ],
+        "preferred_objects": [
+          "phone",
+          "bag",
+          "book",
+          "toy"
+        ],
+        "owned_object_categories": [
+          "phone",
+          "bag",
+          "book"
+        ],
+        "activity_preferences": [
+          "childcare",
+          "snack_prep",
+          "storytime",
+          "cleanup"
+        ],
+        "social_pattern": "temporary evening visitor",
+        "tidiness": "medium_high"
+      }
+    },
+    {
+      "profile_id": "persona_028_weekend_guest",
+      "display_name": "Weekend Guest",
+      "role_type": "temporary_guest",
+      "age_range": [
+        18,
+        75
+      ],
+      "life_stage": "varied",
+      "household_roles": [
+        "guest"
+      ],
+      "occupation_or_status": "visitor",
+      "typical_schedule": "arrives with luggage, uses guest room and shared spaces for short stay",
+      "active_time_windows": [
+        "08:00-23:00"
+      ],
+      "primary_rooms": [
+        "guest room",
+        "living room",
+        "bathroom",
+        "entryway"
+      ],
+      "secondary_rooms": [
+        "kitchen",
+        "dining room"
+      ],
+      "owned_object_categories": [
+        "suitcase",
+        "toiletry bag",
+        "phone",
+        "book",
+        "water bottle"
+      ],
+      "frequently_moved_objects": [
+        "suitcase",
+        "toiletry bag",
+        "phone",
+        "water bottle"
+      ],
+      "activity_preferences": [
+        "visit",
+        "shared_meal",
+        "rest",
+        "conversation"
+      ],
+      "tidiness": "medium",
+      "mobility": "independent",
+      "care_needs": "none",
+      "social_pattern": "short-term stay",
+      "object_behavior_notes": "Temporary objects appear for limited days and should leave after departure.",
+      "name": "Thomas Walker",
+      "age": 57,
+      "gender": "male",
+      "occupation": "visitor",
+      "personality": [
+        "polite",
+        "temporary",
+        "low-impact"
+      ],
+      "thoughts": "As a weekend guest I keep luggage in the guest area but use shared rooms for meals and rest.",
+      "routine_preferences": {
+        "typical_schedule": "arrives with luggage, uses guest room and shared spaces for short stay",
+        "active_time_windows": [
+          "08:00-23:00"
+        ],
+        "preferred_activities": [
+          "visit",
+          "shared_meal",
+          "rest",
+          "conversation"
+        ],
+        "routine_notes": "Temporary objects appear for limited days and should leave after departure."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "guest room",
+          "living room",
+          "bathroom",
+          "entryway"
+        ],
+        "secondary_rooms": [
+          "kitchen",
+          "dining room"
+        ],
+        "preferred_objects": [
+          "suitcase",
+          "toiletry bag",
+          "phone",
+          "water bottle"
+        ],
+        "owned_object_categories": [
+          "suitcase",
+          "toiletry bag",
+          "phone",
+          "book",
+          "water bottle"
+        ],
+        "activity_preferences": [
+          "visit",
+          "shared_meal",
+          "rest",
+          "conversation"
+        ],
+        "social_pattern": "short-term stay",
+        "tidiness": "medium"
+      }
+    },
+    {
+      "profile_id": "persona_029_dinner_guest",
+      "display_name": "Dinner Guest",
+      "role_type": "temporary_guest",
+      "age_range": [
+        18,
+        80
+      ],
+      "life_stage": "varied",
+      "household_roles": [
+        "guest"
+      ],
+      "occupation_or_status": "visitor",
+      "typical_schedule": "short evening visit for dinner or gathering",
+      "active_time_windows": [
+        "18:00-22:30"
+      ],
+      "primary_rooms": [
+        "entryway",
+        "dining room",
+        "living room"
+      ],
+      "secondary_rooms": [
+        "bathroom",
+        "kitchen"
+      ],
+      "owned_object_categories": [
+        "coat",
+        "bag",
+        "phone",
+        "gift bag"
+      ],
+      "frequently_moved_objects": [
+        "coat",
+        "bag",
+        "phone",
+        "gift bag",
+        "cup"
+      ],
+      "activity_preferences": [
+        "shared_dinner",
+        "conversation",
+        "gift_exchange"
+      ],
+      "tidiness": "neutral",
+      "mobility": "independent",
+      "care_needs": "none",
+      "social_pattern": "event-specific visitor",
+      "object_behavior_notes": "Guest objects cluster near entry, dining table, sofa, and disappear after event.",
+      "name": "Isabella Martinez",
+      "age": 36,
+      "gender": "female",
+      "occupation": "visitor",
+      "personality": [
+        "sociable",
+        "event-oriented",
+        "courteous"
+      ],
+      "thoughts": "During dinner visits I bring small objects like a bag or gift and spend time near dining and living spaces.",
+      "routine_preferences": {
+        "typical_schedule": "short evening visit for dinner or gathering",
+        "active_time_windows": [
+          "18:00-22:30"
+        ],
+        "preferred_activities": [
+          "shared_dinner",
+          "conversation",
+          "gift_exchange"
+        ],
+        "routine_notes": "Guest objects cluster near entry, dining table, sofa, and disappear after event."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "entryway",
+          "dining room",
+          "living room"
+        ],
+        "secondary_rooms": [
+          "bathroom",
+          "kitchen"
+        ],
+        "preferred_objects": [
+          "coat",
+          "bag",
+          "phone",
+          "gift bag",
+          "cup"
+        ],
+        "owned_object_categories": [
+          "coat",
+          "bag",
+          "phone",
+          "gift bag"
+        ],
+        "activity_preferences": [
+          "shared_dinner",
+          "conversation",
+          "gift_exchange"
+        ],
+        "social_pattern": "event-specific visitor",
+        "tidiness": "neutral"
+      }
+    },
+    {
+      "profile_id": "persona_030_visiting_relative",
+      "display_name": "Visiting Relative",
+      "role_type": "temporary_guest",
+      "age_range": [
+        10,
+        85
+      ],
+      "life_stage": "varied",
+      "household_roles": [
+        "relative",
+        "guest"
+      ],
+      "occupation_or_status": "visitor",
+      "typical_schedule": "multi-day family visit with shared meals and family activities",
+      "active_time_windows": [
+        "07:00-23:00"
+      ],
+      "primary_rooms": [
+        "guest room",
+        "living room",
+        "dining room",
+        "bathroom"
+      ],
+      "secondary_rooms": [
+        "kitchen",
+        "entryway"
+      ],
+      "owned_object_categories": [
+        "suitcase",
+        "phone",
+        "medicine pouch",
+        "book",
+        "gift"
+      ],
+      "frequently_moved_objects": [
+        "phone",
+        "book",
+        "medicine pouch",
+        "gift"
+      ],
+      "activity_preferences": [
+        "family_meal",
+        "conversation",
+        "rest",
+        "outing_prep"
+      ],
+      "tidiness": "medium",
+      "mobility": "varied",
+      "care_needs": "varied",
+      "social_pattern": "family-centered temporary resident",
+      "object_behavior_notes": "Guest-room and living-room objects persist only through visit interval.",
+      "name": "George Evans",
+      "age": 70,
+      "gender": "male",
+      "occupation": "visitor",
+      "personality": [
+        "family-oriented",
+        "steady",
+        "observant"
+      ],
+      "thoughts": "When visiting relatives, I create temporary but repeated patterns around guest room, sofa, and dining table.",
+      "routine_preferences": {
+        "typical_schedule": "multi-day family visit with shared meals and family activities",
+        "active_time_windows": [
+          "07:00-23:00"
+        ],
+        "preferred_activities": [
+          "family_meal",
+          "conversation",
+          "rest",
+          "outing_prep"
+        ],
+        "routine_notes": "Guest-room and living-room objects persist only through visit interval."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "guest room",
+          "living room",
+          "dining room",
+          "bathroom"
+        ],
+        "secondary_rooms": [
+          "kitchen",
+          "entryway"
+        ],
+        "preferred_objects": [
+          "phone",
+          "book",
+          "medicine pouch",
+          "gift"
+        ],
+        "owned_object_categories": [
+          "suitcase",
+          "phone",
+          "medicine pouch",
+          "book",
+          "gift"
+        ],
+        "activity_preferences": [
+          "family_meal",
+          "conversation",
+          "rest",
+          "outing_prep"
+        ],
+        "social_pattern": "family-centered temporary resident",
+        "tidiness": "medium"
+      }
+    },
+    {
+      "profile_id": "persona_031_new_parent",
+      "display_name": "New Parent",
+      "role_type": "resident_adult",
+      "age_range": [
+        22,
+        42
+      ],
+      "life_stage": "adult",
+      "household_roles": [
+        "parent",
+        "caregiver"
+      ],
+      "occupation_or_status": "parental leave or working parent",
+      "typical_schedule": "fragmented sleep, frequent feeding, baby care, light chores",
+      "active_time_windows": [
+        "00:00-02:00",
+        "05:30-09:00",
+        "12:00-14:00",
+        "17:00-22:00"
+      ],
+      "primary_rooms": [
+        "bedroom",
+        "nursery",
+        "kitchen",
+        "living room"
+      ],
+      "secondary_rooms": [
+        "bathroom",
+        "laundry room"
+      ],
+      "owned_object_categories": [
+        "phone",
+        "mug",
+        "baby bottle",
+        "blanket",
+        "laundry basket"
+      ],
+      "frequently_moved_objects": [
+        "baby bottle",
+        "blanket",
+        "mug",
+        "laundry basket"
+      ],
+      "activity_preferences": [
+        "feeding",
+        "laundry",
+        "quick_meal",
+        "rest"
+      ],
+      "tidiness": "medium_low",
+      "mobility": "independent_tired",
+      "care_needs": "none",
+      "social_pattern": "care-driven irregular rhythm",
+      "object_behavior_notes": "Care objects have high movement frequency and may remain on sofa, nightstand, counter, or crib area.",
+      "name": "Emily Foster",
+      "age": 31,
+      "gender": "female",
+      "occupation": "parental leave or working parent",
+      "personality": [
+        "tired",
+        "protective",
+        "responsive"
+      ],
+      "thoughts": "My routine is fragmented by baby care, so bottles, blankets, mugs, and laundry move often.",
+      "routine_preferences": {
+        "typical_schedule": "fragmented sleep, frequent feeding, baby care, light chores",
+        "active_time_windows": [
+          "00:00-02:00",
+          "05:30-09:00",
+          "12:00-14:00",
+          "17:00-22:00"
+        ],
+        "preferred_activities": [
+          "feeding",
+          "laundry",
+          "quick_meal",
+          "rest"
+        ],
+        "routine_notes": "Care objects have high movement frequency and may remain on sofa, nightstand, counter, or crib area."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "bedroom",
+          "nursery",
+          "kitchen",
+          "living room"
+        ],
+        "secondary_rooms": [
+          "bathroom",
+          "laundry room"
+        ],
+        "preferred_objects": [
+          "baby bottle",
+          "blanket",
+          "mug",
+          "laundry basket"
+        ],
+        "owned_object_categories": [
+          "phone",
+          "mug",
+          "baby bottle",
+          "blanket",
+          "laundry basket"
+        ],
+        "activity_preferences": [
+          "feeding",
+          "laundry",
+          "quick_meal",
+          "rest"
+        ],
+        "social_pattern": "care-driven irregular rhythm",
+        "tidiness": "medium_low"
+      }
+    },
+    {
+      "profile_id": "persona_032_retired_couple_partner_a",
+      "display_name": "Retired Couple Partner A",
+      "role_type": "resident_elder",
+      "age_range": [
+        60,
+        78
+      ],
+      "life_stage": "older_adult",
+      "household_roles": [
+        "partner",
+        "retired_resident"
+      ],
+      "occupation_or_status": "retired",
+      "typical_schedule": "morning routine, reading, errands, early dinner",
+      "active_time_windows": [
+        "06:30-12:00",
+        "15:00-21:30"
+      ],
+      "primary_rooms": [
+        "kitchen",
+        "living room",
+        "bedroom",
+        "study"
+      ],
+      "secondary_rooms": [
+        "dining room",
+        "bathroom"
+      ],
+      "owned_object_categories": [
+        "book",
+        "glasses",
+        "tea cup",
+        "medicine box",
+        "tablet"
+      ],
+      "frequently_moved_objects": [
+        "book",
+        "glasses",
+        "tea cup",
+        "tablet"
+      ],
+      "activity_preferences": [
+        "reading",
+        "tea",
+        "news",
+        "light_chore"
+      ],
+      "tidiness": "high",
+      "mobility": "independent_slow",
+      "care_needs": "low",
+      "social_pattern": "steady daily home presence",
+      "object_behavior_notes": "Predictable morning and evening object locations support memory learning.",
+      "name": "Harold White",
+      "age": 67,
+      "gender": "male",
+      "occupation": "retired",
+      "personality": [
+        "quiet",
+        "habitual",
+        "orderly"
+      ],
+      "thoughts": "I follow stable home routines around reading, tea, medication, and light chores.",
+      "routine_preferences": {
+        "typical_schedule": "morning routine, reading, errands, early dinner",
+        "active_time_windows": [
+          "06:30-12:00",
+          "15:00-21:30"
+        ],
+        "preferred_activities": [
+          "reading",
+          "tea",
+          "news",
+          "light_chore"
+        ],
+        "routine_notes": "Predictable morning and evening object locations support memory learning."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "kitchen",
+          "living room",
+          "bedroom",
+          "study"
+        ],
+        "secondary_rooms": [
+          "dining room",
+          "bathroom"
+        ],
+        "preferred_objects": [
+          "book",
+          "glasses",
+          "tea cup",
+          "tablet"
+        ],
+        "owned_object_categories": [
+          "book",
+          "glasses",
+          "tea cup",
+          "medicine box",
+          "tablet"
+        ],
+        "activity_preferences": [
+          "reading",
+          "tea",
+          "news",
+          "light_chore"
+        ],
+        "social_pattern": "steady daily home presence",
+        "tidiness": "high"
+      }
+    },
+    {
+      "profile_id": "persona_033_retired_couple_partner_b",
+      "display_name": "Retired Couple Partner B",
+      "role_type": "resident_elder",
+      "age_range": [
+        60,
+        78
+      ],
+      "life_stage": "older_adult",
+      "household_roles": [
+        "partner",
+        "retired_resident"
+      ],
+      "occupation_or_status": "retired",
+      "typical_schedule": "morning cooking, hobby, calls with family, evening television",
+      "active_time_windows": [
+        "06:00-11:00",
+        "14:00-21:30"
+      ],
+      "primary_rooms": [
+        "kitchen",
+        "living room",
+        "bedroom"
+      ],
+      "secondary_rooms": [
+        "study",
+        "dining room",
+        "bathroom"
+      ],
+      "owned_object_categories": [
+        "phone",
+        "craft item",
+        "recipe book",
+        "mug",
+        "remote control"
+      ],
+      "frequently_moved_objects": [
+        "phone",
+        "craft item",
+        "recipe book",
+        "mug"
+      ],
+      "activity_preferences": [
+        "cooking",
+        "phone_call",
+        "hobby",
+        "watch_tv"
+      ],
+      "tidiness": "medium_high",
+      "mobility": "independent_slow",
+      "care_needs": "low",
+      "social_pattern": "frequent family communication",
+      "object_behavior_notes": "Hobby objects may remain in living room or dining room for multiple days.",
+      "name": "Margaret White",
+      "age": 66,
+      "gender": "female",
+      "occupation": "retired",
+      "personality": [
+        "warm",
+        "communicative",
+        "hobby-focused"
+      ],
+      "thoughts": "I enjoy cooking, calls, hobbies, and leaving craft or recipe items where I use them.",
+      "routine_preferences": {
+        "typical_schedule": "morning cooking, hobby, calls with family, evening television",
+        "active_time_windows": [
+          "06:00-11:00",
+          "14:00-21:30"
+        ],
+        "preferred_activities": [
+          "cooking",
+          "phone_call",
+          "hobby",
+          "watch_tv"
+        ],
+        "routine_notes": "Hobby objects may remain in living room or dining room for multiple days."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "kitchen",
+          "living room",
+          "bedroom"
+        ],
+        "secondary_rooms": [
+          "study",
+          "dining room",
+          "bathroom"
+        ],
+        "preferred_objects": [
+          "phone",
+          "craft item",
+          "recipe book",
+          "mug"
+        ],
+        "owned_object_categories": [
+          "phone",
+          "craft item",
+          "recipe book",
+          "mug",
+          "remote control"
+        ],
+        "activity_preferences": [
+          "cooking",
+          "phone_call",
+          "hobby",
+          "watch_tv"
+        ],
+        "social_pattern": "frequent family communication",
+        "tidiness": "medium_high"
+      }
+    },
+    {
+      "profile_id": "persona_034_parent_with_irregular_travel",
+      "display_name": "Frequently Traveling Parent",
+      "role_type": "resident_adult",
+      "age_range": [
+        30,
+        55
+      ],
+      "life_stage": "adult",
+      "household_roles": [
+        "parent",
+        "worker"
+      ],
+      "occupation_or_status": "business traveler",
+      "typical_schedule": "periods away from home, packing before trips, unpacking after return",
+      "active_time_windows": [
+        "06:00-08:00",
+        "19:00-23:00"
+      ],
+      "primary_rooms": [
+        "bedroom",
+        "entryway",
+        "laundry room",
+        "kitchen"
+      ],
+      "secondary_rooms": [
+        "living room",
+        "home office"
+      ],
+      "owned_object_categories": [
+        "suitcase",
+        "laptop bag",
+        "passport holder",
+        "keys",
+        "charger"
+      ],
+      "frequently_moved_objects": [
+        "suitcase",
+        "laptop bag",
+        "charger",
+        "keys"
+      ],
+      "activity_preferences": [
+        "packing",
+        "unpacking",
+        "work_call",
+        "family_dinner"
+      ],
+      "tidiness": "medium",
+      "mobility": "independent",
+      "care_needs": "none",
+      "social_pattern": "intermittent absence",
+      "object_behavior_notes": "Travel objects appear before and after trips, then return to storage.",
+      "name": "Victor Ramirez",
+      "age": 45,
+      "gender": "male",
+      "occupation": "business traveler",
+      "personality": [
+        "travel-oriented",
+        "organized under pressure",
+        "family-minded"
+      ],
+      "thoughts": "Trips change the home rhythm because packing and unpacking introduce bags, chargers, and travel documents.",
+      "routine_preferences": {
+        "typical_schedule": "periods away from home, packing before trips, unpacking after return",
+        "active_time_windows": [
+          "06:00-08:00",
+          "19:00-23:00"
+        ],
+        "preferred_activities": [
+          "packing",
+          "unpacking",
+          "work_call",
+          "family_dinner"
+        ],
+        "routine_notes": "Travel objects appear before and after trips, then return to storage."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "bedroom",
+          "entryway",
+          "laundry room",
+          "kitchen"
+        ],
+        "secondary_rooms": [
+          "living room",
+          "home office"
+        ],
+        "preferred_objects": [
+          "suitcase",
+          "laptop bag",
+          "charger",
+          "keys"
+        ],
+        "owned_object_categories": [
+          "suitcase",
+          "laptop bag",
+          "passport holder",
+          "keys",
+          "charger"
+        ],
+        "activity_preferences": [
+          "packing",
+          "unpacking",
+          "work_call",
+          "family_dinner"
+        ],
+        "social_pattern": "intermittent absence",
+        "tidiness": "medium"
+      }
+    },
+    {
+      "profile_id": "persona_035_artist_at_home",
+      "display_name": "Home Artist",
+      "role_type": "resident_adult",
+      "age_range": [
+        20,
+        70
+      ],
+      "life_stage": "adult",
+      "household_roles": [
+        "resident",
+        "hobbyist_or_worker"
+      ],
+      "occupation_or_status": "artist or craft hobbyist",
+      "typical_schedule": "long creative sessions, flexible cleanup, material storage",
+      "active_time_windows": [
+        "09:00-13:00",
+        "15:00-19:00",
+        "21:00-00:00"
+      ],
+      "primary_rooms": [
+        "study",
+        "living room",
+        "dining room",
+        "garage"
+      ],
+      "secondary_rooms": [
+        "kitchen",
+        "bedroom"
+      ],
+      "owned_object_categories": [
+        "sketchbook",
+        "paint set",
+        "camera",
+        "toolbox",
+        "cloth"
+      ],
+      "frequently_moved_objects": [
+        "sketchbook",
+        "paint set",
+        "camera",
+        "cloth"
+      ],
+      "activity_preferences": [
+        "art_project",
+        "photography",
+        "crafting",
+        "surface_cleanup"
+      ],
+      "tidiness": "variable",
+      "mobility": "independent",
+      "care_needs": "none",
+      "social_pattern": "project-driven",
+      "object_behavior_notes": "Project materials may persist on a table until a cleanup event.",
+      "name": "Ari Stone",
+      "age": 33,
+      "gender": "nonbinary",
+      "occupation": "artist or craft hobbyist",
+      "personality": [
+        "artistic",
+        "absorbed",
+        "variable tidy"
+      ],
+      "thoughts": "Creative projects can occupy surfaces for days before I reset the room.",
+      "routine_preferences": {
+        "typical_schedule": "long creative sessions, flexible cleanup, material storage",
+        "active_time_windows": [
+          "09:00-13:00",
+          "15:00-19:00",
+          "21:00-00:00"
+        ],
+        "preferred_activities": [
+          "art_project",
+          "photography",
+          "crafting",
+          "surface_cleanup"
+        ],
+        "routine_notes": "Project materials may persist on a table until a cleanup event."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "study",
+          "living room",
+          "dining room",
+          "garage"
+        ],
+        "secondary_rooms": [
+          "kitchen",
+          "bedroom"
+        ],
+        "preferred_objects": [
+          "sketchbook",
+          "paint set",
+          "camera",
+          "cloth"
+        ],
+        "owned_object_categories": [
+          "sketchbook",
+          "paint set",
+          "camera",
+          "toolbox",
+          "cloth"
+        ],
+        "activity_preferences": [
+          "art_project",
+          "photography",
+          "crafting",
+          "surface_cleanup"
+        ],
+        "social_pattern": "project-driven",
+        "tidiness": "variable"
+      }
+    },
+    {
+      "profile_id": "persona_036_fitness_oriented_adult",
+      "display_name": "Fitness-oriented Adult",
+      "role_type": "resident_adult",
+      "age_range": [
+        18,
+        55
+      ],
+      "life_stage": "adult",
+      "household_roles": [
+        "resident"
+      ],
+      "occupation_or_status": "varied",
+      "typical_schedule": "morning or evening exercise, meal prep, laundry",
+      "active_time_windows": [
+        "05:30-08:00",
+        "18:00-22:00"
+      ],
+      "primary_rooms": [
+        "bedroom",
+        "bathroom",
+        "entryway",
+        "kitchen"
+      ],
+      "secondary_rooms": [
+        "living room",
+        "laundry room"
+      ],
+      "owned_object_categories": [
+        "gym bag",
+        "water bottle",
+        "towel",
+        "headphones",
+        "meal container"
+      ],
+      "frequently_moved_objects": [
+        "gym bag",
+        "water bottle",
+        "towel",
+        "headphones"
+      ],
+      "activity_preferences": [
+        "exercise_prep",
+        "laundry",
+        "meal_prep",
+        "hydration"
+      ],
+      "tidiness": "medium",
+      "mobility": "independent",
+      "care_needs": "none",
+      "social_pattern": "routine-driven",
+      "object_behavior_notes": "Exercise-related objects cycle between entryway, bedroom, bathroom, and laundry.",
+      "name": "Kevin Park",
+      "age": 27,
+      "gender": "male",
+      "occupation": "varied",
+      "personality": [
+        "energetic",
+        "routine-driven",
+        "health-conscious"
+      ],
+      "thoughts": "Exercise routines move bags, bottles, towels, and laundry through the home.",
+      "routine_preferences": {
+        "typical_schedule": "morning or evening exercise, meal prep, laundry",
+        "active_time_windows": [
+          "05:30-08:00",
+          "18:00-22:00"
+        ],
+        "preferred_activities": [
+          "exercise_prep",
+          "laundry",
+          "meal_prep",
+          "hydration"
+        ],
+        "routine_notes": "Exercise-related objects cycle between entryway, bedroom, bathroom, and laundry."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "bedroom",
+          "bathroom",
+          "entryway",
+          "kitchen"
+        ],
+        "secondary_rooms": [
+          "living room",
+          "laundry room"
+        ],
+        "preferred_objects": [
+          "gym bag",
+          "water bottle",
+          "towel",
+          "headphones"
+        ],
+        "owned_object_categories": [
+          "gym bag",
+          "water bottle",
+          "towel",
+          "headphones",
+          "meal container"
+        ],
+        "activity_preferences": [
+          "exercise_prep",
+          "laundry",
+          "meal_prep",
+          "hydration"
+        ],
+        "social_pattern": "routine-driven",
+        "tidiness": "medium"
+      }
+    },
+    {
+      "profile_id": "persona_037_person_with_mobility_aid",
+      "display_name": "Adult With Mobility Aid",
+      "role_type": "resident_adult",
+      "age_range": [
+        20,
+        85
+      ],
+      "life_stage": "adult_or_elder",
+      "household_roles": [
+        "resident"
+      ],
+      "occupation_or_status": "varied",
+      "typical_schedule": "structured movement between accessible rooms, reachable surfaces preferred",
+      "active_time_windows": [
+        "07:00-12:00",
+        "15:00-22:00"
+      ],
+      "primary_rooms": [
+        "bedroom",
+        "bathroom",
+        "living room",
+        "kitchen"
+      ],
+      "secondary_rooms": [
+        "dining room",
+        "entryway"
+      ],
+      "owned_object_categories": [
+        "walker",
+        "medicine box",
+        "phone",
+        "water bottle",
+        "book"
+      ],
+      "frequently_moved_objects": [
+        "phone",
+        "water bottle",
+        "medicine box",
+        "book"
+      ],
+      "activity_preferences": [
+        "accessible_meal",
+        "rest",
+        "medication",
+        "reading"
+      ],
+      "tidiness": "medium_high",
+      "mobility": "limited_with_aid",
+      "care_needs": "variable",
+      "social_pattern": "reachable-surface dependent",
+      "object_behavior_notes": "Important objects should be placed on accessible surfaces near common sitting and sleeping areas.",
+      "name": "Linda Moore",
+      "age": 58,
+      "gender": "female",
+      "occupation": "varied",
+      "personality": [
+        "careful",
+        "independent",
+        "accessibility-aware"
+      ],
+      "thoughts": "I prefer important objects on reachable surfaces near safe walking paths.",
+      "routine_preferences": {
+        "typical_schedule": "structured movement between accessible rooms, reachable surfaces preferred",
+        "active_time_windows": [
+          "07:00-12:00",
+          "15:00-22:00"
+        ],
+        "preferred_activities": [
+          "accessible_meal",
+          "rest",
+          "medication",
+          "reading"
+        ],
+        "routine_notes": "Important objects should be placed on accessible surfaces near common sitting and sleeping areas."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "bedroom",
+          "bathroom",
+          "living room",
+          "kitchen"
+        ],
+        "secondary_rooms": [
+          "dining room",
+          "entryway"
+        ],
+        "preferred_objects": [
+          "phone",
+          "water bottle",
+          "medicine box",
+          "book"
+        ],
+        "owned_object_categories": [
+          "walker",
+          "medicine box",
+          "phone",
+          "water bottle",
+          "book"
+        ],
+        "activity_preferences": [
+          "accessible_meal",
+          "rest",
+          "medication",
+          "reading"
+        ],
+        "social_pattern": "reachable-surface dependent",
+        "tidiness": "medium_high"
+      }
+    },
+    {
+      "profile_id": "persona_038_parent_on_leave",
+      "display_name": "Parent On Temporary Leave",
+      "role_type": "resident_adult",
+      "age_range": [
+        25,
+        50
+      ],
+      "life_stage": "adult",
+      "household_roles": [
+        "parent",
+        "temporary_home_full_time"
+      ],
+      "occupation_or_status": "temporarily on leave",
+      "typical_schedule": "more daytime home presence than usual, household projects, caregiving",
+      "active_time_windows": [
+        "07:00-22:30"
+      ],
+      "primary_rooms": [
+        "kitchen",
+        "living room",
+        "bedroom",
+        "home office"
+      ],
+      "secondary_rooms": [
+        "laundry room",
+        "entryway"
+      ],
+      "owned_object_categories": [
+        "phone",
+        "planner",
+        "mug",
+        "laptop",
+        "storage box"
+      ],
+      "frequently_moved_objects": [
+        "planner",
+        "mug",
+        "laptop",
+        "storage box"
+      ],
+      "activity_preferences": [
+        "home_project",
+        "childcare",
+        "cooking",
+        "online_task"
+      ],
+      "tidiness": "medium_high",
+      "mobility": "independent",
+      "care_needs": "none",
+      "social_pattern": "temporary distribution shift",
+      "object_behavior_notes": "Creates mid-month shift toward more daytime object movement inside the house.",
+      "name": "Rachel Young",
+      "age": 40,
+      "gender": "female",
+      "occupation": "temporarily on leave",
+      "personality": [
+        "project-oriented",
+        "temporarily home-centered",
+        "practical"
+      ],
+      "thoughts": "Being on leave makes daytime home activity higher and changes where work and project objects appear.",
+      "routine_preferences": {
+        "typical_schedule": "more daytime home presence than usual, household projects, caregiving",
+        "active_time_windows": [
+          "07:00-22:30"
+        ],
+        "preferred_activities": [
+          "home_project",
+          "childcare",
+          "cooking",
+          "online_task"
+        ],
+        "routine_notes": "Creates mid-month shift toward more daytime object movement inside the house."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "kitchen",
+          "living room",
+          "bedroom",
+          "home office"
+        ],
+        "secondary_rooms": [
+          "laundry room",
+          "entryway"
+        ],
+        "preferred_objects": [
+          "planner",
+          "mug",
+          "laptop",
+          "storage box"
+        ],
+        "owned_object_categories": [
+          "phone",
+          "planner",
+          "mug",
+          "laptop",
+          "storage box"
+        ],
+        "activity_preferences": [
+          "home_project",
+          "childcare",
+          "cooking",
+          "online_task"
+        ],
+        "social_pattern": "temporary distribution shift",
+        "tidiness": "medium_high"
+      }
+    },
+    {
+      "profile_id": "persona_039_divorced_co_parent_visit",
+      "display_name": "Co-parent Visit Child",
+      "role_type": "temporary_resident_child",
+      "age_range": [
+        5,
+        16
+      ],
+      "life_stage": "child_or_teen",
+      "household_roles": [
+        "child",
+        "periodic_resident"
+      ],
+      "occupation_or_status": "student",
+      "typical_schedule": "stays on alternate weekends or scheduled weekdays",
+      "active_time_windows": [
+        "07:00-22:00"
+      ],
+      "primary_rooms": [
+        "bedroom",
+        "living room",
+        "dining room"
+      ],
+      "secondary_rooms": [
+        "bathroom",
+        "entryway"
+      ],
+      "owned_object_categories": [
+        "backpack",
+        "toy",
+        "tablet",
+        "clothes bag",
+        "book"
+      ],
+      "frequently_moved_objects": [
+        "backpack",
+        "tablet",
+        "book",
+        "clothes bag"
+      ],
+      "activity_preferences": [
+        "homework",
+        "play",
+        "shared_meal",
+        "screen_time"
+      ],
+      "tidiness": "medium_low",
+      "mobility": "independent_child",
+      "care_needs": "age_dependent",
+      "social_pattern": "periodic presence",
+      "object_behavior_notes": "Personal objects appear only during custody intervals and should leave afterward.",
+      "name": "Ben Collins",
+      "age": 11,
+      "gender": "male",
+      "occupation": "student",
+      "personality": [
+        "adaptable",
+        "attached to personal items",
+        "weekend-oriented"
+      ],
+      "thoughts": "When I stay over, my bag, tablet, and books appear during scheduled custody periods.",
+      "routine_preferences": {
+        "typical_schedule": "stays on alternate weekends or scheduled weekdays",
+        "active_time_windows": [
+          "07:00-22:00"
+        ],
+        "preferred_activities": [
+          "homework",
+          "play",
+          "shared_meal",
+          "screen_time"
+        ],
+        "routine_notes": "Personal objects appear only during custody intervals and should leave afterward."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "bedroom",
+          "living room",
+          "dining room"
+        ],
+        "secondary_rooms": [
+          "bathroom",
+          "entryway"
+        ],
+        "preferred_objects": [
+          "backpack",
+          "tablet",
+          "book",
+          "clothes bag"
+        ],
+        "owned_object_categories": [
+          "backpack",
+          "toy",
+          "tablet",
+          "clothes bag",
+          "book"
+        ],
+        "activity_preferences": [
+          "homework",
+          "play",
+          "shared_meal",
+          "screen_time"
+        ],
+        "social_pattern": "periodic presence",
+        "tidiness": "medium_low"
+      }
+    },
+    {
+      "profile_id": "persona_040_newborn_grandparent_helper",
+      "display_name": "Temporary Grandparent Helper",
+      "role_type": "temporary_guest",
+      "age_range": [
+        55,
+        78
+      ],
+      "life_stage": "older_adult",
+      "household_roles": [
+        "grandparent",
+        "temporary_caregiver"
+      ],
+      "occupation_or_status": "retired visitor",
+      "typical_schedule": "multi-day stay assisting with baby care, cooking, and household reset",
+      "active_time_windows": [
+        "06:00-21:30"
+      ],
+      "primary_rooms": [
+        "guest room",
+        "kitchen",
+        "nursery",
+        "living room"
+      ],
+      "secondary_rooms": [
+        "bathroom",
+        "laundry room"
+      ],
+      "owned_object_categories": [
+        "suitcase",
+        "tea cup",
+        "medicine pouch",
+        "book"
+      ],
+      "frequently_moved_objects": [
+        "tea cup",
+        "medicine pouch",
+        "book",
+        "baby bottle"
+      ],
+      "activity_preferences": [
+        "care_support",
+        "cooking",
+        "tea",
+        "laundry"
+      ],
+      "tidiness": "high",
+      "mobility": "independent_slow",
+      "care_needs": "low",
+      "social_pattern": "temporary family support",
+      "object_behavior_notes": "Combines guest-room objects with increased nursery and kitchen activity.",
+      "name": "Susan Clark",
+      "age": 64,
+      "gender": "female",
+      "occupation": "retired visitor",
+      "personality": [
+        "supportive",
+        "experienced",
+        "family-centered"
+      ],
+      "thoughts": "I temporarily help with baby care, meals, tea, and laundry while staying as family.",
+      "routine_preferences": {
+        "typical_schedule": "multi-day stay assisting with baby care, cooking, and household reset",
+        "active_time_windows": [
+          "06:00-21:30"
+        ],
+        "preferred_activities": [
+          "care_support",
+          "cooking",
+          "tea",
+          "laundry"
+        ],
+        "routine_notes": "Combines guest-room objects with increased nursery and kitchen activity."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "guest room",
+          "kitchen",
+          "nursery",
+          "living room"
+        ],
+        "secondary_rooms": [
+          "bathroom",
+          "laundry room"
+        ],
+        "preferred_objects": [
+          "tea cup",
+          "medicine pouch",
+          "book",
+          "baby bottle"
+        ],
+        "owned_object_categories": [
+          "suitcase",
+          "tea cup",
+          "medicine pouch",
+          "book"
+        ],
+        "activity_preferences": [
+          "care_support",
+          "cooking",
+          "tea",
+          "laundry"
+        ],
+        "social_pattern": "temporary family support",
+        "tidiness": "high"
+      }
+    },
+    {
+      "profile_id": "persona_041_child_friend_sleepover",
+      "display_name": "Child Friend Sleepover Guest",
+      "role_type": "temporary_guest_child",
+      "age_range": [
+        7,
+        14
+      ],
+      "life_stage": "child_or_early_teen",
+      "household_roles": [
+        "child_guest"
+      ],
+      "occupation_or_status": "student visitor",
+      "typical_schedule": "afternoon arrival, evening play, overnight stay, morning departure",
+      "active_time_windows": [
+        "16:00-23:00",
+        "07:00-10:00"
+      ],
+      "primary_rooms": [
+        "child bedroom",
+        "living room",
+        "bathroom"
+      ],
+      "secondary_rooms": [
+        "dining room",
+        "entryway"
+      ],
+      "owned_object_categories": [
+        "sleepover bag",
+        "tablet",
+        "book",
+        "water bottle"
+      ],
+      "frequently_moved_objects": [
+        "sleepover bag",
+        "tablet",
+        "water bottle",
+        "toy"
+      ],
+      "activity_preferences": [
+        "play",
+        "movie",
+        "snack",
+        "sleepover"
+      ],
+      "tidiness": "low",
+      "mobility": "independent_child",
+      "care_needs": "medium",
+      "social_pattern": "short-term child social event",
+      "object_behavior_notes": "Temporary clutter in child bedroom and living room, removed after departure.",
+      "name": "Mia Robinson",
+      "age": 10,
+      "gender": "female",
+      "occupation": "student visitor",
+      "personality": [
+        "excited",
+        "social",
+        "messy during play"
+      ],
+      "thoughts": "Sleepovers mean snacks, games, water bottles, and bags appear briefly in child and living spaces.",
+      "routine_preferences": {
+        "typical_schedule": "afternoon arrival, evening play, overnight stay, morning departure",
+        "active_time_windows": [
+          "16:00-23:00",
+          "07:00-10:00"
+        ],
+        "preferred_activities": [
+          "play",
+          "movie",
+          "snack",
+          "sleepover"
+        ],
+        "routine_notes": "Temporary clutter in child bedroom and living room, removed after departure."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "child bedroom",
+          "living room",
+          "bathroom"
+        ],
+        "secondary_rooms": [
+          "dining room",
+          "entryway"
+        ],
+        "preferred_objects": [
+          "sleepover bag",
+          "tablet",
+          "water bottle",
+          "toy"
+        ],
+        "owned_object_categories": [
+          "sleepover bag",
+          "tablet",
+          "book",
+          "water bottle"
+        ],
+        "activity_preferences": [
+          "play",
+          "movie",
+          "snack",
+          "sleepover"
+        ],
+        "social_pattern": "short-term child social event",
+        "tidiness": "low"
+      }
+    },
+    {
+      "profile_id": "persona_042_home_schooled_child",
+      "display_name": "Home-schooled Child",
+      "role_type": "resident_child",
+      "age_range": [
+        6,
+        14
+      ],
+      "life_stage": "school_age",
+      "household_roles": [
+        "child",
+        "student"
+      ],
+      "occupation_or_status": "home-schooled student",
+      "typical_schedule": "daytime learning at home, breaks, reading, family activities",
+      "active_time_windows": [
+        "08:00-15:00",
+        "17:00-20:30"
+      ],
+      "primary_rooms": [
+        "study",
+        "dining room",
+        "living room",
+        "bedroom"
+      ],
+      "secondary_rooms": [
+        "kitchen",
+        "bathroom"
+      ],
+      "owned_object_categories": [
+        "notebook",
+        "textbook",
+        "pencil case",
+        "tablet",
+        "craft kit"
+      ],
+      "frequently_moved_objects": [
+        "notebook",
+        "textbook",
+        "tablet",
+        "craft kit"
+      ],
+      "activity_preferences": [
+        "lesson",
+        "reading",
+        "drawing",
+        "snack"
+      ],
+      "tidiness": "medium",
+      "mobility": "independent_child",
+      "care_needs": "medium",
+      "social_pattern": "high daytime home presence",
+      "object_behavior_notes": "Learning materials create repeated daytime patterns at dining table and study surfaces.",
+      "name": "Isaac Turner",
+      "age": 9,
+      "gender": "male",
+      "occupation": "home-schooled student",
+      "personality": [
+        "curious",
+        "structured",
+        "home-learning focused"
+      ],
+      "thoughts": "School materials move through the home because learning happens at tables and study areas.",
+      "routine_preferences": {
+        "typical_schedule": "daytime learning at home, breaks, reading, family activities",
+        "active_time_windows": [
+          "08:00-15:00",
+          "17:00-20:30"
+        ],
+        "preferred_activities": [
+          "lesson",
+          "reading",
+          "drawing",
+          "snack"
+        ],
+        "routine_notes": "Learning materials create repeated daytime patterns at dining table and study surfaces."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "study",
+          "dining room",
+          "living room",
+          "bedroom"
+        ],
+        "secondary_rooms": [
+          "kitchen",
+          "bathroom"
+        ],
+        "preferred_objects": [
+          "notebook",
+          "textbook",
+          "tablet",
+          "craft kit"
+        ],
+        "owned_object_categories": [
+          "notebook",
+          "textbook",
+          "pencil case",
+          "tablet",
+          "craft kit"
+        ],
+        "activity_preferences": [
+          "lesson",
+          "reading",
+          "drawing",
+          "snack"
+        ],
+        "social_pattern": "high daytime home presence",
+        "tidiness": "medium"
+      }
+    },
+    {
+      "profile_id": "persona_043_work_from_home_shared_space",
+      "display_name": "Shared-space Remote Worker",
+      "role_type": "resident_adult",
+      "age_range": [
+        22,
+        55
+      ],
+      "life_stage": "adult",
+      "household_roles": [
+        "worker"
+      ],
+      "occupation_or_status": "remote worker without dedicated office",
+      "typical_schedule": "uses dining table or sofa for work, packs away items in evening",
+      "active_time_windows": [
+        "08:30-18:00",
+        "20:00-22:00"
+      ],
+      "primary_rooms": [
+        "dining room",
+        "living room",
+        "kitchen"
+      ],
+      "secondary_rooms": [
+        "bedroom",
+        "entryway"
+      ],
+      "owned_object_categories": [
+        "laptop",
+        "charger",
+        "notebook",
+        "mug",
+        "headphones"
+      ],
+      "frequently_moved_objects": [
+        "laptop",
+        "charger",
+        "notebook",
+        "mug",
+        "headphones"
+      ],
+      "activity_preferences": [
+        "work",
+        "video_call",
+        "coffee",
+        "surface_reset"
+      ],
+      "tidiness": "medium_high",
+      "mobility": "independent",
+      "care_needs": "none",
+      "social_pattern": "shared space conflict potential",
+      "object_behavior_notes": "Work setup appears during weekdays and is often removed before dinner.",
+      "name": "Natalie Cooper",
+      "age": 36,
+      "gender": "female",
+      "occupation": "remote worker without dedicated office",
+      "personality": [
+        "focused",
+        "space-sharing",
+        "reset-oriented"
+      ],
+      "thoughts": "I build a work setup in shared rooms and usually clear it before meals.",
+      "routine_preferences": {
+        "typical_schedule": "uses dining table or sofa for work, packs away items in evening",
+        "active_time_windows": [
+          "08:30-18:00",
+          "20:00-22:00"
+        ],
+        "preferred_activities": [
+          "work",
+          "video_call",
+          "coffee",
+          "surface_reset"
+        ],
+        "routine_notes": "Work setup appears during weekdays and is often removed before dinner."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "dining room",
+          "living room",
+          "kitchen"
+        ],
+        "secondary_rooms": [
+          "bedroom",
+          "entryway"
+        ],
+        "preferred_objects": [
+          "laptop",
+          "charger",
+          "notebook",
+          "mug",
+          "headphones"
+        ],
+        "owned_object_categories": [
+          "laptop",
+          "charger",
+          "notebook",
+          "mug",
+          "headphones"
+        ],
+        "activity_preferences": [
+          "work",
+          "video_call",
+          "coffee",
+          "surface_reset"
+        ],
+        "social_pattern": "shared space conflict potential",
+        "tidiness": "medium_high"
+      }
+    },
+    {
+      "profile_id": "persona_044_teen_gamer",
+      "display_name": "Teen Gamer",
+      "role_type": "resident_child",
+      "age_range": [
+        13,
+        18
+      ],
+      "life_stage": "teen",
+      "household_roles": [
+        "student"
+      ],
+      "occupation_or_status": "student",
+      "typical_schedule": "school, homework, evening gaming, late weekend sessions",
+      "active_time_windows": [
+        "16:00-23:30",
+        "10:00-02:00 weekend"
+      ],
+      "primary_rooms": [
+        "bedroom",
+        "living room",
+        "study"
+      ],
+      "secondary_rooms": [
+        "kitchen",
+        "dining room"
+      ],
+      "owned_object_categories": [
+        "game controller",
+        "headphones",
+        "snack bowl",
+        "water bottle",
+        "charger"
+      ],
+      "frequently_moved_objects": [
+        "game controller",
+        "headphones",
+        "snack bowl",
+        "water bottle"
+      ],
+      "activity_preferences": [
+        "gaming",
+        "snack",
+        "homework",
+        "music"
+      ],
+      "tidiness": "low",
+      "mobility": "independent",
+      "care_needs": "low",
+      "social_pattern": "private or media-room centered",
+      "object_behavior_notes": "Snack containers and controllers often remain near sofa, desk, or entertainment console.",
+      "name": "Tyler Hughes",
+      "age": 15,
+      "gender": "male",
+      "occupation": "student",
+      "personality": [
+        "competitive",
+        "night-active",
+        "snack-prone"
+      ],
+      "thoughts": "Gaming keeps controllers, headphones, water bottles, and snack bowls near entertainment spaces.",
+      "routine_preferences": {
+        "typical_schedule": "school, homework, evening gaming, late weekend sessions",
+        "active_time_windows": [
+          "16:00-23:30",
+          "10:00-02:00 weekend"
+        ],
+        "preferred_activities": [
+          "gaming",
+          "snack",
+          "homework",
+          "music"
+        ],
+        "routine_notes": "Snack containers and controllers often remain near sofa, desk, or entertainment console."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "bedroom",
+          "living room",
+          "study"
+        ],
+        "secondary_rooms": [
+          "kitchen",
+          "dining room"
+        ],
+        "preferred_objects": [
+          "game controller",
+          "headphones",
+          "snack bowl",
+          "water bottle"
+        ],
+        "owned_object_categories": [
+          "game controller",
+          "headphones",
+          "snack bowl",
+          "water bottle",
+          "charger"
+        ],
+        "activity_preferences": [
+          "gaming",
+          "snack",
+          "homework",
+          "music"
+        ],
+        "social_pattern": "private or media-room centered",
+        "tidiness": "low"
+      }
+    },
+    {
+      "profile_id": "persona_045_bookish_adult",
+      "display_name": "Bookish Adult",
+      "role_type": "resident_adult",
+      "age_range": [
+        20,
+        75
+      ],
+      "life_stage": "adult_or_elder",
+      "household_roles": [
+        "resident"
+      ],
+      "occupation_or_status": "varied",
+      "typical_schedule": "reading before sleep, quiet evenings, weekend organization",
+      "active_time_windows": [
+        "07:00-09:00",
+        "18:30-23:00"
+      ],
+      "primary_rooms": [
+        "bedroom",
+        "living room",
+        "study"
+      ],
+      "secondary_rooms": [
+        "kitchen",
+        "dining room"
+      ],
+      "owned_object_categories": [
+        "book",
+        "reading glasses",
+        "bookmark",
+        "mug",
+        "blanket"
+      ],
+      "frequently_moved_objects": [
+        "book",
+        "reading glasses",
+        "mug",
+        "blanket"
+      ],
+      "activity_preferences": [
+        "reading",
+        "tea",
+        "rest",
+        "tidying_books"
+      ],
+      "tidiness": "medium_high",
+      "mobility": "independent",
+      "care_needs": "none_or_low",
+      "social_pattern": "quiet routine",
+      "object_behavior_notes": "Books and mugs create stable but multi-room evening patterns.",
+      "name": "Eleanor Price",
+      "age": 48,
+      "gender": "female",
+      "occupation": "varied",
+      "personality": [
+        "quiet",
+        "reflective",
+        "book-loving"
+      ],
+      "thoughts": "Books, mugs, blankets, and glasses follow me between bedroom, sofa, and study.",
+      "routine_preferences": {
+        "typical_schedule": "reading before sleep, quiet evenings, weekend organization",
+        "active_time_windows": [
+          "07:00-09:00",
+          "18:30-23:00"
+        ],
+        "preferred_activities": [
+          "reading",
+          "tea",
+          "rest",
+          "tidying_books"
+        ],
+        "routine_notes": "Books and mugs create stable but multi-room evening patterns."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "bedroom",
+          "living room",
+          "study"
+        ],
+        "secondary_rooms": [
+          "kitchen",
+          "dining room"
+        ],
+        "preferred_objects": [
+          "book",
+          "reading glasses",
+          "mug",
+          "blanket"
+        ],
+        "owned_object_categories": [
+          "book",
+          "reading glasses",
+          "bookmark",
+          "mug",
+          "blanket"
+        ],
+        "activity_preferences": [
+          "reading",
+          "tea",
+          "rest",
+          "tidying_books"
+        ],
+        "social_pattern": "quiet routine",
+        "tidiness": "medium_high"
+      }
+    },
+    {
+      "profile_id": "persona_046_host_family_organizer",
+      "display_name": "Family Host Organizer",
+      "role_type": "resident_adult",
+      "age_range": [
+        30,
+        70
+      ],
+      "life_stage": "adult_or_elder",
+      "household_roles": [
+        "host",
+        "resident"
+      ],
+      "occupation_or_status": "varied",
+      "typical_schedule": "prepares social gatherings, organizes dining and living spaces",
+      "active_time_windows": [
+        "09:00-12:00",
+        "16:00-22:00"
+      ],
+      "primary_rooms": [
+        "kitchen",
+        "dining room",
+        "living room",
+        "entryway"
+      ],
+      "secondary_rooms": [
+        "storage",
+        "bathroom"
+      ],
+      "owned_object_categories": [
+        "serving tray",
+        "vase",
+        "tableware",
+        "decor item",
+        "cleaning cloth"
+      ],
+      "frequently_moved_objects": [
+        "serving tray",
+        "vase",
+        "tableware",
+        "decor item"
+      ],
+      "activity_preferences": [
+        "hosting",
+        "decorating",
+        "cooking",
+        "cleanup"
+      ],
+      "tidiness": "high",
+      "mobility": "independent",
+      "care_needs": "none",
+      "social_pattern": "high special-event influence",
+      "object_behavior_notes": "Special events cause coordinated movement of decorative and dining objects.",
+      "name": "Camila Torres",
+      "age": 52,
+      "gender": "female",
+      "occupation": "varied",
+      "personality": [
+        "welcoming",
+        "planner-minded",
+        "social"
+      ],
+      "thoughts": "When hosting, I reorganize dining, living, decorative, and serving objects before and after guests arrive.",
+      "routine_preferences": {
+        "typical_schedule": "prepares social gatherings, organizes dining and living spaces",
+        "active_time_windows": [
+          "09:00-12:00",
+          "16:00-22:00"
+        ],
+        "preferred_activities": [
+          "hosting",
+          "decorating",
+          "cooking",
+          "cleanup"
+        ],
+        "routine_notes": "Special events cause coordinated movement of decorative and dining objects."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "kitchen",
+          "dining room",
+          "living room",
+          "entryway"
+        ],
+        "secondary_rooms": [
+          "storage",
+          "bathroom"
+        ],
+        "preferred_objects": [
+          "serving tray",
+          "vase",
+          "tableware",
+          "decor item"
+        ],
+        "owned_object_categories": [
+          "serving tray",
+          "vase",
+          "tableware",
+          "decor item",
+          "cleaning cloth"
+        ],
+        "activity_preferences": [
+          "hosting",
+          "decorating",
+          "cooking",
+          "cleanup"
+        ],
+        "social_pattern": "high special-event influence",
+        "tidiness": "high"
+      }
+    },
+    {
+      "profile_id": "persona_047_new_resident_move_in",
+      "display_name": "New Resident Moving In",
+      "role_type": "temporary_to_persistent_resident",
+      "age_range": [
+        18,
+        60
+      ],
+      "life_stage": "adult",
+      "household_roles": [
+        "new_resident",
+        "roommate_or_family"
+      ],
+      "occupation_or_status": "varied",
+      "typical_schedule": "move-in period with boxes, gradual object introduction, room setup",
+      "active_time_windows": [
+        "09:00-22:00"
+      ],
+      "primary_rooms": [
+        "bedroom",
+        "entryway",
+        "living room"
+      ],
+      "secondary_rooms": [
+        "kitchen",
+        "bathroom",
+        "storage"
+      ],
+      "owned_object_categories": [
+        "moving box",
+        "suitcase",
+        "laptop",
+        "clothes bag",
+        "decor item"
+      ],
+      "frequently_moved_objects": [
+        "moving box",
+        "suitcase",
+        "decor item",
+        "laptop"
+      ],
+      "activity_preferences": [
+        "unpacking",
+        "room_setup",
+        "shopping",
+        "cleaning"
+      ],
+      "tidiness": "low_then_medium",
+      "mobility": "independent",
+      "care_needs": "none",
+      "social_pattern": "distribution shift at introduction",
+      "object_behavior_notes": "Creates strong long-term change by introducing new objects and private-room anchors.",
+      "name": "Owen Brooks",
+      "age": 26,
+      "gender": "male",
+      "occupation": "varied",
+      "personality": [
+        "transitioning",
+        "organizing",
+        "adaptable"
+      ],
+      "thoughts": "Moving in gradually introduces boxes, bags, decor, and new personal anchors.",
+      "routine_preferences": {
+        "typical_schedule": "move-in period with boxes, gradual object introduction, room setup",
+        "active_time_windows": [
+          "09:00-22:00"
+        ],
+        "preferred_activities": [
+          "unpacking",
+          "room_setup",
+          "shopping",
+          "cleaning"
+        ],
+        "routine_notes": "Creates strong long-term change by introducing new objects and private-room anchors."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "bedroom",
+          "entryway",
+          "living room"
+        ],
+        "secondary_rooms": [
+          "kitchen",
+          "bathroom",
+          "storage"
+        ],
+        "preferred_objects": [
+          "moving box",
+          "suitcase",
+          "decor item",
+          "laptop"
+        ],
+        "owned_object_categories": [
+          "moving box",
+          "suitcase",
+          "laptop",
+          "clothes bag",
+          "decor item"
+        ],
+        "activity_preferences": [
+          "unpacking",
+          "room_setup",
+          "shopping",
+          "cleaning"
+        ],
+        "social_pattern": "distribution shift at introduction",
+        "tidiness": "low_then_medium"
+      }
+    },
+    {
+      "profile_id": "persona_048_resident_moving_out",
+      "display_name": "Resident Moving Out",
+      "role_type": "persistent_to_absent_resident",
+      "age_range": [
+        18,
+        60
+      ],
+      "life_stage": "adult",
+      "household_roles": [
+        "departing_resident"
+      ],
+      "occupation_or_status": "varied",
+      "typical_schedule": "packing period, object removal, final cleanup",
+      "active_time_windows": [
+        "18:00-23:00",
+        "09:00-18:00 weekend"
+      ],
+      "primary_rooms": [
+        "bedroom",
+        "entryway",
+        "storage"
+      ],
+      "secondary_rooms": [
+        "living room",
+        "kitchen",
+        "bathroom"
+      ],
+      "owned_object_categories": [
+        "moving box",
+        "suitcase",
+        "laptop",
+        "book",
+        "decor item"
+      ],
+      "frequently_moved_objects": [
+        "moving box",
+        "suitcase",
+        "book",
+        "decor item"
+      ],
+      "activity_preferences": [
+        "packing",
+        "sorting",
+        "cleaning",
+        "departure"
+      ],
+      "tidiness": "medium_then_high",
+      "mobility": "independent",
+      "care_needs": "none",
+      "social_pattern": "temporary disruption then removal",
+      "object_behavior_notes": "Personal objects gradually disappear from household snapshots.",
+      "name": "Leah Simmons",
+      "age": 24,
+      "gender": "female",
+      "occupation": "varied",
+      "personality": [
+        "transitional",
+        "sorting-focused",
+        "goal-oriented"
+      ],
+      "thoughts": "Moving out means packing, removing personal objects, and resetting shared spaces.",
+      "routine_preferences": {
+        "typical_schedule": "packing period, object removal, final cleanup",
+        "active_time_windows": [
+          "18:00-23:00",
+          "09:00-18:00 weekend"
+        ],
+        "preferred_activities": [
+          "packing",
+          "sorting",
+          "cleaning",
+          "departure"
+        ],
+        "routine_notes": "Personal objects gradually disappear from household snapshots."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "bedroom",
+          "entryway",
+          "storage"
+        ],
+        "secondary_rooms": [
+          "living room",
+          "kitchen",
+          "bathroom"
+        ],
+        "preferred_objects": [
+          "moving box",
+          "suitcase",
+          "book",
+          "decor item"
+        ],
+        "owned_object_categories": [
+          "moving box",
+          "suitcase",
+          "laptop",
+          "book",
+          "decor item"
+        ],
+        "activity_preferences": [
+          "packing",
+          "sorting",
+          "cleaning",
+          "departure"
+        ],
+        "social_pattern": "temporary disruption then removal",
+        "tidiness": "medium_then_high"
+      }
+    },
+    {
+      "profile_id": "persona_049_post_surgery_recovery_adult",
+      "display_name": "Adult Recovering At Home",
+      "role_type": "temporary_state_resident",
+      "age_range": [
+        20,
+        80
+      ],
+      "life_stage": "adult_or_elder",
+      "household_roles": [
+        "resident",
+        "temporary_care_recipient"
+      ],
+      "occupation_or_status": "temporarily recovering",
+      "typical_schedule": "rest-heavy routine, medication, limited movement, caregiver assistance",
+      "active_time_windows": [
+        "07:00-11:00",
+        "15:00-21:00"
+      ],
+      "primary_rooms": [
+        "bedroom",
+        "living room",
+        "bathroom"
+      ],
+      "secondary_rooms": [
+        "kitchen",
+        "dining room"
+      ],
+      "owned_object_categories": [
+        "medicine box",
+        "water bottle",
+        "blanket",
+        "book",
+        "phone"
+      ],
+      "frequently_moved_objects": [
+        "medicine box",
+        "water bottle",
+        "blanket",
+        "phone"
+      ],
+      "activity_preferences": [
+        "rest",
+        "medication",
+        "light_meal",
+        "reading"
+      ],
+      "tidiness": "medium",
+      "mobility": "temporarily_limited",
+      "care_needs": "medium",
+      "social_pattern": "caregiver-assisted temporary pattern",
+      "object_behavior_notes": "Recovery creates temporary concentration of useful objects near bed or sofa.",
+      "name": "Michael Grant",
+      "age": 62,
+      "gender": "male",
+      "occupation": "temporarily recovering",
+      "personality": [
+        "patient",
+        "temporarily limited",
+        "comfort-seeking"
+      ],
+      "thoughts": "Recovery concentrates medicine, water, phone, blanket, and books near bed or sofa.",
+      "routine_preferences": {
+        "typical_schedule": "rest-heavy routine, medication, limited movement, caregiver assistance",
+        "active_time_windows": [
+          "07:00-11:00",
+          "15:00-21:00"
+        ],
+        "preferred_activities": [
+          "rest",
+          "medication",
+          "light_meal",
+          "reading"
+        ],
+        "routine_notes": "Recovery creates temporary concentration of useful objects near bed or sofa."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "bedroom",
+          "living room",
+          "bathroom"
+        ],
+        "secondary_rooms": [
+          "kitchen",
+          "dining room"
+        ],
+        "preferred_objects": [
+          "medicine box",
+          "water bottle",
+          "blanket",
+          "phone"
+        ],
+        "owned_object_categories": [
+          "medicine box",
+          "water bottle",
+          "blanket",
+          "book",
+          "phone"
+        ],
+        "activity_preferences": [
+          "rest",
+          "medication",
+          "light_meal",
+          "reading"
+        ],
+        "social_pattern": "caregiver-assisted temporary pattern",
+        "tidiness": "medium"
+      }
+    },
+    {
+      "profile_id": "persona_050_large_family_coordinator",
+      "display_name": "Large Family Coordinator",
+      "role_type": "resident_adult",
+      "age_range": [
+        30,
+        60
+      ],
+      "life_stage": "adult",
+      "household_roles": [
+        "parent",
+        "organizer",
+        "caregiver"
+      ],
+      "occupation_or_status": "working or home manager",
+      "typical_schedule": "coordinates multiple residents, meals, school items, cleaning, shopping",
+      "active_time_windows": [
+        "05:30-23:00"
+      ],
+      "primary_rooms": [
+        "kitchen",
+        "entryway",
+        "living room",
+        "laundry room"
+      ],
+      "secondary_rooms": [
+        "bedroom",
+        "dining room",
+        "bathroom"
+      ],
+      "owned_object_categories": [
+        "planner",
+        "phone",
+        "keys",
+        "laundry basket",
+        "grocery bag"
+      ],
+      "frequently_moved_objects": [
+        "planner",
+        "phone",
+        "keys",
+        "laundry basket",
+        "grocery bag"
+      ],
+      "activity_preferences": [
+        "meal_planning",
+        "school_prep",
+        "shopping",
+        "cleaning",
+        "family_event"
+      ],
+      "tidiness": "medium_high",
+      "mobility": "independent_high_activity",
+      "care_needs": "none",
+      "social_pattern": "dense multi-person interaction",
+      "object_behavior_notes": "Strong driver of whole-house object redistribution and cleanup cycles.",
+      "name": "Angela Carter",
+      "age": 42,
+      "gender": "female",
+      "occupation": "working or home manager",
+      "personality": [
+        "coordinating",
+        "high-energy",
+        "family-centered"
+      ],
+      "thoughts": "In a busy family, I coordinate meals, school prep, shopping, laundry, and shared cleanup cycles.",
+      "routine_preferences": {
+        "typical_schedule": "coordinates multiple residents, meals, school items, cleaning, shopping",
+        "active_time_windows": [
+          "05:30-23:00"
+        ],
+        "preferred_activities": [
+          "meal_planning",
+          "school_prep",
+          "shopping",
+          "cleaning",
+          "family_event"
+        ],
+        "routine_notes": "Strong driver of whole-house object redistribution and cleanup cycles."
+      },
+      "preferences": {
+        "preferred_rooms": [
+          "kitchen",
+          "entryway",
+          "living room",
+          "laundry room"
+        ],
+        "secondary_rooms": [
+          "bedroom",
+          "dining room",
+          "bathroom"
+        ],
+        "preferred_objects": [
+          "planner",
+          "phone",
+          "keys",
+          "laundry basket",
+          "grocery bag"
+        ],
+        "owned_object_categories": [
+          "planner",
+          "phone",
+          "keys",
+          "laundry basket",
+          "grocery bag"
+        ],
+        "activity_preferences": [
+          "meal_planning",
+          "school_prep",
+          "shopping",
+          "cleaning",
+          "family_event"
+        ],
+        "social_pattern": "dense multi-person interaction",
+        "tidiness": "medium_high"
+      }
+    }
+  ],
+  "required_profile_fields": [
+    "profile_id",
+    "name",
+    "age",
+    "gender",
+    "occupation",
+    "personality",
+    "thoughts",
+    "routine_preferences",
+    "preferences"
+  ]
+}

@@ -351,3 +351,28 @@ pip install habitat-sim==0.2.5
 
 **快速问题?** 参见 [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md#常见问题) 的 FAQ 部分。  
 **需要帮助?** 检查各文件的 docstring 和代码注释。
+
+---
+
+## 当前工程同步更新（2026-08-13）
+
+本文档主要记录早期 SD-OVON mock/production 管道。当前工程已经额外加入两条更常用的数据集生成链路：
+
+1. 批量最终 3D layout：`core/batch_generate_layouts.py`
+2. Lifespan 长期家庭语义轨迹：`core/lifespan_generate_layouts.py`
+
+Lifespan 当前是 semantic-only MVP，会生成 household profile、人物关系、daily routine、洛杉矶随机月份每日事件、object event log、state history、snapshot requests 和 semantic layout manifest。它还没有接入 Habitat 3D grounding，因此 `layouts/snapshot_*.json` 中的 `position/rotation` 暂为 `null`，不能直接作为最终导航 layout。
+
+快速运行 Lifespan 本地 smoke test：
+
+```bash
+python core/log_filter.py --run "python core/lifespan_generate_layouts.py --scene 00808-y9hTuugGdiq --duration-days 3 --snapshots-per-day 07:00,18:00 --object-limit 10 --disable-lifespan-llm --sequence-id smoke_lifespan_test"
+```
+
+带 Qwen 高层规划运行：
+
+```bash
+python core/log_filter.py --run "python core/lifespan_generate_layouts.py --scene 00808-y9hTuugGdiq --scene-info results/scene_info/00808-y9hTuugGdiq/00808-y9hTuugGdiq_scene_info.json --duration-days 7 --snapshots-per-day 07:00,12:00,18:00,22:00 --object-limit 40 --ssh-password 666666"
+```
+
+完整最新命令顺序请以 `doc/DATASET_TASK_GENERATION_COMMANDS.md` 为准。

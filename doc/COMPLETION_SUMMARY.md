@@ -345,3 +345,51 @@ python integration_test_sd_ovon.py production
 **交付日期:** 2026-04-15  
 **版本:** 1.0 (Mock → Production Ready)  
 **维护者:** SD-OVON Team
+
+---
+
+## 当前工程同步更新（2026-08-13）
+
+原交付总结覆盖的是 SD-OVON mock/production 能力。当前工程在此基础上新增了长期家庭动态数据生成能力：
+
+已新增并通过 smoke test 的 Lifespan semantic-only MVP：
+
+- `core/lifespan_generate_layouts.py`
+- `core/lifespan_schema.py`
+- `core/lifespan_household_generator.py`
+- `core/lifespan_profiles.py`
+- `core/lifespan_event_generator.py`
+- `core/lifespan_state_engine.py`
+- `data/lifespan/resident_persona_profiles.json`
+- `data/lifespan/default_lifespan_config.json`
+- `data/lifespan/activity_templates.json`
+
+该链路可以生成：
+
+```text
+household_profile.json
+household_relationship_graph.json
+resident_daily_routines.json
+daily_important_events.json
+object_lifespan_profiles.json
+event_log.json
+state_history.json
+snapshot_requests.json
+manifest.json
+validation_report.json
+layouts/snapshot_*.json
+```
+
+当前 smoke test 命令：
+
+```bash
+python core/log_filter.py --run "python core/lifespan_generate_layouts.py --scene 00808-y9hTuugGdiq --duration-days 3 --snapshots-per-day 07:00,18:00 --object-limit 10 --disable-lifespan-llm --sequence-id smoke_lifespan_test"
+```
+
+当前边界：
+
+- Lifespan 输出仍是 semantic-only，`position/rotation=null`。
+- 还未接入 Habitat 3D grounding。
+- 不能直接作为最终导航任务 layout，需要先将 `snapshot_requests.json` 转为真实 3D layout。
+
+最新完整状态请参考 `doc/EXECUTABLE_TECH_SPEC.md`。

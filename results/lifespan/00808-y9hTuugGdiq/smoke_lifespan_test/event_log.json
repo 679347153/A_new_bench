@@ -1,0 +1,715 @@
+{
+  "schema_version": "1.0",
+  "event_count": 15,
+  "events": [
+    {
+      "event_id": "day_01_0700_breakfast_resident_0",
+      "event_type": "routine_activity",
+      "activity": "breakfast",
+      "day_index": 1,
+      "time": "07:00",
+      "sort_key": "001-07:00",
+      "residents": [
+        "resident_0"
+      ],
+      "rooms": [
+        "kitchen",
+        "dining room"
+      ],
+      "with_residents": "household",
+      "effects": [
+        {
+          "type": "MOVE",
+          "object_selector": {
+            "category_keywords": [
+              "mug"
+            ]
+          },
+          "target": "activity_surface",
+          "target_state": "active"
+        },
+        {
+          "type": "MOVE",
+          "object_selector": {
+            "category_keywords": [
+              "plate"
+            ]
+          },
+          "target": "activity_surface",
+          "target_state": "active"
+        },
+        {
+          "type": "MOVE",
+          "object_selector": {
+            "category_keywords": [
+              "food"
+            ]
+          },
+          "target": "activity_surface",
+          "target_state": "active"
+        }
+      ],
+      "parent_event_id": null
+    },
+    {
+      "event_id": "day_01_0900_work_resident_0",
+      "event_type": "routine_activity",
+      "activity": "work",
+      "day_index": 1,
+      "time": "09:00",
+      "sort_key": "001-09:00",
+      "residents": [
+        "resident_0"
+      ],
+      "rooms": [
+        "study",
+        "bedroom"
+      ],
+      "with_residents": [],
+      "effects": [
+        {
+          "type": "MOVE",
+          "object_selector": {
+            "category_keywords": [
+              "laptop"
+            ]
+          },
+          "target": "activity_surface",
+          "target_state": "active"
+        },
+        {
+          "type": "MOVE",
+          "object_selector": {
+            "category_keywords": [
+              "book"
+            ]
+          },
+          "target": "activity_surface",
+          "target_state": "active"
+        },
+        {
+          "type": "MOVE",
+          "object_selector": {
+            "category_keywords": [
+              "medicine box"
+            ]
+          },
+          "target": "activity_surface",
+          "target_state": "active"
+        }
+      ],
+      "parent_event_id": null
+    },
+    {
+      "event_id": "day_01_1200_cleaning",
+      "event_type": "cleaning",
+      "activity": "weekly household cleaning",
+      "day_index": 1,
+      "time": "12:00",
+      "sort_key": "001-12:00",
+      "residents": [
+        "resident_0"
+      ],
+      "rooms": [],
+      "phases": [
+        "main"
+      ],
+      "effects": [
+        {
+          "type": "CLEANUP",
+          "object_selector": {
+            "category_keywords": [
+              "all"
+            ]
+          },
+          "target": "event_surface",
+          "target_state": "active",
+          "quantity": 1
+        }
+      ],
+      "parent_event_id": null
+    },
+    {
+      "event_id": "day_01_1830_dinner_resident_0",
+      "event_type": "routine_activity",
+      "activity": "dinner",
+      "day_index": 1,
+      "time": "18:30",
+      "sort_key": "001-18:30",
+      "residents": [
+        "resident_0"
+      ],
+      "rooms": [
+        "kitchen",
+        "dining room"
+      ],
+      "with_residents": "household",
+      "effects": [
+        {
+          "type": "MOVE",
+          "object_selector": {
+            "category_keywords": [
+              "plate"
+            ]
+          },
+          "target": "activity_surface",
+          "target_state": "active"
+        },
+        {
+          "type": "MOVE",
+          "object_selector": {
+            "category_keywords": [
+              "cup"
+            ]
+          },
+          "target": "activity_surface",
+          "target_state": "active"
+        },
+        {
+          "type": "MOVE",
+          "object_selector": {
+            "category_keywords": [
+              "food"
+            ]
+          },
+          "target": "activity_surface",
+          "target_state": "active"
+        }
+      ],
+      "parent_event_id": null
+    },
+    {
+      "event_id": "day_01_2000_leisure_resident_0",
+      "event_type": "routine_activity",
+      "activity": "leisure",
+      "day_index": 1,
+      "time": "20:00",
+      "sort_key": "001-20:00",
+      "residents": [
+        "resident_0"
+      ],
+      "rooms": [
+        "living room",
+        "bedroom"
+      ],
+      "with_residents": [],
+      "effects": [
+        {
+          "type": "MOVE",
+          "object_selector": {
+            "category_keywords": [
+              "book"
+            ]
+          },
+          "target": "activity_surface",
+          "target_state": "active"
+        },
+        {
+          "type": "MOVE",
+          "object_selector": {
+            "category_keywords": [
+              "remote"
+            ]
+          },
+          "target": "activity_surface",
+          "target_state": "active"
+        },
+        {
+          "type": "MOVE",
+          "object_selector": {
+            "category_keywords": [
+              "tea"
+            ]
+          },
+          "target": "activity_surface",
+          "target_state": "active"
+        },
+        {
+          "type": "MOVE",
+          "object_selector": {
+            "category_keywords": [
+              "pillow"
+            ]
+          },
+          "target": "activity_surface",
+          "target_state": "active"
+        }
+      ],
+      "parent_event_id": null
+    },
+    {
+      "event_id": "day_02_0700_breakfast_resident_0",
+      "event_type": "routine_activity",
+      "activity": "breakfast",
+      "day_index": 2,
+      "time": "07:00",
+      "sort_key": "002-07:00",
+      "residents": [
+        "resident_0"
+      ],
+      "rooms": [
+        "kitchen",
+        "dining room"
+      ],
+      "with_residents": "household",
+      "effects": [
+        {
+          "type": "MOVE",
+          "object_selector": {
+            "category_keywords": [
+              "mug"
+            ]
+          },
+          "target": "activity_surface",
+          "target_state": "active"
+        },
+        {
+          "type": "MOVE",
+          "object_selector": {
+            "category_keywords": [
+              "plate"
+            ]
+          },
+          "target": "activity_surface",
+          "target_state": "active"
+        },
+        {
+          "type": "MOVE",
+          "object_selector": {
+            "category_keywords": [
+              "food"
+            ]
+          },
+          "target": "activity_surface",
+          "target_state": "active"
+        }
+      ],
+      "parent_event_id": null
+    },
+    {
+      "event_id": "day_02_0900_work_resident_0",
+      "event_type": "routine_activity",
+      "activity": "work",
+      "day_index": 2,
+      "time": "09:00",
+      "sort_key": "002-09:00",
+      "residents": [
+        "resident_0"
+      ],
+      "rooms": [
+        "study",
+        "bedroom"
+      ],
+      "with_residents": [],
+      "effects": [
+        {
+          "type": "MOVE",
+          "object_selector": {
+            "category_keywords": [
+              "laptop"
+            ]
+          },
+          "target": "activity_surface",
+          "target_state": "active"
+        },
+        {
+          "type": "MOVE",
+          "object_selector": {
+            "category_keywords": [
+              "book"
+            ]
+          },
+          "target": "activity_surface",
+          "target_state": "active"
+        },
+        {
+          "type": "MOVE",
+          "object_selector": {
+            "category_keywords": [
+              "medicine box"
+            ]
+          },
+          "target": "activity_surface",
+          "target_state": "active"
+        }
+      ],
+      "parent_event_id": null
+    },
+    {
+      "event_id": "day_02_1200_normal_routine_day",
+      "event_type": "normal_routine_day",
+      "activity": "normal routine day",
+      "day_index": 2,
+      "time": "12:00",
+      "sort_key": "002-12:00",
+      "residents": [
+        "resident_0"
+      ],
+      "rooms": [],
+      "phases": [
+        "main"
+      ],
+      "effects": [
+        {
+          "type": "MOVE",
+          "object_selector": {
+            "category_keywords": [
+              "mug",
+              "book",
+              "phone"
+            ]
+          },
+          "target": "event_surface",
+          "target_state": "active",
+          "quantity": 1
+        }
+      ],
+      "parent_event_id": null
+    },
+    {
+      "event_id": "day_02_1830_dinner_resident_0",
+      "event_type": "routine_activity",
+      "activity": "dinner",
+      "day_index": 2,
+      "time": "18:30",
+      "sort_key": "002-18:30",
+      "residents": [
+        "resident_0"
+      ],
+      "rooms": [
+        "kitchen",
+        "dining room"
+      ],
+      "with_residents": "household",
+      "effects": [
+        {
+          "type": "MOVE",
+          "object_selector": {
+            "category_keywords": [
+              "plate"
+            ]
+          },
+          "target": "activity_surface",
+          "target_state": "active"
+        },
+        {
+          "type": "MOVE",
+          "object_selector": {
+            "category_keywords": [
+              "cup"
+            ]
+          },
+          "target": "activity_surface",
+          "target_state": "active"
+        },
+        {
+          "type": "MOVE",
+          "object_selector": {
+            "category_keywords": [
+              "food"
+            ]
+          },
+          "target": "activity_surface",
+          "target_state": "active"
+        }
+      ],
+      "parent_event_id": null
+    },
+    {
+      "event_id": "day_02_2000_leisure_resident_0",
+      "event_type": "routine_activity",
+      "activity": "leisure",
+      "day_index": 2,
+      "time": "20:00",
+      "sort_key": "002-20:00",
+      "residents": [
+        "resident_0"
+      ],
+      "rooms": [
+        "living room",
+        "bedroom"
+      ],
+      "with_residents": [],
+      "effects": [
+        {
+          "type": "MOVE",
+          "object_selector": {
+            "category_keywords": [
+              "book"
+            ]
+          },
+          "target": "activity_surface",
+          "target_state": "active"
+        },
+        {
+          "type": "MOVE",
+          "object_selector": {
+            "category_keywords": [
+              "remote"
+            ]
+          },
+          "target": "activity_surface",
+          "target_state": "active"
+        },
+        {
+          "type": "MOVE",
+          "object_selector": {
+            "category_keywords": [
+              "tea"
+            ]
+          },
+          "target": "activity_surface",
+          "target_state": "active"
+        },
+        {
+          "type": "MOVE",
+          "object_selector": {
+            "category_keywords": [
+              "pillow"
+            ]
+          },
+          "target": "activity_surface",
+          "target_state": "active"
+        }
+      ],
+      "parent_event_id": null
+    },
+    {
+      "event_id": "day_03_0700_breakfast_resident_0",
+      "event_type": "routine_activity",
+      "activity": "breakfast",
+      "day_index": 3,
+      "time": "07:00",
+      "sort_key": "003-07:00",
+      "residents": [
+        "resident_0"
+      ],
+      "rooms": [
+        "kitchen",
+        "dining room"
+      ],
+      "with_residents": "household",
+      "effects": [
+        {
+          "type": "MOVE",
+          "object_selector": {
+            "category_keywords": [
+              "mug"
+            ]
+          },
+          "target": "activity_surface",
+          "target_state": "active"
+        },
+        {
+          "type": "MOVE",
+          "object_selector": {
+            "category_keywords": [
+              "plate"
+            ]
+          },
+          "target": "activity_surface",
+          "target_state": "active"
+        },
+        {
+          "type": "MOVE",
+          "object_selector": {
+            "category_keywords": [
+              "food"
+            ]
+          },
+          "target": "activity_surface",
+          "target_state": "active"
+        }
+      ],
+      "parent_event_id": null
+    },
+    {
+      "event_id": "day_03_0900_work_resident_0",
+      "event_type": "routine_activity",
+      "activity": "work",
+      "day_index": 3,
+      "time": "09:00",
+      "sort_key": "003-09:00",
+      "residents": [
+        "resident_0"
+      ],
+      "rooms": [
+        "study",
+        "bedroom"
+      ],
+      "with_residents": [],
+      "effects": [
+        {
+          "type": "MOVE",
+          "object_selector": {
+            "category_keywords": [
+              "laptop"
+            ]
+          },
+          "target": "activity_surface",
+          "target_state": "active"
+        },
+        {
+          "type": "MOVE",
+          "object_selector": {
+            "category_keywords": [
+              "book"
+            ]
+          },
+          "target": "activity_surface",
+          "target_state": "active"
+        },
+        {
+          "type": "MOVE",
+          "object_selector": {
+            "category_keywords": [
+              "medicine box"
+            ]
+          },
+          "target": "activity_surface",
+          "target_state": "active"
+        }
+      ],
+      "parent_event_id": null
+    },
+    {
+      "event_id": "day_03_1200_normal_routine_day",
+      "event_type": "normal_routine_day",
+      "activity": "normal routine day",
+      "day_index": 3,
+      "time": "12:00",
+      "sort_key": "003-12:00",
+      "residents": [
+        "resident_0"
+      ],
+      "rooms": [],
+      "phases": [
+        "main"
+      ],
+      "effects": [
+        {
+          "type": "MOVE",
+          "object_selector": {
+            "category_keywords": [
+              "mug",
+              "book",
+              "phone"
+            ]
+          },
+          "target": "event_surface",
+          "target_state": "active",
+          "quantity": 1
+        }
+      ],
+      "parent_event_id": null
+    },
+    {
+      "event_id": "day_03_1830_dinner_resident_0",
+      "event_type": "routine_activity",
+      "activity": "dinner",
+      "day_index": 3,
+      "time": "18:30",
+      "sort_key": "003-18:30",
+      "residents": [
+        "resident_0"
+      ],
+      "rooms": [
+        "kitchen",
+        "dining room"
+      ],
+      "with_residents": "household",
+      "effects": [
+        {
+          "type": "MOVE",
+          "object_selector": {
+            "category_keywords": [
+              "plate"
+            ]
+          },
+          "target": "activity_surface",
+          "target_state": "active"
+        },
+        {
+          "type": "MOVE",
+          "object_selector": {
+            "category_keywords": [
+              "cup"
+            ]
+          },
+          "target": "activity_surface",
+          "target_state": "active"
+        },
+        {
+          "type": "MOVE",
+          "object_selector": {
+            "category_keywords": [
+              "food"
+            ]
+          },
+          "target": "activity_surface",
+          "target_state": "active"
+        }
+      ],
+      "parent_event_id": null
+    },
+    {
+      "event_id": "day_03_2000_leisure_resident_0",
+      "event_type": "routine_activity",
+      "activity": "leisure",
+      "day_index": 3,
+      "time": "20:00",
+      "sort_key": "003-20:00",
+      "residents": [
+        "resident_0"
+      ],
+      "rooms": [
+        "living room",
+        "bedroom"
+      ],
+      "with_residents": [],
+      "effects": [
+        {
+          "type": "MOVE",
+          "object_selector": {
+            "category_keywords": [
+              "book"
+            ]
+          },
+          "target": "activity_surface",
+          "target_state": "active"
+        },
+        {
+          "type": "MOVE",
+          "object_selector": {
+            "category_keywords": [
+              "remote"
+            ]
+          },
+          "target": "activity_surface",
+          "target_state": "active"
+        },
+        {
+          "type": "MOVE",
+          "object_selector": {
+            "category_keywords": [
+              "tea"
+            ]
+          },
+          "target": "activity_surface",
+          "target_state": "active"
+        },
+        {
+          "type": "MOVE",
+          "object_selector": {
+            "category_keywords": [
+              "pillow"
+            ]
+          },
+          "target": "activity_surface",
+          "target_state": "active"
+        }
+      ],
+      "parent_event_id": null
+    }
+  ]
+}

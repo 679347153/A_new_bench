@@ -289,3 +289,21 @@ layout = sampler.load_sd_ovon_layout()
 **维护者**：SD-OVON Team  
 **最后更新**：2024  
 **版本**：1.0
+
+---
+
+## 当前工程同步更新（2026-08-13）
+
+本文档描述的是早期 SD-OVON pipeline。当前工程中，SD-OVON 仍可作为子链路参考，但完整数据集生成主线已经扩展为：
+
+1. 3D 自动放置链路：通过 `query_room_receptacle_objects.py`、`assign_objects_to_receptacle_instances.py` 和 `place_objects_on_instances.py` 输出最终 3D layout。
+2. 批量 layout 链路：通过 `batch_generate_layouts.py` 复用缓存批量生成多个最终 3D layout。
+3. Lifespan 语义演化链路：通过 `lifespan_generate_layouts.py` 生成 household profile、daily routine、monthly events、object event log、state history 和 snapshot requests。
+
+Lifespan 当前为 semantic-only MVP，输出 `results/lifespan/<scene>/<sequence_id>/layouts/snapshot_*.json`，但物体 `position/rotation` 暂为 `null`。这些 semantic snapshots 需要后续接入 3D grounding 后，才能进入本文档所描述的物理可视化和导航评测流程。
+
+最新命令和工程状态请优先参考：
+
+- `doc/DATASET_TASK_GENERATION_COMMANDS.md`
+- `doc/EXECUTABLE_TECH_SPEC.md`
+- `doc/lifespan_exec.md`

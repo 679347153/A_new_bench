@@ -1,0 +1,136 @@
+{
+  "event_state_history": [
+    {
+      "event_id": "day_01_0700_breakfast_resident_0",
+      "day_index": 1,
+      "time": "07:00",
+      "changed_object_ids": [],
+      "present_object_count": 10,
+      "absent_object_count": 0
+    },
+    {
+      "event_id": "day_01_0900_work_resident_0",
+      "day_index": 1,
+      "time": "09:00",
+      "changed_object_ids": [],
+      "present_object_count": 10,
+      "absent_object_count": 0
+    },
+    {
+      "event_id": "day_01_1200_cleaning",
+      "day_index": 1,
+      "time": "12:00",
+      "changed_object_ids": [
+        "object_0000",
+        "object_0001",
+        "object_0002"
+      ],
+      "present_object_count": 10,
+      "absent_object_count": 0
+    },
+    {
+      "event_id": "day_01_1830_dinner_resident_0",
+      "day_index": 1,
+      "time": "18:30",
+      "changed_object_ids": [
+        "object_0000",
+        "object_0001",
+        "object_0002"
+      ],
+      "present_object_count": 10,
+      "absent_object_count": 0
+    },
+    {
+      "event_id": "day_01_2000_leisure_resident_0",
+      "day_index": 1,
+      "time": "20:00",
+      "changed_object_ids": [
+        "object_0000",
+        "object_0001",
+        "object_0002"
+      ],
+      "present_object_count": 10,
+      "absent_object_count": 0
+    },
+    {
+      "event_id": "day_02_0700_breakfast_resident_0",
+      "day_index": 2,
+      "time": "07:00",
+      "changed_object_ids": [],
+      "present_object_count": 10,
+      "absent_object_count": 0
+    },
+    {
+      "event_id": "day_02_0900_work_resident_0",
+      "day_index": 2,
+      "time": "09:00",
+      "changed_object_ids": [],
+      "present_object_count": 10,
+      "absent_object_count": 0
+    },
+    {
+      "event_id": "day_02_1200_normal_routine_day",
+      "day_index": 2,
+      "time": "12:00",
+      "changed_object_ids": [],
+      "present_object_count": 10,
+      "absent_object_count": 0
+    },
+    {
+      "event_id": "day_02_1830_dinner_resident_0",
+      "day_index": 2,
+      "time": "18:30",
+      "changed_object_ids": [],
+      "present_object_count": 10,
+      "absent_object_count": 0
+    },
+    {
+      "event_id": "day_02_2000_leisure_resident_0",
+      "day_index": 2,
+      "time": "20:00",
+      "changed_object_ids": [],
+      "present_object_count": 10,
+      "absent_object_count": 0
+    },
+    {
+      "event_id": "day_03_0700_breakfast_resident_0",
+      "day_index": 3,
+      "time": "07:00",
+      "changed_object_ids": [],
+      "present_object_count": 10,
+      "absent_object_count": 0
+    },
+    {
+      "event_id": "day_03_0900_work_resident_0",
+      "day_index": 3,
+      "time": "09:00",
+      "changed_object_ids": [],
+      "present_object_count": 10,
+      "absent_object_count": 0
+    },
+    {
+      "event_id": "day_03_1200_normal_routine_day",
+      "day_index": 3,
+      "time": "12:00",
+      "changed_object_ids": [],
+      "present_object_count": 10,
+      "absent_object_count": 0
+    },
+    {
+      "event_id": "day_03_1830_dinner_resident_0",
+      "day_index": 3,
+      "time": "18:30",
+      "changed_object_ids": [],
+      "present_object_count": 10,
+      "absent_object_count": 0
+    },
+    {
+      "event_id": "day_03_2000_leisure_resident_0",
+      "day_index": 3,
+      "time": "20:00",
+      "changed_object_ids": [],
+      "present_object_count": 10,
+      "absent_object_count": 0
+    }
+  ]
+}

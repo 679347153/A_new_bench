@@ -1,0 +1,151 @@
+{
+  "scene_household_reasoning": "Rule fallback selected residents from bedroom count, furniture hints, and persona coverage.",
+  "scene": "00808-y9hTuugGdiq",
+  "generation_source": "rule_fallback",
+  "bedroom_count": 1,
+  "resident_count": 1,
+  "selected_residents": [
+    {
+      "resident_id": "resident_0",
+      "source_profile_id": "persona_011_single_professional",
+      "name": "Alex Morgan",
+      "age": 31,
+      "gender": "nonbinary",
+      "relationship_role": "single_resident",
+      "assigned_private_room": "bedroom",
+      "primary_shared_rooms": [
+        "kitchen",
+        "living room"
+      ],
+      "personal_object_categories": [
+        "laptop",
+        "phone",
+        "keys",
+        "bag",
+        "mug",
+        "book"
+      ],
+      "persona": {
+        "profile_id": "persona_011_single_professional",
+        "display_name": "Single Professional",
+        "role_type": "resident_adult",
+        "age_range": [
+          25,
+          40
+        ],
+        "life_stage": "adult",
+        "household_roles": [
+          "single_resident",
+          "worker"
+        ],
+        "occupation_or_status": "full-time professional",
+        "typical_schedule": "workday outside home or hybrid, evening cooking or delivery, weekend chores",
+        "active_time_windows": [
+          "06:30-08:30",
+          "18:00-00:00"
+        ],
+        "primary_rooms": [
+          "bedroom",
+          "kitchen",
+          "living room",
+          "home office"
+        ],
+        "secondary_rooms": [
+          "bathroom",
+          "entryway"
+        ],
+        "owned_object_categories": [
+          "laptop",
+          "phone",
+          "keys",
+          "bag",
+          "mug",
+          "book"
+        ],
+        "frequently_moved_objects": [
+          "phone",
+          "keys",
+          "bag",
+          "mug"
+        ],
+        "activity_preferences": [
+          "work",
+          "simple_cooking",
+          "streaming",
+          "reading"
+        ],
+        "tidiness": "medium",
+        "mobility": "independent",
+        "care_needs": "none",
+        "social_pattern": "occasional guests",
+        "object_behavior_notes": "Daily carry items cluster near entry and living room; work items may be stable near desk.",
+        "name": "Alex Morgan",
+        "age": 31,
+        "gender": "nonbinary",
+        "occupation": "full-time professional",
+        "personality": [
+          "self-directed",
+          "balanced",
+          "low-clutter"
+        ],
+        "thoughts": "I prefer simple routines, clear surfaces, and predictable places for keys, bag, and laptop.",
+        "routine_preferences": {
+          "typical_schedule": "workday outside home or hybrid, evening cooking or delivery, weekend chores",
+          "active_time_windows": [
+            "06:30-08:30",
+            "18:00-00:00"
+          ],
+          "preferred_activities": [
+            "work",
+            "simple_cooking",
+            "streaming",
+            "reading"
+          ],
+          "routine_notes": "Daily carry items cluster near entry and living room; work items may be stable near desk."
+        },
+        "preferences": {
+          "preferred_rooms": [
+            "bedroom",
+            "kitchen",
+            "living room",
+            "home office"
+          ],
+          "secondary_rooms": [
+            "bathroom",
+            "entryway"
+          ],
+          "preferred_objects": [
+            "phone",
+            "keys",
+            "bag",
+            "mug"
+          ],
+          "owned_object_categories": [
+            "laptop",
+            "phone",
+            "keys",
+            "bag",
+            "mug",
+            "book"
+          ],
+          "activity_preferences": [
+            "work",
+            "simple_cooking",
+            "streaming",
+            "reading"
+          ],
+          "social_pattern": "occasional guests",
+          "tidiness": "medium"
+        }
+      }
+    }
+  ],
+  "relationship_graph": [],
+  "household_habits": {
+    "location": "Los Angeles, USA",
+    "shopping_day_preference": "Saturday",
+    "cleaning_day_preference": "Sunday",
+    "tidiness": "medium",
+    "visitor_frequency": "occasional"
+  }
+}

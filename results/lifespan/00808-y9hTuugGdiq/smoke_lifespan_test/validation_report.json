@@ -1,0 +1,15 @@
+{
+  "schema_version": "1.0",
+  "status": "ok",
+  "semantic_only": true,
+  "checks": {
+    "resident_count": 1,
+    "daily_event_count": 3,
+    "event_count": 15,
+    "snapshot_count": 6,
+    "object_count": 10
+  },
+  "notes": [
+    "MVP output is semantic-only; 3D Habitat grounding should consume snapshot_requests.json in the next stage."
+  ]
+}

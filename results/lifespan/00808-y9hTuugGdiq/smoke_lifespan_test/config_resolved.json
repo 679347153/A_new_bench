@@ -1,0 +1,23 @@
+{
+  "duration_days": 3,
+  "snapshots_per_day": [
+    "07:00",
+    "18:00"
+  ],
+  "location": "Los Angeles, USA",
+  "month": "random",
+  "resident_count_mode": "infer_from_bedrooms",
+  "max_residents_per_bedroom": 2,
+  "allow_guest_profiles": true,
+  "resident_persona_pool": "data/lifespan/resident_persona_profiles.json",
+  "routine_noise": 0.15,
+  "placement_noise": 0.12,
+  "special_event_rate": 0.25,
+  "introduction_rate": 0.05,
+  "failure_rate": 0.02,
+  "cleanup_rate": 0.35,
+  "consumption_rate": 1.0,
+  "min_adjacent_stay_ratio": 0.7,
+  "max_adjacent_stay_ratio": 0.95,
+  "seed": 42
+}

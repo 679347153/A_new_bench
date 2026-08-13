@@ -30,6 +30,12 @@
   - `visualize_placed_layout.py`
   - `visualize_instance_pointcloud_viser.py`
   - `log_filter.py`
+  - `lifespan_generate_layouts.py`
+  - `lifespan_schema.py`
+  - `lifespan_household_generator.py`
+  - `lifespan_profiles.py`
+  - `lifespan_event_generator.py`
+  - `lifespan_state_engine.py`
 
 ## 2. 全链路概览（树状）
 ```text
@@ -46,12 +52,20 @@
         ├── batch_generate_layouts.py 复用缓存批量生成多个最终布局
         ├── visualize_placed_layout.py 加载最终布局检查放置效果/高度偏移
         └── visualize_instance_pointcloud_viser.py 可视化核验（调试/对齐）
+    └── Lifespan 长期语义演化模式（当前为 semantic-only MVP）
+        ├── resident_persona_profiles.json 候选人物画像池
+        ├── lifespan_household_generator.py 场景人物分配/协作日程/月事件规划
+        ├── lifespan_profiles.py 物体生命周期 profile
+        ├── lifespan_event_generator.py routine/event 到 object event 展开
+        ├── lifespan_state_engine.py 长期状态连续传播
+        └── lifespan_generate_layouts.py 生成 household/event/state/snapshot/manifest
 ```
 
 说明：
 1. 你要求的目标链路就是以上树状结构。
 2. 当前代码已具备主要节点能力；自动分支已支持在 `assign_objects_to_receptacle_instances.py` 中缺省 `--surfaces-json` 时自动触发承载面提取。
 3. 链路通过中间 JSON（如 `object_layout`、`surfaces_json`、`assignment_plan`）进行稳定衔接。
+4. Lifespan 分支已实现第一版语义轨迹生成闭环：可生成家庭人物、协作日程、洛杉矶随机月份整月事件、物体生命周期状态、snapshot request 和 semantic-only layout；下一步需要接入 Habitat 3D grounding，使其输出真实 `position/rotation`。
 
 ## 3. 模块实施内容
 
@@ -292,6 +306,72 @@ python core/visualize_placed_layout.py \
 5. 不输出统计摘要：
    - `python core/log_filter.py --run "python your_script.py" --no-summary`
 
+### 3.14 Lifespan 长期家庭语义演化模块
+
+当前已实现第一版 semantic-only MVP，用于解决普通 `batch_generate_layouts.py` 只通过独立随机 seed 采样，难以表达长期家庭活动规律的问题。该分支不会替代现有 3D 自动放置链路，而是在其上游生成更真实的长期语义轨迹。
+
+新增模块：
+1. `lifespan_schema.py`
+   - 提供 JSON 读写、schema 校验、prompt 压缩和通用工具。
+   - 校验 `resident_persona_profiles.json`、`household_profile.json`、`resident_daily_routines.json`、`daily_important_events.json` 等核心结构。
+2. `lifespan_household_generator.py`
+   - 读取 `scene_info` 中的房间、卧室数量、家具/物体类别摘要。
+   - 读取 `data/lifespan/resident_persona_profiles.json` 的 50 个候选人物画像。
+   - 默认尝试通过 Qwen3-VL/LLM 生成场景特定 household；远端不可用时使用规则回退。
+   - 输出人物数量、人物关系图、私人空间、共享空间、家庭习惯。
+   - 为每个居民生成 weekday/weekend daily routine，并包含家庭协作事件。
+   - 固定地点为 `Los Angeles, USA`，随机选择月份，并生成该月每天的重要事件。
+3. `lifespan_profiles.py`
+   - 从 object catalog 推断物体生命周期 profile。
+   - 为物体标注 `mobility_class / home_location_type / persistence / activities / inventory`。
+   - 支持 `consumable / semi_static / temporary / replaceable / routine_movable` 等长期动态类别。
+4. `lifespan_event_generator.py`
+   - 将 daily routine 和 monthly important events 展开为 object-level event log。
+   - 当前支持 `MOVE / CONSUME / REPLENISH / CLEANUP` 等事件效果。
+5. `lifespan_state_engine.py`
+   - 按时间顺序执行事件，传播 object state。
+   - 维护 `exists / quantity / location_state / semantic_target / condition / last_event_id`。
+   - 生成 regular snapshots 的 `snapshot_requests`。
+6. `lifespan_generate_layouts.py`
+   - Lifespan 总入口。
+   - 输出 `household_profile.json`、`resident_daily_routines.json`、`daily_important_events.json`、`event_log.json`、`state_history.json`、`snapshot_requests.json`、`manifest.json`、`validation_report.json` 和 `layouts/snapshot_*.json`。
+   - 当前 layout 为 `lifespan_semantic_layout.v1`，顶层包含 `semantic_only=true`；物体 `position/rotation` 暂为 `null`，用于后续 3D grounding。
+
+已生成/维护的数据文件：
+1. `data/lifespan/resident_persona_profiles.json`
+   - 50 个家庭场景候选人物画像。
+   - 每条包含 `name / age / gender / occupation / personality / thoughts / routine_preferences / preferences`。
+2. `data/lifespan/default_lifespan_config.json`
+   - Lifespan 默认参数，包括 `duration_days / snapshots_per_day / location / month=random / resident_count_mode=infer_from_bedrooms`。
+3. `data/lifespan/activity_templates.json`
+   - 常见活动到物体效果的规则模板。
+
+执行示例：
+```bash
+python core/lifespan_generate_layouts.py \
+  --scene 00808-y9hTuugGdiq \
+  --duration-days 7 \
+  --snapshots-per-day 07:00,12:00,18:00,22:00 \
+  --object-limit 40 \
+  --ssh-password 666666
+```
+
+不连接远端 Qwen 的本地 smoke test：
+```bash
+python core/lifespan_generate_layouts.py \
+  --scene 00808-y9hTuugGdiq \
+  --duration-days 3 \
+  --snapshots-per-day 07:00,18:00 \
+  --object-limit 10 \
+  --disable-lifespan-llm \
+  --sequence-id smoke_lifespan_test
+```
+
+当前边界：
+1. Lifespan 分支当前是 semantic-only MVP，不会直接生成可被 Habitat-Sim 加载的最终 3D pose。
+2. 如果找不到真实 `scene_info`，脚本会使用 minimal fallback scene summary，并输出 warning；真实数据集生成建议先执行 `export_scene_info.py` 或通过 `--scene-info` 显式传入。
+3. 下一步应将 `snapshot_requests.json` 接到 `assign_objects_to_receptacle_instances.py` 和 `place_objects_on_instances.py`，实现 changed objects 的 3D grounding，并复用 unchanged objects 的上一 snapshot pose。
+
 ## 4. 数据流与产物
 
 ### 4.1 主干产物
@@ -314,6 +394,21 @@ python core/visualize_placed_layout.py \
    - 可视化高度调试布局：`results/layouts/<scene>/*_offset_debug.json`
    - 自动放置统计：layout 顶层 `auto_placement_stats`，包含 `failed_by_reason / failed_objects / profile_diagnostics`
    - 批量 retry 记录：layout 顶层 `batch_generation.placement_retry` 与 manifest 中每个 layout 的 `placement_retry`
+3. Lifespan 语义演化分支：
+   - 候选人物画像：`data/lifespan/resident_persona_profiles.json`
+   - 默认配置：`data/lifespan/default_lifespan_config.json`
+   - 活动模板：`data/lifespan/activity_templates.json`
+   - 长期序列目录：`results/lifespan/<scene>/lifespan_<YYYYmmdd_HHMMSS>/`
+   - household：`household_profile.json`
+   - 人物关系：`household_relationship_graph.json`
+   - daily routine：`resident_daily_routines.json`
+   - 月度事件：`monthly_calendar.json`、`daily_important_events.json`
+   - object event：`event_log.json`
+   - 状态历史：`state_history.json`
+   - snapshot 请求：`snapshot_requests.json`
+   - semantic-only layout：`layouts/snapshot_*_day_*.json`
+   - 长期序列索引：`manifest.json`
+   - 验证报告：`validation_report.json`
 
 ### 4.3 终端输出治理产物
 1. 日志清洗脚本：`log_filter.py`
@@ -334,6 +429,8 @@ python core/visualize_placed_layout.py \
 4. 批量生成已由 `batch_generate_layouts.py` 编排：同一场景同一批物体可以复用 scene_info、概率、承载面结果，并通过不同 seed 生成多个最终 layout。
 5. 放置准确性增强已接入主链路：`object_profiles.py` 统一尺寸估计，assignment 使用 affordance/几何过滤，placement 支持备用承载面和失败驱动 retry。
 6. 验收工具已支持同场景多 layout 切换、跨 batch 扫描和 selected/all 高度偏移调试。
+7. Lifespan semantic-only MVP 已实现：可生成 scene-specific household、协作 daily routine、洛杉矶随机月份每日事件、object event log、state history、snapshot requests 与 semantic layout manifest。
+8. Lifespan 3D grounding 尚未接入：当前 Lifespan layout 中 `position/rotation=null`，`semantic_only=true`，不能直接作为 Habitat 物理放置结果。
 
 ## 6. 与本次需求对照
 1. 技术报告新增 `extract_room_instances.py`：已完成。
@@ -347,8 +444,11 @@ python core/visualize_placed_layout.py \
 9. 同场景同物体批量生成最终 layout 流程：已完成。
 10. 自动放置准确性增强：已完成，包括统一 object profile、承载面 affordance、navmesh 合成地面、备用承载面尝试与 placement retry。
 11. 报告已根据当前代码更新默认参数、产物字段和可视化调试能力。
+12. Lifespan 执行计划与第一版语义生成器：已完成，包括 50 个候选人物画像、默认配置、活动模板、长期事件与状态传播。
+13. Lifespan 最终 3D layout grounding：未完成，是下一阶段核心任务。
 
 ## 7. 结论
 - 报告现已与你定义的“树状主干+双分支”方案对齐。
 - 自动分支已形成可复用、可批量、可调试的闭环：承载面提取、实例分配、物理放置、失败诊断、retry、可视化验收均已在报告中描述。
-- 当前最值得继续迭代的数据资产是 `object_profiles.json`：为常用物体补充更精确的 footprint、height、y_offset 和 placement_class，可进一步提升自动放置稳定性。
+- Lifespan 分支已形成长期语义轨迹闭环，但仍是 semantic-only；要成为最终 benchmark layout，还需要将 `snapshot_requests.json` ground 到具体 receptacle instance 和 3D pose。
+- 当前最值得继续迭代的数据资产是 `object_profiles.json` 与 `data/lifespan/resident_persona_profiles.json`：前者提升物体几何放置稳定性，后者提升家庭人物与长期行为多样性。

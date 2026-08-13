@@ -179,6 +179,38 @@ results/layouts/{scene}/final_*.json
 3. 房间推荐为空或不足 2 个
 检查图片质量、Qwen 服务状态、scene_info 可用性；脚本有回退补足逻辑。
 
+## 当前工程同步更新（2026-08-13）
+
+当前项目已经从早期“物体图片 -> 房间推荐 -> 概率采样 -> 手动微调”的主线，扩展为三条可并行使用的生成链路：
+
+1. 普通手动/自动 layout 链路：继续使用 `query_rooms_for_objects.py`、`sample_and_place_objects.py`、`assign_objects_to_receptacle_instances.py`、`place_objects_on_instances.py`。
+2. 批量独立 layout 链路：使用 `core/batch_generate_layouts.py` 为同一场景生成多个最终 3D layout。
+3. Lifespan 长期语义演化链路：使用 `core/lifespan_generate_layouts.py` 生成家庭人物、人物关系、协作 daily routine、洛杉矶随机月份每日事件、object event log、state history、snapshot requests 和 semantic-only layouts。
+
+Lifespan 当前是 semantic-only MVP：输出位于 `results/lifespan/<scene>/<sequence_id>/`，其中 `layouts/snapshot_*.json` 的 `position/rotation` 暂为 `null`，顶层包含 `semantic_only=true`。这些文件用于后续接入 3D grounding，尚不能直接作为 Habitat-Sim 最终物理 layout。
+
+默认 Qwen 连接仍为 SSH 密码方式：
+
+```text
+root@7.216.187.6:30180
+password: 666666
+remote vLLM API: 127.0.0.1:8000
+```
+
+Lifespan 本地 smoke test：
+
+```bash
+python core/log_filter.py --run "python core/lifespan_generate_layouts.py --scene 00808-y9hTuugGdiq --duration-days 3 --snapshots-per-day 07:00,18:00 --object-limit 10 --disable-lifespan-llm --sequence-id smoke_lifespan_test"
+```
+
+带 Qwen 高层规划的 Lifespan 运行：
+
+```bash
+python core/log_filter.py --run "python core/lifespan_generate_layouts.py --scene 00808-y9hTuugGdiq --scene-info results/scene_info/00808-y9hTuugGdiq/00808-y9hTuugGdiq_scene_info.json --duration-days 7 --snapshots-per-day 07:00,12:00,18:00,22:00 --object-limit 40 --ssh-password 666666"
+```
+
+更完整的当前命令顺序请参考 `doc/DATASET_TASK_GENERATION_COMMANDS.md`，当前模块状态请参考 `doc/EXECUTABLE_TECH_SPEC.md`。
+
 4. 编辑器加载不到模型
 确认 objects_images 文件名与 objects 模板可映射（脚本已做 _4k 别名映射）。
 

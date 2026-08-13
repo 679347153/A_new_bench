@@ -1,0 +1,50 @@
+{
+  "schema_version": "1.0",
+  "templates": {
+    "breakfast": {
+      "typical_rooms": ["kitchen", "dining room"],
+      "default_time": "07:30",
+      "effects": [
+        {"type": "MOVE", "category_keywords": ["mug", "cup", "bottle"], "target_state": "active", "target": "breakfast_surface"},
+        {"type": "MOVE", "category_keywords": ["plate", "bowl"], "target_state": "active", "target": "breakfast_surface"},
+        {"type": "CONSUME", "category_keywords": ["apple", "food", "fruit", "cake"], "quantity": 1}
+      ]
+    },
+    "work": {
+      "typical_rooms": ["home office", "study", "bedroom", "dining room"],
+      "default_time": "09:00",
+      "effects": [
+        {"type": "MOVE", "category_keywords": ["laptop", "notebook", "camera", "mug"], "target_state": "active", "target": "work_surface"}
+      ]
+    },
+    "dinner": {
+      "typical_rooms": ["kitchen", "dining room"],
+      "default_time": "18:30",
+      "effects": [
+        {"type": "MOVE", "category_keywords": ["plate", "bowl", "cup", "mug", "tea", "bottle"], "target_state": "active", "target": "dining_surface"},
+        {"type": "CONSUME", "category_keywords": ["food", "apple", "cake"], "quantity": 1}
+      ]
+    },
+    "leisure": {
+      "typical_rooms": ["living room", "bedroom", "study"],
+      "default_time": "20:00",
+      "effects": [
+        {"type": "MOVE", "category_keywords": ["book", "controller", "remote", "chess", "tea", "pillow"], "target_state": "active", "target": "leisure_surface"}
+      ]
+    },
+    "cleaning": {
+      "typical_rooms": ["kitchen", "living room", "bedroom", "bathroom"],
+      "default_time": "10:00",
+      "effects": [
+        {"type": "CLEANUP", "category_keywords": ["all"], "target_state": "home", "target": "home_anchor"}
+      ]
+    },
+    "shopping": {
+      "typical_rooms": ["entryway", "kitchen", "pantry"],
+      "default_time": "11:00",
+      "effects": [
+        {"type": "REPLENISH", "category_keywords": ["food", "fruit", "apple", "bottle"], "quantity": 3}
+      ]
+    }
+  }
+}

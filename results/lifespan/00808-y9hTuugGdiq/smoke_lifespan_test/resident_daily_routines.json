@@ -1,0 +1,152 @@
+{
+  "generation_source": "rule_fallback",
+  "routines": [
+    {
+      "resident_id": "resident_0",
+      "weekday": [
+        {
+          "time": "07:00",
+          "activity": "breakfast",
+          "rooms": [
+            "kitchen",
+            "dining room"
+          ],
+          "with_residents": "household",
+          "object_effect_hints": [
+            "mug",
+            "plate",
+            "food"
+          ]
+        },
+        {
+          "time": "09:00",
+          "activity": "work",
+          "rooms": [
+            "study",
+            "bedroom"
+          ],
+          "with_residents": [],
+          "object_effect_hints": [
+            "laptop",
+            "book",
+            "medicine box"
+          ]
+        },
+        {
+          "time": "18:30",
+          "activity": "dinner",
+          "rooms": [
+            "kitchen",
+            "dining room"
+          ],
+          "with_residents": "household",
+          "object_effect_hints": [
+            "plate",
+            "cup",
+            "food"
+          ]
+        },
+        {
+          "time": "20:00",
+          "activity": "leisure",
+          "rooms": [
+            "living room",
+            "bedroom"
+          ],
+          "with_residents": [],
+          "object_effect_hints": [
+            "book",
+            "remote",
+            "tea",
+            "pillow"
+          ]
+        }
+      ],
+      "weekend": [
+        {
+          "time": "08:30",
+          "activity": "breakfast",
+          "rooms": [
+            "kitchen",
+            "dining room"
+          ],
+          "with_residents": "household",
+          "object_effect_hints": [
+            "mug",
+            "plate",
+            "food"
+          ]
+        },
+        {
+          "time": "10:00",
+          "activity": "cleaning",
+          "rooms": [
+            "living room",
+            "bedroom",
+            "kitchen"
+          ],
+          "with_residents": "household",
+          "object_effect_hints": [
+            "all"
+          ]
+        },
+        {
+          "time": "15:00",
+          "activity": "leisure",
+          "rooms": [
+            "living room",
+            "study"
+          ],
+          "with_residents": [],
+          "object_effect_hints": [
+            "work",
+            "simple_cooking",
+            "streaming"
+          ]
+        },
+        {
+          "time": "18:30",
+          "activity": "dinner",
+          "rooms": [
+            "kitchen",
+            "dining room"
+          ],
+          "with_residents": "household",
+          "object_effect_hints": [
+            "plate",
+            "cup",
+            "food"
+          ]
+        }
+      ]
+    }
+  ],
+  "collaborative_activities": [
+    {
+      "activity_id": "family_breakfast",
+      "time": "07:00",
+      "participants": [
+        "resident_0"
+      ],
+      "activity": "breakfast",
+      "object_effect_hints": [
+        "mug",
+        "plate",
+        "food"
+      ]
+    },
+    {
+      "activity_id": "shared_dinner",
+      "time": "18:30",
+      "participants": [
+        "resident_0"
+      ],
+      "activity": "dinner",
+      "object_effect_hints": [
+        "plate",
+        "cup",
+        "food"
+      ]
+    }
+  ]
+}

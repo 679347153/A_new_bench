@@ -1,0 +1,79 @@
+{
+  "generation_source": "rule_fallback",
+  "location": "Los Angeles, USA",
+  "selected_month": 3,
+  "daily_events": [
+    {
+      "day_index": 1,
+      "date_hint": "2026-03-01",
+      "weekday": "Sunday",
+      "event_type": "cleaning",
+      "title": "weekly household cleaning",
+      "participants": [
+        "resident_0"
+      ],
+      "importance": "medium",
+      "phases": [
+        "main"
+      ],
+      "expected_object_effects": [
+        {
+          "type": "CLEANUP",
+          "category_keywords": [
+            "all"
+          ]
+        }
+      ]
+    },
+    {
+      "day_index": 2,
+      "date_hint": "2026-03-02",
+      "weekday": "Monday",
+      "event_type": "normal_routine_day",
+      "title": "normal routine day",
+      "participants": [
+        "resident_0"
+      ],
+      "importance": "low",
+      "phases": [
+        "main"
+      ],
+      "expected_object_effects": [
+        {
+          "type": "MOVE",
+          "category_keywords": [
+            "mug",
+            "book",
+            "phone"
+          ],
+          "target_state": "active"
+        }
+      ]
+    },
+    {
+      "day_index": 3,
+      "date_hint": "2026-03-03",
+      "weekday": "Tuesday",
+      "event_type": "normal_routine_day",
+      "title": "normal routine day",
+      "participants": [
+        "resident_0"
+      ],
+      "importance": "low",
+      "phases": [
+        "main"
+      ],
+      "expected_object_effects": [
+        {
+          "type": "MOVE",
+          "category_keywords": [
+            "mug",
+            "book",
+            "phone"
+          ],
+          "target_state": "active"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,128 @@
+{
+  "type": "lifespan_sequence_manifest",
+  "schema_version": "1.0",
+  "scene": "00808-y9hTuugGdiq",
+  "sequence_id": "smoke_lifespan_test",
+  "duration_days": 3,
+  "snapshot_count": 6,
+  "location": "Los Angeles, USA",
+  "selected_month": 3,
+  "resident_count_mode": "infer_from_bedrooms",
+  "bedroom_count": 1,
+  "resident_count": 1,
+  "semantic_only": true,
+  "cache_paths": {
+    "scene_info": "minimal_fallback",
+    "resident_persona_pool": "C:\\Users\\Dell\\Downloads\\A数据集\\semantic\\data\\lifespan\\resident_persona_profiles.json",
+    "object_catalog": "C:\\Users\\Dell\\Downloads\\A数据集\\semantic\\data\\object_catalog\\object_catalog.json"
+  },
+  "statistics": {
+    "event_count": 15,
+    "object_count": 10,
+    "daily_event_count": 3
+  },
+  "snapshots": [
+    {
+      "snapshot_index": 0,
+      "layout_path": "layouts/snapshot_000_day_01_0700.json",
+      "day_index": 1,
+      "time_label": "day_01_0700",
+      "event_ids": [
+        "day_01_0700_breakfast_resident_0",
+        "day_01_0900_work_resident_0",
+        "day_01_1200_cleaning",
+        "day_01_1830_dinner_resident_0",
+        "day_01_2000_leisure_resident_0"
+      ],
+      "changed_object_count": 3,
+      "placed_count": 0,
+      "failed_count": 0,
+      "semantic_only": true
+    },
+    {
+      "snapshot_index": 1,
+      "layout_path": "layouts/snapshot_001_day_01_1800.json",
+      "day_index": 1,
+      "time_label": "day_01_1800",
+      "event_ids": [
+        "day_01_0700_breakfast_resident_0",
+        "day_01_0900_work_resident_0",
+        "day_01_1200_cleaning",
+        "day_01_1830_dinner_resident_0",
+        "day_01_2000_leisure_resident_0"
+      ],
+      "changed_object_count": 3,
+      "placed_count": 0,
+      "failed_count": 0,
+      "semantic_only": true
+    },
+    {
+      "snapshot_index": 2,
+      "layout_path": "layouts/snapshot_002_day_02_0700.json",
+      "day_index": 2,
+      "time_label": "day_02_0700",
+      "event_ids": [
+        "day_02_0700_breakfast_resident_0",
+        "day_02_0900_work_resident_0",
+        "day_02_1200_normal_routine_day",
+        "day_02_1830_dinner_resident_0",
+        "day_02_2000_leisure_resident_0"
+      ],
+      "changed_object_count": 0,
+      "placed_count": 0,
+      "failed_count": 0,
+      "semantic_only": true
+    },
+    {
+      "snapshot_index": 3,
+      "layout_path": "layouts/snapshot_003_day_02_1800.json",
+      "day_index": 2,
+      "time_label": "day_02_1800",
+      "event_ids": [
+        "day_02_0700_breakfast_resident_0",
+        "day_02_0900_work_resident_0",
+        "day_02_1200_normal_routine_day",
+        "day_02_1830_dinner_resident_0",
+        "day_02_2000_leisure_resident_0"
+      ],
+      "changed_object_count": 0,
+      "placed_count": 0,
+      "failed_count": 0,
+      "semantic_only": true
+    },
+    {
+      "snapshot_index": 4,
+      "layout_path": "layouts/snapshot_004_day_03_0700.json",
+      "day_index": 3,
+      "time_label": "day_03_0700",
+      "event_ids": [
+        "day_03_0700_breakfast_resident_0",
+        "day_03_0900_work_resident_0",
+        "day_03_1200_normal_routine_day",
+        "day_03_1830_dinner_resident_0",
+        "day_03_2000_leisure_resident_0"
+      ],
+      "changed_object_count": 0,
+      "placed_count": 0,
+      "failed_count": 0,
+      "semantic_only": true
+    },
+    {
+      "snapshot_index": 5,
+      "layout_path": "layouts/snapshot_005_day_03_1800.json",
+      "day_index": 3,
+      "time_label": "day_03_1800",
+      "event_ids": [
+        "day_03_0700_breakfast_resident_0",
+        "day_03_0900_work_resident_0",
+        "day_03_1200_normal_routine_day",
+        "day_03_1830_dinner_resident_0",
+        "day_03_2000_leisure_resident_0"
+      ],
+      "changed_object_count": 0,
+      "placed_count": 0,
+      "failed_count": 0,
+      "semantic_only": true
+    }
+  ]
+}

@@ -2344,3 +2344,34 @@ Causal State Propagation
 ]
 
 它们共同形成一个**具有日内周期、周级重复、月级事件、物体生命周期和长期非平稳性的家庭场景生成模型**。这样生成的数据尤其适合研究 lifelong object memory、spatio-temporal object prediction、long-term ObjectNav，以及机器人在重复访问同一环境时的经验积累与记忆更新。
+
+---
+
+# 当前工程实现注记（2026-08-13）
+
+本文是 Lifespan 方法论草案，描述的是最终目标。当前代码已经实现第一版 semantic-only MVP，对应方法论中的高层家庭建模、月/日行为建模、事件展开和状态传播部分：
+
+```text
+core/lifespan_generate_layouts.py
+core/lifespan_household_generator.py
+core/lifespan_profiles.py
+core/lifespan_event_generator.py
+core/lifespan_state_engine.py
+```
+
+当前已能生成：
+
+```text
+household_profile.json
+household_relationship_graph.json
+resident_daily_routines.json
+daily_important_events.json
+object_lifespan_profiles.json
+event_log.json
+state_history.json
+snapshot_requests.json
+manifest.json
+layouts/snapshot_*.json
+```
+
+当前尚未完成方法论中的 Scene Grounding and Physical Validation 闭环。也就是说，`layouts/snapshot_*.json` 仍是 semantic-only layout，物体 `position/rotation` 暂为 `null`，需要后续接入 `assign_objects_to_receptacle_instances.py` 和 `place_objects_on_instances.py` 才能成为最终可加载的 Habitat 3D layout。

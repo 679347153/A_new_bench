@@ -1,0 +1,30 @@
+{
+  "collaborative_activities": [
+    {
+      "activity_id": "family_breakfast",
+      "time": "07:00",
+      "participants": [
+        "resident_0"
+      ],
+      "activity": "breakfast",
+      "object_effect_hints": [
+        "mug",
+        "plate",
+        "food"
+      ]
+    },
+    {
+      "activity_id": "shared_dinner",
+      "time": "18:30",
+      "participants": [
+        "resident_0"
+      ],
+      "activity": "dinner",
+      "object_effect_hints": [
+        "plate",
+        "cup",
+        "food"
+      ]
+    }
+  ]
+}

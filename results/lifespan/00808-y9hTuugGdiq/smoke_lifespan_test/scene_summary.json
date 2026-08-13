@@ -1,0 +1,16 @@
+{
+  "scene": "00808-y9hTuugGdiq",
+  "room_count": 0,
+  "bedroom_count": 1,
+  "bathroom_count": 0,
+  "room_type_counts": {},
+  "rooms": [],
+  "top_object_categories": [],
+  "furniture_hints": {
+    "beds": false,
+    "work_surfaces": false,
+    "child_hints": false,
+    "elder_hints": false,
+    "hosting_hints": false
+  }
+}

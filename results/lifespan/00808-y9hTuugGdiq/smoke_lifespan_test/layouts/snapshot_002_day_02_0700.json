@@ -1,0 +1,256 @@
+{
+  "schema_version": "lifespan_semantic_layout.v1",
+  "scene": "00808-y9hTuugGdiq",
+  "objects": [
+    {
+      "id": "object_0000",
+      "object_id": "object_0000",
+      "model_id": "002_master_chef_can",
+      "name": "002_master_chef_can",
+      "semantic_room_type": "living room",
+      "semantic_target": "floor",
+      "position": null,
+      "rotation": null,
+      "lifespan_state": {
+        "exists": true,
+        "quantity": 1,
+        "location_state": "home",
+        "condition": "normal",
+        "owner": "",
+        "last_changed_at": "day_01_12:00",
+        "event_id": "day_01_1200_cleaning",
+        "home_anchor": {
+          "room_type": "living room",
+          "receptacle_category": "floor"
+        }
+      }
+    },
+    {
+      "id": "object_0001",
+      "object_id": "object_0001",
+      "model_id": "003_cracker_box",
+      "name": "003_cracker_box",
+      "semantic_room_type": "living room",
+      "semantic_target": "table_or_shelf",
+      "position": null,
+      "rotation": null,
+      "lifespan_state": {
+        "exists": true,
+        "quantity": 1,
+        "location_state": "home",
+        "condition": "normal",
+        "owner": "",
+        "last_changed_at": "day_01_12:00",
+        "event_id": "day_01_1200_cleaning",
+        "home_anchor": {
+          "room_type": "living room",
+          "receptacle_category": "table_or_shelf"
+        }
+      }
+    },
+    {
+      "id": "object_0002",
+      "object_id": "object_0002",
+      "model_id": "004_sugar_box",
+      "name": "004_sugar_box",
+      "semantic_room_type": "living room",
+      "semantic_target": "table_or_shelf",
+      "position": null,
+      "rotation": null,
+      "lifespan_state": {
+        "exists": true,
+        "quantity": 1,
+        "location_state": "home",
+        "condition": "normal",
+        "owner": "",
+        "last_changed_at": "day_01_12:00",
+        "event_id": "day_01_1200_cleaning",
+        "home_anchor": {
+          "room_type": "living room",
+          "receptacle_category": "table_or_shelf"
+        }
+      }
+    },
+    {
+      "id": "object_0003",
+      "object_id": "object_0003",
+      "model_id": "005_tomato_soup_can",
+      "name": "005_tomato_soup_can",
+      "semantic_room_type": "living room",
+      "semantic_target": "floor",
+      "position": null,
+      "rotation": null,
+      "lifespan_state": {
+        "exists": true,
+        "quantity": 1,
+        "location_state": "home",
+        "condition": "normal",
+        "owner": "",
+        "last_changed_at": "initial_state",
+        "event_id": "",
+        "home_anchor": {
+          "room_type": "living room",
+          "receptacle_category": "floor"
+        }
+      }
+    },
+    {
+      "id": "object_0004",
+      "object_id": "object_0004",
+      "model_id": "006_mustard_bottle",
+      "name": "006_mustard_bottle",
+      "semantic_room_type": "kitchen",
+      "semantic_target": "storage",
+      "position": null,
+      "rotation": null,
+      "lifespan_state": {
+        "exists": true,
+        "quantity": 3,
+        "location_state": "home",
+        "condition": "normal",
+        "owner": "",
+        "last_changed_at": "initial_state",
+        "event_id": "",
+        "home_anchor": {
+          "room_type": "kitchen",
+          "receptacle_category": "storage"
+        }
+      }
+    },
+    {
+      "id": "object_0005",
+      "object_id": "object_0005",
+      "model_id": "007_tuna_fish_can",
+      "name": "007_tuna_fish_can",
+      "semantic_room_type": "living room",
+      "semantic_target": "floor",
+      "position": null,
+      "rotation": null,
+      "lifespan_state": {
+        "exists": true,
+        "quantity": 1,
+        "location_state": "home",
+        "condition": "normal",
+        "owner": "",
+        "last_changed_at": "initial_state",
+        "event_id": "",
+        "home_anchor": {
+          "room_type": "living room",
+          "receptacle_category": "floor"
+        }
+      }
+    },
+    {
+      "id": "object_0006",
+      "object_id": "object_0006",
+      "model_id": "008_pudding_box",
+      "name": "008_pudding_box",
+      "semantic_room_type": "living room",
+      "semantic_target": "table_or_shelf",
+      "position": null,
+      "rotation": null,
+      "lifespan_state": {
+        "exists": true,
+        "quantity": 1,
+        "location_state": "home",
+        "condition": "normal",
+        "owner": "",
+        "last_changed_at": "initial_state",
+        "event_id": "",
+        "home_anchor": {
+          "room_type": "living room",
+          "receptacle_category": "table_or_shelf"
+        }
+      }
+    },
+    {
+      "id": "object_0007",
+      "object_id": "object_0007",
+      "model_id": "009_gelatin_box",
+      "name": "009_gelatin_box",
+      "semantic_room_type": "living room",
+      "semantic_target": "table_or_shelf",
+      "position": null,
+      "rotation": null,
+      "lifespan_state": {
+        "exists": true,
+        "quantity": 1,
+        "location_state": "home",
+        "condition": "normal",
+        "owner": "",
+        "last_changed_at": "initial_state",
+        "event_id": "",
+        "home_anchor": {
+          "room_type": "living room",
+          "receptacle_category": "table_or_shelf"
+        }
+      }
+    },
+    {
+      "id": "object_0008",
+      "object_id": "object_0008",
+      "model_id": "010_potted_meat_can",
+      "name": "010_potted_meat_can",
+      "semantic_room_type": "living room",
+      "semantic_target": "floor",
+      "position": null,
+      "rotation": null,
+      "lifespan_state": {
+        "exists": true,
+        "quantity": 1,
+        "location_state": "home",
+        "condition": "normal",
+        "owner": "",
+        "last_changed_at": "initial_state",
+        "event_id": "",
+        "home_anchor": {
+          "room_type": "living room",
+          "receptacle_category": "floor"
+        }
+      }
+    },
+    {
+      "id": "object_0009",
+      "object_id": "object_0009",
+      "model_id": "011_banana",
+      "name": "011_banana",
+      "semantic_room_type": "living room",
+      "semantic_target": "floor",
+      "position": null,
+      "rotation": null,
+      "lifespan_state": {
+        "exists": true,
+        "quantity": 1,
+        "location_state": "home",
+        "condition": "normal",
+        "owner": "",
+        "last_changed_at": "initial_state",
+        "event_id": "",
+        "home_anchor": {
+          "room_type": "living room",
+          "receptacle_category": "floor"
+        }
+      }
+    }
+  ],
+  "lifespan_generation": {
+    "sequence_id": "smoke_lifespan_test",
+    "scene": "00808-y9hTuugGdiq",
+    "snapshot_index": 2,
+    "day_index": 2,
+    "time_label": "day_02_0700",
+    "selected_month": 3,
+    "previous_layout": "layouts/snapshot_001_day_01_1800.json",
+    "activity_context": [
+      "day_02_0700_breakfast_resident_0",
+      "day_02_0900_work_resident_0",
+      "day_02_1200_normal_routine_day",
+      "day_02_1830_dinner_resident_0",
+      "day_02_2000_leisure_resident_0"
+    ],
+    "changed_object_count": 0,
+    "present_object_count": 10,
+    "absent_object_count": 0,
+    "semantic_only": true
+  }
+}
