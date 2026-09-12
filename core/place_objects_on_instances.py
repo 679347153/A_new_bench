@@ -51,6 +51,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import random
 import sys
@@ -67,8 +68,10 @@ from project_paths import default_object_config_dirs_str, find_object_config_pat
 
 try:
     import habitat_sim  # type: ignore[import-not-found]
+    import magnum as mn  # type: ignore[import-not-found]
 except ImportError:
     habitat_sim = None
+    mn = None
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
     """尽力转换为 float，失败时返回确定性的默认值。"""
@@ -422,6 +425,61 @@ def _surface_height(surface_item: Dict[str, Any]) -> float:
     return 0.0
 
 
+def _normalize_surface_points_to_world(
+    surface_item: Dict[str, Any], points: Sequence[Sequence[float]]
+) -> Tuple[List[List[float]], str]:
+    """Validate points against their instance and repair legacy HM3D GLB axes."""
+    arr = np.asarray(points, dtype=np.float32)
+    if arr.ndim != 2 or arr.shape[1] < 3 or len(arr) == 0:
+        return [], "empty_surface_points"
+    arr = arr[:, :3]
+    instance = surface_item.get("instance", {}) if isinstance(surface_item, dict) else {}
+    aabb = instance.get("aabb", {}) if isinstance(instance, dict) else {}
+    try:
+        min_pt = np.asarray(aabb["min"], dtype=np.float32).reshape(3)
+        max_pt = np.asarray(aabb["max"], dtype=np.float32).reshape(3)
+    except Exception:
+        return np.round(arr, 4).tolist(), "unvalidated_no_instance_aabb"
+
+    extent = np.maximum(max_pt - min_pt, 1e-4)
+    pad = np.maximum(extent * 0.12, 0.06)
+
+    def inside_mask(candidate: np.ndarray) -> np.ndarray:
+        return np.all(
+            (candidate >= (min_pt - pad)[None, :])
+            & (candidate <= (max_pt + pad)[None, :]),
+            axis=1,
+        )
+
+    raw_mask = inside_mask(arr)
+    converted = arr[:, [0, 2, 1]].copy()
+    converted[:, 2] *= -1.0
+    converted_mask = inside_mask(converted)
+    raw_ratio = float(np.mean(raw_mask))
+    converted_ratio = float(np.mean(converted_mask))
+    if converted_ratio > raw_ratio and converted_ratio >= 0.75:
+        chosen, mask, status = converted, converted_mask, "legacy_hm3d_axes_repaired"
+    elif raw_ratio >= 0.75:
+        chosen, mask, status = arr, raw_mask, "world_coordinates_validated"
+    else:
+        return [], "surface_points_outside_instance_aabb"
+    return np.round(chosen[mask], 4).tolist(), status
+
+
+def _surface_fits_points(points: Sequence[Sequence[float]], profile: Dict[str, Any]) -> Tuple[bool, str]:
+    arr = np.asarray(points, dtype=np.float32)
+    if arr.ndim != 2 or arr.shape[1] < 3 or len(arr) == 0:
+        return False, "empty_surface_points"
+    span_x = float(np.max(arr[:, 0]) - np.min(arr[:, 0]))
+    span_z = float(np.max(arr[:, 2]) - np.min(arr[:, 2]))
+    req = surface_requirement(profile)
+    if span_x * span_z < float(req["required_area"]):
+        return False, "surface_area_smaller_than_object"
+    if min(span_x, span_z) < float(req["required_min_span"]):
+        return False, "surface_span_smaller_than_object"
+    return True, ""
+
+
 def _surface_fits_profile(surface_item: Dict[str, Any], profile: Dict[str, Any]) -> Tuple[bool, str]:
     bounds = _surface_bounds(surface_item)
     if bounds is None:
@@ -636,6 +694,7 @@ def place_objects_on_instances(
     max_trials_per_object: int = 30,
     settle_steps: int = 45,
     seed: int = 42,
+    fixed_objects: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """
     文件1调用的核心放置函数。
@@ -657,6 +716,16 @@ def place_objects_on_instances(
     scene_paths = resolve_scene_paths(scene_name, require_semantic=False, root=data_dir)
     scene_path = str(scene_paths.stage_glb) if scene_paths is not None else scene_name
     by_room_instance, by_instance = _build_surface_index(surfaces_payload)
+    room_centers: Dict[int, List[float]] = {}
+    for room_entry in surfaces_payload.get("rooms", []) or []:
+        try:
+            rid = int(room_entry.get("room_id"))
+        except Exception:
+            continue
+        room_payload = room_entry.get("room", {}) if isinstance(room_entry, dict) else {}
+        center = room_payload.get("room_center", []) if isinstance(room_payload, dict) else []
+        if isinstance(center, list) and len(center) >= 3:
+            room_centers[rid] = [_safe_float(center[0]), _safe_float(center[1]), _safe_float(center[2])]
     surfaces_base_dir: Optional[Path] = None
     raw_source_dir = surfaces_payload.get("_source_json_dir") if isinstance(surfaces_payload, dict) else None
     raw_source_path = surfaces_payload.get("_source_json_path") if isinstance(surfaces_payload, dict) else None
@@ -672,6 +741,24 @@ def place_objects_on_instances(
     assignments = assignment_plan.get("assignments", []) if isinstance(assignment_plan, dict) else []
     placed_layout_objects: List[Dict[str, Any]] = []
     placed_internal: List[Dict[str, Any]] = []
+    for fixed in fixed_objects or []:
+        if not isinstance(fixed, dict):
+            continue
+        position = fixed.get("position")
+        if not isinstance(position, list) or len(position) < 3:
+            continue
+        profile = fixed.get("object_profile", {}) if isinstance(fixed.get("object_profile"), dict) else {}
+        placed_internal.append(
+            {
+                "object_id": fixed.get("object_id", fixed.get("id")),
+                "position": [float(position[0]), float(position[1]), float(position[2])],
+                "_radius": float(fixed.get("placement_radius", profile.get("radius", 0.2))),
+                "_sim_object_id": None,
+                "_sim_handle": None,
+                "_target_instance_id": int(fixed.get("target_instance_id", -1)),
+                "_surface_height": float(fixed.get("support_surface_height", position[1])),
+            }
+        )
     failed_objects: List[Dict[str, Any]] = []
     profile_diagnostics: List[Dict[str, Any]] = []
     profile_diag_seen = set()
@@ -739,8 +826,20 @@ def place_objects_on_instances(
         chosen_surface_source = "target"
 
         for candidate_instance_id, surface_item, surface_source in surface_attempts:
-            surface_height = _surface_height(surface_item)
-            surface_ok, surface_fit_reason = _surface_fits_profile(surface_item, profile)
+            surface_points = _load_surface_points(surface_item, base_dir=surfaces_base_dir)
+            surface_points, coordinate_status = _normalize_surface_points_to_world(surface_item, surface_points)
+            if not surface_points:
+                failure_reason = coordinate_status
+                placement_attempts.append(
+                    {
+                        "target_instance_id": int(candidate_instance_id),
+                        "source": surface_source,
+                        "reason": coordinate_status,
+                    }
+                )
+                continue
+            surface_height = float(np.median(np.asarray(surface_points, dtype=np.float32)[:, 1]))
+            surface_ok, surface_fit_reason = _surface_fits_points(surface_points, profile)
             if not surface_ok:
                 failure_reason = surface_fit_reason
                 placement_attempts.append(
@@ -751,8 +850,6 @@ def place_objects_on_instances(
                     }
                 )
                 continue
-
-            surface_points = _load_surface_points(surface_item, base_dir=surfaces_base_dir)
             candidates = _sample_surface_points(
                 surface_points,
                 max_trials=max_trials_per_object,
@@ -792,10 +889,26 @@ def place_objects_on_instances(
                     failure_reason = "min_distance_rejected"
                     continue
 
+                orientation_mode = str(assignment.get("orientation_mode", "free"))
+                yaw_offset = _safe_float(assignment.get("yaw_offset_deg"), 0.0)
                 yaw = float(rng.uniform(0.0, 360.0))
+                if orientation_mode == "face_room_center" and int(room_id) in room_centers:
+                    room_center = room_centers[int(room_id)]
+                    dx = float(room_center[0]) - float(target_pos[0])
+                    dz = float(room_center[2]) - float(target_pos[2])
+                    if abs(dx) + abs(dz) > 1e-6:
+                        yaw = math.degrees(math.atan2(-dx, -dz)) + yaw_offset
+                elif orientation_mode == "align_support_long_axis":
+                    instance_payload = surface_item.get("instance", {}) if isinstance(surface_item, dict) else {}
+                    aabb = instance_payload.get("aabb", {}) if isinstance(instance_payload, dict) else {}
+                    size = aabb.get("size", []) if isinstance(aabb, dict) else []
+                    if isinstance(size, list) and len(size) >= 3:
+                        yaw = (90.0 if _safe_float(size[0]) > _safe_float(size[2]) else 0.0) + yaw_offset
+                yaw %= 360.0
                 final_pos = list(target_pos)
                 sim_object_id = None
                 sim_handle = None
+                stability_mode = "direct_surface"
 
                 if sim is not None and rom is not None and template_mgr is not None and model_id:
                     if template_handle is None:
@@ -808,6 +921,11 @@ def place_objects_on_instances(
                             continue
                         sim_object_id = int(getattr(obj, "object_id", -1))
                         sim_handle = getattr(obj, "handle", None)
+                        if mn is not None:
+                            obj.rotation = mn.Quaternion.rotation(
+                                mn.Rad(math.radians(float(yaw))),
+                                mn.Vector3(0.0, 1.0, 0.0),
+                            )
                         obj.translation = np.array(spawn_pos, dtype=np.float32)
                         if use_physics_settle and hasattr(obj, "motion_type") and hasattr(habitat_sim, "physics"):
                             obj.motion_type = habitat_sim.physics.MotionType.DYNAMIC
@@ -815,8 +933,35 @@ def place_objects_on_instances(
                             obj.motion_type = habitat_sim.physics.MotionType.KINEMATIC
                         if use_physics_settle:
                             _step_physics(sim, steps=settle_steps)
+                            stability_mode = "physics_settled"
                         pos = getattr(obj, "translation", np.array(spawn_pos, dtype=np.float32))
                         final_pos = [round(float(pos[0]), 4), round(float(pos[1]), 4), round(float(pos[2]), 4)]
+                        # Runtime ``obj.aabb`` is local-space in some Habitat-Sim
+                        # versions.  The runtime profile already measured the local
+                        # origin-to-bottom offset, so combine it with world translation.
+                        settled_base_y = float(final_pos[1]) - float(y_offset)
+                        support_gap = settled_base_y - float(surface_height)
+                        # More than 2 cm of clearance/penetration is visibly wrong for
+                        # the small household assets used by the lifespan benchmark.
+                        if support_gap > 0.02 or support_gap < -0.02:
+                            # HM3D visual furniture and the stage collision mesh do not always
+                            # agree. Preserve the validated semantic-surface placement instead
+                            # of accepting an object that floats or falls through furniture.
+                            obj.translation = np.array(target_pos, dtype=np.float32)
+                            if hasattr(obj, "motion_type") and hasattr(habitat_sim, "physics"):
+                                obj.motion_type = habitat_sim.physics.MotionType.KINEMATIC
+                            final_pos = [round(float(v), 4) for v in target_pos]
+                            settled_base_y = float(final_pos[1]) - float(y_offset)
+                            support_gap = settled_base_y - float(surface_height)
+                            stability_mode = "kinematic_surface_fallback"
+                            if support_gap > 0.01:
+                                _remove_object_safe(rom, obj)
+                                failure_reason = "object_floating_after_surface_snap"
+                                continue
+                            if support_gap < -0.01:
+                                _remove_object_safe(rom, obj)
+                                failure_reason = "object_sunk_after_surface_snap"
+                                continue
                         existing_ids = [x.get("_sim_object_id") for x in placed_internal if x.get("_sim_object_id") is not None]
                         if not _distance_ok(
                             final_pos,
@@ -843,11 +988,14 @@ def place_objects_on_instances(
                 chosen_instance_id = candidate_instance_id
                 chosen_surface_source = surface_source
                 layout_obj = {
-                    "id": int(idx),
+                    "id": object_id,
+                    "object_id": object_id,
                     "name": name,
                     "model_id": model_id,
                     "position": [round(float(final_pos[0]), 4), round(float(final_pos[1]), 4), round(float(final_pos[2]), 4)],
                     "rotation": [0.0, round(float(yaw), 4), 0.0],
+                    "orientation_mode": orientation_mode,
+                    "yaw_offset_deg": round(float(yaw_offset), 4),
                     "sampled_region_id": int(room_id) if room_id is not None else -1,
                     "target_instance_id": int(chosen_instance_id) if chosen_instance_id is not None else -1,
                     "assigned_target_instance_id": int(target_instance_id) if target_instance_id is not None else -1,
@@ -864,6 +1012,11 @@ def place_objects_on_instances(
                     },
                     "template_collidable": template_collidable,
                     "physics_settle": bool(use_physics_settle),
+                    "placement_stability_mode": stability_mode,
+                    "surface_coordinate_status": coordinate_status,
+                    "support_surface_height": round(float(surface_height), 4),
+                    "support_base_height": round(float(settled_base_y if sim_object_id is not None else target_pos[1] - y_offset), 4),
+                    "support_gap": round(float(support_gap if sim_object_id is not None else target_pos[1] - y_offset - surface_height), 4),
                 }
                 placed_layout_objects.append(layout_obj)
                 placed_internal.append(

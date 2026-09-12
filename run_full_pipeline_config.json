@@ -1,7 +1,7 @@
 {
   "_comment": "Default parameters for run_full_pipeline.py. Command-line options override values in this file.",
   "pipeline": {
-    "scene": "00808-y9hTuugGdiq",
+    "scene": "00401-H8rQCnvBgo6",
     "plan_json": null,
     "run_id": null,
     "dry_run": false,

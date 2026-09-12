@@ -47,8 +47,9 @@ from lifespan_schema import (
     write_json,
 )
 from lifespan_state_engine import propagate_states
-from object_catalog import build_catalog, filter_entries, load_catalog
+from object_catalog import object_entries_from_args
 from project_paths import OBJECT_CATALOG_PATH, PROJECT_ROOT, resolve_results_root
+from qwen_credentials import load_dashscope_api_key
 from query_rooms_for_objects import (
     DEFAULT_SSH_HOST,
     DEFAULT_SSH_KEY,
@@ -121,12 +122,55 @@ def _load_personas(path: Path) -> List[JsonDict]:
 
 def _load_objects(args: argparse.Namespace) -> List[JsonDict]:
     catalog_path = _resolve_project_path(args.object_catalog)
-    entries = load_catalog(catalog_path)
-    if not entries:
-        datasets = [part.strip() for part in str(args.object_datasets).split(",") if part.strip()]
-        entries = build_catalog(datasets or ("legacy",))
     datasets = [part.strip() for part in str(args.object_datasets).split(",") if part.strip()]
-    return filter_entries(entries, datasets=datasets or None, limit=int(args.object_limit))
+    return object_entries_from_args(
+        catalog_path=catalog_path,
+        datasets=datasets or None,
+        object_set_path=args.object_set or None,
+        limit=int(args.object_limit),
+    )
+
+
+def _ensure_daily_event_coverage(payload: JsonDict, duration_days: int) -> JsonDict:
+    """Repair otherwise valid LLM calendars that omit one or more requested days."""
+    events = payload.get("daily_events", [])
+    if not isinstance(events, list):
+        events = []
+    by_day: Dict[int, JsonDict] = {}
+    for item in events:
+        if not isinstance(item, dict):
+            continue
+        try:
+            day = int(item.get("day_index"))
+        except (TypeError, ValueError):
+            continue
+        if 1 <= day <= int(duration_days) and day not in by_day:
+            by_day[day] = item
+    repaired_days: List[int] = []
+    for day in range(1, int(duration_days) + 1):
+        if day in by_day:
+            continue
+        repaired_days.append(day)
+        by_day[day] = {
+            "day_index": day,
+            "event_type": "normal_routine_day",
+            "title": "normal household routine",
+            "participants": ["household"],
+            "importance": "low",
+            "phases": ["main"],
+            "expected_object_effects": [
+                {
+                    "type": "MOVE",
+                    "category_keywords": ["camera", "tea", "food", "book"],
+                    "target_state": "active",
+                    "target": "activity_surface",
+                }
+            ],
+        }
+    payload["daily_events"] = [by_day[day] for day in sorted(by_day)]
+    if repaired_days:
+        payload["coverage_repaired_days"] = repaired_days
+    return payload
 
 
 def _start_llm_client(args: argparse.Namespace) -> Tuple[Optional[SSHTunnel], Optional[Any]]:
@@ -136,6 +180,13 @@ def _start_llm_client(args: argparse.Namespace) -> Tuple[Optional[SSHTunnel], Op
     if OpenAI is None:
         print("[Warning] openai package unavailable; using rule fallback.")
         return None, None
+    dashscope_key = load_dashscope_api_key()
+    if dashscope_key:
+        base_url = os.environ.get(
+            "DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        )
+        print(f"[Info] Lifespan LLM using DashScope direct API: {base_url}")
+        return None, OpenAI(api_key=dashscope_key, base_url=base_url, timeout=args.timeout)
     if not (args.ssh_host and args.ssh_user and (args.ssh_password or args.ssh_key)):
         print("[Warning] SSH args incomplete; using rule fallback.")
         return None, None
@@ -275,7 +326,12 @@ def run_scene(args: argparse.Namespace) -> int:
 
     try:
         print("[Stage 1/6] Household selection")
-        household = build_household_profile(args.scene, scene_summary, personas, config, client=client, model=args.model)
+        household_path = out_dir / "household_profile.json"
+        if args.reuse_existing_plan and household_path.is_file():
+            household = read_json(household_path)
+            print(f"[Info] Reusing household plan: {household_path}")
+        else:
+            household = build_household_profile(args.scene, scene_summary, personas, config, client=client, model=args.model)
         validate_household_profile(household)
         write_json(out_dir / "scene_summary.json", scene_summary)
         write_json(out_dir / "household_profile.json", household)
@@ -286,13 +342,24 @@ def run_scene(args: argparse.Namespace) -> int:
         write_json(out_dir / "object_lifespan_profiles.json", object_profiles)
 
         print("[Stage 3/6] Relationship-aware daily routines")
-        routines = generate_daily_routines(household, scene_summary, config, client=client, model=args.model)
+        routines_path = out_dir / "resident_daily_routines.json"
+        if args.reuse_existing_plan and routines_path.is_file():
+            routines = read_json(routines_path)
+            print(f"[Info] Reusing daily routines: {routines_path}")
+        else:
+            routines = generate_daily_routines(household, scene_summary, config, client=client, model=args.model)
         validate_daily_routines(routines)
         write_json(out_dir / "resident_daily_routines.json", routines)
         write_json(out_dir / "collaborative_activity_templates.json", {"collaborative_activities": routines.get("collaborative_activities", [])})
 
         print("[Stage 4/6] Los Angeles monthly important events")
-        monthly_events = generate_monthly_events(household, routines, config, client=client, model=args.model)
+        monthly_events_path = out_dir / "daily_important_events.json"
+        if args.reuse_existing_plan and monthly_events_path.is_file():
+            monthly_events = read_json(monthly_events_path)
+            print(f"[Info] Reusing monthly events: {monthly_events_path}")
+        else:
+            monthly_events = generate_monthly_events(household, routines, config, client=client, model=args.model)
+        monthly_events = _ensure_daily_event_coverage(monthly_events, duration_days)
         validate_daily_events(monthly_events, duration_days=duration_days)
         selected_month = int(monthly_events.get("selected_month", 1))
         write_json(out_dir / "monthly_calendar.json", {"location": monthly_events.get("location"), "selected_month": selected_month})
@@ -366,6 +433,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--personas", default="data/lifespan/resident_persona_profiles.json")
     parser.add_argument("--object-catalog", default=str(OBJECT_CATALOG_PATH))
     parser.add_argument("--object-datasets", default="legacy,ycb,hssd")
+    parser.add_argument("--object-set", default="", help="Optional JSON/text object set shared with the physical placement pipeline")
     parser.add_argument("--object-limit", type=int, default=40, help="Limit objects for MVP state simulation; 0 means all")
     parser.add_argument("--results-dir", default="")
     parser.add_argument("--sequence-id", default="")
@@ -376,6 +444,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dry-run-household-plan", action="store_true", help="Compatibility flag; MVP still writes all semantic plan files")
     parser.add_argument("--dry-run-state-only", action="store_true", help="Compatibility flag; MVP writes state files and semantic snapshots")
     parser.add_argument("--disable-lifespan-llm", action="store_true", help="Use deterministic rule fallback for household/routine/month planning")
+    parser.add_argument("--reuse-existing-plan", action="store_true", help="Reuse household and routine JSONs already present in the sequence directory")
     parser.add_argument("--ssh-host", default=DEFAULT_SSH_HOST)
     parser.add_argument("--ssh-port", type=int, default=DEFAULT_SSH_PORT)
     parser.add_argument("--ssh-user", default=DEFAULT_SSH_USER)

@@ -120,7 +120,7 @@ def _default_config_payload() -> Dict[str, Any]:
             "override values in this file."
         ),
         "pipeline": {
-            "scene": "00808-y9hTuugGdiq",
+            "scene": "00401-H8rQCnvBgo6",
             "plan_json": None,
             "run_id": None,
             "dry_run": False,

@@ -80,6 +80,7 @@ from extract_room_instances import (
 )
 from hm3d_paths import resolve_scene_paths
 from project_paths import resolve_results_root
+from qwen_credentials import load_dashscope_api_key
 
 try:
     import habitat_sim  # type: ignore[import-not-found]
@@ -1182,7 +1183,8 @@ def main() -> int:
 
     client: Optional[OpenAI] = None
     tunnel: Optional[SSHTunnel] = None
-    use_llm = (not args.disable_llm) and _validate_ssh_args(args) and (OpenAI is not None)
+    dashscope_key = load_dashscope_api_key()
+    use_llm = (not args.disable_llm) and (OpenAI is not None) and (bool(dashscope_key) or _validate_ssh_args(args))
     if not args.disable_llm and not use_llm:
         if OpenAI is None:
             print("[Warning] openai package not found, auto switch to heuristic-only mode.", file=sys.stderr)
@@ -1190,7 +1192,12 @@ def main() -> int:
             print("[Warning] SSH args incomplete, auto switch to heuristic-only mode.", file=sys.stderr)
 
     if use_llm:
-        tunnel = SSHTunnel(
+        if dashscope_key:
+            base_url = os.environ.get("DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+            client = OpenAI(api_key=dashscope_key, base_url=base_url, timeout=args.timeout)
+            print(f"[Info] Surface LLM using DashScope direct API: {base_url}")
+        else:
+            tunnel = SSHTunnel(
             ssh_host=str(args.ssh_host),
             ssh_port=int(args.ssh_port),
             ssh_user=str(args.ssh_user),
@@ -1200,12 +1207,12 @@ def main() -> int:
             remote_port=args.vllm_port,
             local_port=args.local_port,
         )
-        if not tunnel.start():
-            print("[Warning] Failed to start tunnel, fallback to heuristic-only mode.", file=sys.stderr)
-            use_llm = False
-            tunnel = None
-        else:
-            client = OpenAI(api_key="EMPTY", base_url=tunnel.base_url, timeout=args.timeout)
+            if not tunnel.start():
+                print("[Warning] Failed to start tunnel, fallback to heuristic-only mode.", file=sys.stderr)
+                use_llm = False
+                tunnel = None
+            else:
+                client = OpenAI(api_key="EMPTY", base_url=tunnel.base_url, timeout=args.timeout)
 
     print(
         "[Info] Global ranking mode: {}".format(

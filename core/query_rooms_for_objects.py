@@ -53,7 +53,8 @@ from typing import Dict, List, Tuple, Optional, Any
 
 from hm3d_paths import list_available_scenes, resolve_scene_paths
 from object_catalog import object_entries_from_args
-from project_paths import OBJECT_CATALOG_PATH, resolve_legacy_images_dir, resolve_results_root
+from project_paths import OBJECT_CATALOG_PATH, resolve_hm3d_root, resolve_legacy_images_dir, resolve_results_root
+from qwen_credentials import load_dashscope_api_key
 
 try:
     from openai import OpenAI
@@ -267,7 +268,8 @@ class SSHTunnel:
             self.proc = subprocess.Popen(
                 cmd_for_run,
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
                 env=proc_env,
             )
         except Exception as e:
@@ -284,6 +286,10 @@ class SSHTunnel:
         if not _wait_tunnel_ready("127.0.0.1", self.local_port, timeout_s):
             print(f"[Error] SSH tunnel did not become ready within {timeout_s}s")
             self.close()
+            if self.proc and self.proc.stderr:
+                detail = self.proc.stderr.read().strip()
+                if detail:
+                    print(f"[Error] SSH detail: {detail[-2000:]}")
             return False
         
         print(f"[Info] SSH tunnel ready at {self.base_url}")
@@ -673,7 +679,7 @@ def process_scene(
     scene_name: str,
     images_dir: str,
     output_dir: str,
-    tunnel: SSHTunnel,
+    tunnel: Optional[SSHTunnel],
     client: OpenAI,
     model: str,
     object_catalog: Optional[str] = None,
@@ -811,6 +817,7 @@ def main():
     parser.add_argument("--object-set", type=str, default=None, help="Optional JSON list/object set to restrict objects")
     parser.add_argument("--limit-objects", type=int, default=0, help="Limit number of object entries for smoke tests")
     parser.add_argument("--output-dir", type=str, default=DEFAULT_OUTPUT_DIR, help="Output directory for results")
+    parser.add_argument("--data-dir", type=str, default=str(resolve_hm3d_root()), help="HM3D dataset root")
     
     # SSH tunnel (defaults use password auth: sshpass -e ssh -p DEFAULT_SSH_PORT DEFAULT_SSH_USER@DEFAULT_SSH_HOST)
     parser.add_argument("--ssh-host", default=DEFAULT_SSH_HOST, help="SSH server host")
@@ -844,7 +851,8 @@ def main():
     if args.scene and args.scenes is not None:
         print("[Error] Cannot specify both --scene and --scenes all")
         sys.exit(1)
-    if args.scene and args.scene not in AVAILABLE_SCENES:
+    available_scenes = list_available_scenes(require_semantic=True, root=Path(args.data_dir))
+    if args.scene and args.scene not in available_scenes:
         print(f"[Error] Scene not found in merged valid scenes: {args.scene}")
         sys.exit(1)
     if OpenAI is None:
@@ -852,26 +860,25 @@ def main():
         sys.exit(1)
 
     scenes_to_process = [args.scene] if args.scene else AVAILABLE_SCENES
-    tunnel = SSHTunnel(
-        ssh_host=args.ssh_host,
-        ssh_port=args.ssh_port,
-        ssh_user=args.ssh_user,
-        ssh_password=args.ssh_password,
-        ssh_key=args.ssh_key,
-        remote_host=args.vllm_host,
-        remote_port=args.vllm_port,
-        local_port=args.local_port,
-    )
-    
-    if not tunnel.start():
-        print("[Error] Failed to start SSH tunnel")
-        sys.exit(1)
-    
-    # Create OpenAI client
-    client = OpenAI(api_key="EMPTY", base_url=tunnel.base_url, timeout=args.timeout)
-
-    if not args.skip_api_health_check:
-        if not check_qwen_endpoint(tunnel.base_url, args.model, timeout_s=10.0):
+    dashscope_key = load_dashscope_api_key()
+    tunnel: Optional[SSHTunnel] = None
+    if dashscope_key:
+        base_url = os.environ.get(
+            "DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        )
+        client = OpenAI(api_key=dashscope_key, base_url=base_url, timeout=args.timeout)
+        print(f"[Info] Using DashScope direct API: {base_url}")
+    else:
+        tunnel = SSHTunnel(
+            ssh_host=args.ssh_host, ssh_port=args.ssh_port, ssh_user=args.ssh_user,
+            ssh_password=args.ssh_password, ssh_key=args.ssh_key,
+            remote_host=args.vllm_host, remote_port=args.vllm_port, local_port=args.local_port,
+        )
+        if not tunnel.start():
+            print("[Error] Failed to start SSH tunnel")
+            sys.exit(1)
+        client = OpenAI(api_key="EMPTY", base_url=tunnel.base_url, timeout=args.timeout)
+        if not args.skip_api_health_check and not check_qwen_endpoint(tunnel.base_url, args.model, timeout_s=10.0):
             tunnel.close()
             sys.exit(1)
     
@@ -905,7 +912,8 @@ def main():
             sys.exit(1)
         
     finally:
-        tunnel.close()
+        if tunnel is not None:
+            tunnel.close()
 
 
 if __name__ == "__main__":

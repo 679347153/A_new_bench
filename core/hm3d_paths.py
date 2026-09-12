@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""Utilities for resolving HM3D scenes across val/minival splits.
+"""Utilities for resolving HM3D scenes across train/val/minival splits.
 
-The workspace now prefers two HM3D splits under data/scenes/hm3d:
+The workspace supports three HM3D splits under data/scenes/hm3d:
+- data/scenes/hm3d/train
 - data/scenes/hm3d/minival
 - data/scenes/hm3d/val
 
 Legacy ./hm3d is still accepted when it exists.
 
 Rules:
-- Prefer val when the same scene exists in both splits.
+- Prefer val, then minival, then train when a scene exists in multiple splits.
 - Only expose scenes that have semantic.txt by default.
 - Keep split-specific dataset config files aligned with the data split.
 """
@@ -25,11 +26,13 @@ WORKSPACE_ROOT = PROJECT_ROOT
 HM3D_ROOT = resolve_hm3d_root()
 MINIVAL_ROOT = HM3D_ROOT / "minival"
 VAL_ROOT = HM3D_ROOT / "val"
+TRAIN_ROOT = HM3D_ROOT / "train"
 
 MINIVAL_CONFIG = HM3D_ROOT / "hm3d_annotated_basis.scene_dataset_config.json"
 VAL_CONFIG = VAL_ROOT / "hm3d_annotated_val_basis.scene_dataset_config.json"
+TRAIN_CONFIG = HM3D_ROOT / "hm3d_annotated_train_basis.scene_dataset_config.json"
 
-SPLIT_PRIORITY = ("val", "minival")
+SPLIT_PRIORITY = ("val", "minival", "train")
 
 
 @dataclass(frozen=True)
@@ -57,6 +60,8 @@ def split_root(split: str, root: Optional[Path] = None) -> Path:
         return base / "val"
     if split == "minival":
         return base / "minival"
+    if split == "train":
+        return base / "train"
     raise ValueError(f"Unknown HM3D split: {split}")
 
 
@@ -66,6 +71,8 @@ def dataset_config_for_split(split: str, root: Optional[Path] = None) -> Path:
         return base / "val" / "hm3d_annotated_val_basis.scene_dataset_config.json"
     if split == "minival":
         return base / "hm3d_annotated_basis.scene_dataset_config.json"
+    if split == "train":
+        return base / "hm3d_annotated_train_basis.scene_dataset_config.json"
     raise ValueError(f"Unknown HM3D split: {split}")
 
 
@@ -89,7 +96,7 @@ def _candidate_scene_paths(scene_name: str, split: str, root: Optional[Path] = N
 
 
 def resolve_scene_paths(scene_name: str, require_semantic: bool = True, root: Optional[Path] = None) -> Optional[ScenePaths]:
-    """Resolve a scene name to actual files, preferring val over minival."""
+    """Resolve a scene name to actual files using ``SPLIT_PRIORITY``."""
     for split in SPLIT_PRIORITY:
         candidate = _candidate_scene_paths(scene_name, split, root=root)
         if not candidate.scene_dir.is_dir():
@@ -105,7 +112,7 @@ def resolve_scene_paths(scene_name: str, require_semantic: bool = True, root: Op
 
 
 def iter_available_scenes(require_semantic: bool = True, root: Optional[Path] = None) -> List[ScenePaths]:
-    """Return merged scenes across val/minival, de-duplicated with val priority."""
+    """Return merged scenes across supported splits, de-duplicated by priority."""
     results: List[ScenePaths] = []
     seen = set()
     for split in SPLIT_PRIORITY:

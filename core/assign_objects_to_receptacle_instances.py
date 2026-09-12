@@ -78,6 +78,7 @@ from object_profiles import (
 )
 from place_objects_on_instances import place_objects_on_instances
 from project_paths import OBJECT_CATALOG_PATH, default_object_config_dirs_str
+from qwen_credentials import load_dashscope_api_key
 from sample_and_place_objects import (
     DEFAULT_IMAGES_DIR,
     DEFAULT_PROBABILITIES_DIR,
@@ -115,13 +116,19 @@ Hard constraints:
 6) Respect object_fit.affordance.allowed. If it is false, only select that candidate when every candidate is false.
 7) For floor_only objects, choose floor/ground/room_floor candidates; do not choose shelves, tables, beds, or chairs.
 8) For small_tabletop/large_tabletop objects, prefer table, desk, counter, shelf, cabinet, dresser, or nightstand surfaces with enough span/area.
+9) Choose orientation_mode from: free, face_room_center, align_support_long_axis.
+   Use face_room_center for objects with a meaningful front that should face into the room;
+   align_support_long_axis for elongated furniture/objects; free for rotationally symmetric objects.
+10) yaw_offset_deg is an optional correction in degrees in [-180, 180], normally 0.
 
 Output JSON schema:
 {{
   "target_instance_id": 123,
   "confidence_score": 0.91,
   "reasoning": "short sentence",
-  "backup_instance_ids": [456, 789]
+  "backup_instance_ids": [456, 789],
+  "orientation_mode": "face_room_center",
+  "yaw_offset_deg": 0
 }}
 
 Scene: {scene_name}
@@ -260,7 +267,8 @@ class SSHTunnel:
         self.proc = subprocess.Popen(
             cmd_for_run,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
             env=env,
         )
         time.sleep(0.2)
@@ -270,6 +278,10 @@ class SSHTunnel:
         if not _wait_tunnel_ready("127.0.0.1", self.local_port, timeout_s):
             print(f"[Error] SSH tunnel not ready within {timeout_s}s", file=sys.stderr)
             self.close()
+            if self.proc and self.proc.stderr:
+                detail = self.proc.stderr.read().strip()
+                if detail:
+                    print(f"[Error] SSH detail: {detail[-2000:]}", file=sys.stderr)
             return False
         return True
 
@@ -530,6 +542,13 @@ def _normalize_assignment_response(parsed: Optional[Dict[str, Any]], candidates:
         "confidence_score": round(confidence, 4),
         "reasoning": reasoning,
         "backup_instance_ids": backups,
+        "orientation_mode": (
+            str(parsed.get("orientation_mode", "free"))
+            if str(parsed.get("orientation_mode", "free"))
+            in {"free", "face_room_center", "align_support_long_axis"}
+            else "free"
+        ),
+        "yaw_offset_deg": max(-180.0, min(180.0, _safe_float(parsed.get("yaw_offset_deg"), 0.0))),
     }
 
 
@@ -845,7 +864,8 @@ def main() -> int:
         except Exception:
             continue
 
-    use_llm = (not args.disable_llm) and _validate_ssh_args(args) and (OpenAI is not None)
+    dashscope_key = load_dashscope_api_key()
+    use_llm = (not args.disable_llm) and (OpenAI is not None) and (bool(dashscope_key) or _validate_ssh_args(args))
     if not args.disable_llm and not use_llm:
         if OpenAI is None:
             print("[Warning] openai package not found, using heuristic-only assignment.", file=sys.stderr)
@@ -855,7 +875,12 @@ def main() -> int:
     tunnel: Optional[SSHTunnel] = None
     client: Optional[OpenAI] = None
     if use_llm:
-        tunnel = SSHTunnel(
+        if dashscope_key:
+            base_url = os.environ.get("DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+            client = OpenAI(api_key=dashscope_key, base_url=base_url, timeout=args.timeout)
+            print(f"[Info] Assignment LLM using DashScope direct API: {base_url}")
+        else:
+            tunnel = SSHTunnel(
             ssh_host=str(args.ssh_host),
             ssh_port=int(args.ssh_port),
             ssh_user=str(args.ssh_user),
@@ -865,12 +890,12 @@ def main() -> int:
             remote_port=args.vllm_port,
             local_port=args.local_port,
         )
-        if not tunnel.start():
-            print("[Warning] Tunnel failed, fallback to heuristic-only assignment.", file=sys.stderr)
-            use_llm = False
-            tunnel = None
-        else:
-            client = OpenAI(api_key="EMPTY", base_url=tunnel.base_url, timeout=args.timeout)
+            if not tunnel.start():
+                print("[Warning] Tunnel failed, fallback to heuristic-only assignment.", file=sys.stderr)
+                use_llm = False
+                tunnel = None
+            else:
+                client = OpenAI(api_key="EMPTY", base_url=tunnel.base_url, timeout=args.timeout)
 
     assignments: List[Dict[str, Any]] = []
     llm_debug: List[Dict[str, Any]] = []

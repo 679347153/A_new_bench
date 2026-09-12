@@ -31,7 +31,29 @@ data/object_catalog/missing_semantic_text.csv
 
 paper/
 
+# Local credentials and environment files (never commit)
+.secrets/
+.env
+.env.*
+!.env.example
+
+# Local Python environments and caches
+.venv/
+venv/
+env/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# IDE and OS metadata
+.vscode/
+.idea/
+.DS_Store
+
 # Generated outputs
+/results/
 scene_info_export/
 semantic_demo_output/
 hm3d_pipeline_report.json

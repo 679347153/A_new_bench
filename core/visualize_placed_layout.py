@@ -296,10 +296,20 @@ def _make_simulator(scene_name: str, data_dir: Path, width: int, height: int) ->
     sensor.sensor_type = habitat_sim.SensorType.COLOR
     sensor.resolution = [int(height), int(width)]
     sensor.hfov = 90
-    sensor.position = [0.0, CAMERA_HEIGHT, 0.0]
+    # Camera poses in this viewer are already expressed at eye height.  Keeping
+    # another sensor offset here used to add CAMERA_HEIGHT a second time and
+    # pushed close-up targets to the bottom edge (or completely out of view).
+    sensor.position = [0.0, 0.0, 0.0]
+
+    semantic_sensor = habitat_sim.CameraSensorSpec()
+    semantic_sensor.uuid = "semantic"
+    semantic_sensor.sensor_type = habitat_sim.SensorType.SEMANTIC
+    semantic_sensor.resolution = [int(height), int(width)]
+    semantic_sensor.hfov = 90
+    semantic_sensor.position = [0.0, 0.0, 0.0]
 
     agent_cfg = habitat_sim.agent.AgentConfiguration()
-    agent_cfg.sensor_specifications = [sensor]
+    agent_cfg.sensor_specifications = [sensor, semantic_sensor]
     agent_cfg.height = CAMERA_HEIGHT
     agent_cfg.radius = 0.18
 
@@ -394,12 +404,16 @@ def _load_layout_objects(
             debug_offset = [0.0, float(initial_y_offset), 0.0]
             obj.translation = np.asarray(pos, dtype=np.float32) + np.asarray(debug_offset, dtype=np.float32)
             obj.rotation = _yaw_to_magnum_quat(yaw)
+            semantic_id = 10000 + idx
+            if hasattr(obj, "semantic_id"):
+                obj.semantic_id = semantic_id
             if hasattr(obj, "motion_type") and hasattr(habitat_sim, "physics"):
                 obj.motion_type = habitat_sim.physics.MotionType.KINEMATIC
             loaded.append(
                 {
                     "object": obj,
                     "object_id": getattr(obj, "object_id", None),
+                    "semantic_id": semantic_id,
                     "handle": getattr(obj, "handle", None),
                     "layout": cfg,
                     "index": idx,
@@ -548,14 +562,13 @@ def _switch_layout(
     print(f"[OK] Switched layout {next_idx + 1}/{len(layout_files)} -> {next_path.name} loaded={len(loaded_items)}/{object_count} skipped={skipped}")
 
 
-def _set_camera(sim: habitat_sim.Simulator, camera_pos: np.ndarray, yaw: float, pitch: float) -> np.ndarray:
+def _set_camera(sim: habitat_sim.Simulator, camera_pos: np.ndarray, yaw: float, pitch: float) -> Dict[str, np.ndarray]:
     agent = sim.get_agent(0)
     state = agent.get_state()
     state.position = camera_pos.astype(np.float32)
     state.rotation = _camera_rotation(yaw, pitch)
     agent.set_state(state, reset_sensors=False)
-    obs = sim.get_sensor_observations()
-    return obs["color"][:, :, :3]
+    return sim.get_sensor_observations()
 
 
 def _draw_text(frame: np.ndarray, lines: Sequence[str], x: int, y: int, color: Tuple[int, int, int]) -> np.ndarray:
@@ -598,11 +611,83 @@ def _reset_camera(objects: Sequence[Dict[str, Any]]) -> Tuple[np.ndarray, float,
     return camera_pos, yaw, pitch
 
 
-def _focus_object(item: Dict[str, Any]) -> Tuple[np.ndarray, float, float]:
-    """把相机移动到当前物体前方，用于逐个检查高度和穿模。"""
+def _focus_object(item: Dict[str, Any], sim: Optional[habitat_sim.Simulator] = None) -> Tuple[np.ndarray, float, float]:
+    """从房间内寻找能实际看见物体的斜视角，而不是从正上方俯拍。"""
     target = np.asarray(item["object"].translation, dtype=np.float32)
-    camera_pos = target + np.array([0.0, 1.0, 2.4], dtype=np.float32)
-    yaw, pitch = _look_at_yaw_pitch(camera_pos, target)
+    profile = item.get("layout", {}).get("object_profile", {})
+    dimensions = [
+        float(profile.get("footprint_x", 0.25)),
+        float(profile.get("footprint_z", 0.25)),
+        float(profile.get("height", 0.25)),
+    ]
+    extent = max(dimensions)
+    distance = min(max(extent * 3.8, 1.15), 2.6)
+    candidates: List[Tuple[int, float, float, np.ndarray, float, float]] = []
+    for radius_scale in (1.0, 1.45):
+        for angle_deg in range(0, 360, 30):
+            angle = math.radians(angle_deg)
+            desired = target + np.array(
+                [math.cos(angle) * distance * radius_scale, 0.0, math.sin(angle) * distance * radius_scale],
+                dtype=np.float32,
+            )
+            camera_pos = desired.copy()
+            if sim is not None and getattr(sim, "pathfinder", None) is not None:
+                try:
+                    snapped = np.asarray(sim.pathfinder.snap_point(desired), dtype=np.float32)
+                    if np.all(np.isfinite(snapped)):
+                        camera_pos[[0, 2]] = snapped[[0, 2]]
+                        relative_height = float(target[1] - snapped[1])
+                        camera_pos[1] = snapped[1] + min(CAMERA_HEIGHT, max(0.70, relative_height + 0.45))
+                    else:
+                        camera_pos[1] = target[1] + max(0.35, dimensions[2] * 0.4)
+                except Exception:
+                    camera_pos[1] = target[1] + max(0.35, dimensions[2] * 0.4)
+            else:
+                camera_pos[1] = target[1] + max(0.35, dimensions[2] * 0.4)
+            yaw, pitch = _look_at_yaw_pitch(camera_pos, target)
+            horizontal_distance = float(np.linalg.norm((camera_pos - target)[[0, 2]]))
+            # snap_point can collapse a requested viewpoint onto the target's
+            # own navmesh cell.  Such a pose makes a floor object fill the
+            # frame and produces a near-vertical, disorienting image.
+            if horizontal_distance < max(0.65, distance * 0.55) or horizontal_distance > 4.0:
+                continue
+            visible = 0
+            if sim is not None:
+                try:
+                    observations = _set_camera(sim, camera_pos, yaw, pitch)
+                    semantic = observations.get("semantic")
+                    if semantic is not None:
+                        visible = int(np.count_nonzero(semantic == int(item.get("semantic_id", -1))))
+                except Exception:
+                    pass
+            target_pixels = 0.025 * 960.0 * 540.0
+            size_quality = -abs(math.log(max(float(visible), 1.0) / target_pixels))
+            candidates.append((int(visible > 0), size_quality, -abs(horizontal_distance - distance), camera_pos, yaw, pitch))
+    # If every navigable viewpoint is occluded (for example an object embedded
+    # behind fixed cabinetry), add close diagnostic viewpoints.  These retain
+    # the real scene and object pose while allowing the bad placement itself
+    # to be seen and reviewed instead of producing a blank corner photograph.
+    if candidates and not any(row[0] for row in candidates) and sim is not None:
+        for angle_deg in range(0, 360, 30):
+            angle = math.radians(angle_deg)
+            camera_pos = target + np.array(
+                [math.cos(angle) * 0.72, 0.35, math.sin(angle) * 0.72], dtype=np.float32
+            )
+            yaw, pitch = _look_at_yaw_pitch(camera_pos, target)
+            try:
+                observations = _set_camera(sim, camera_pos, yaw, pitch)
+                semantic = observations.get("semantic")
+                visible = int(np.count_nonzero(semantic == int(item.get("semantic_id", -1)))) if semantic is not None else 0
+            except Exception:
+                visible = 0
+            target_pixels = 0.025 * 960.0 * 540.0
+            size_quality = -abs(math.log(max(float(visible), 1.0) / target_pixels))
+            candidates.append((int(visible > 0), size_quality, -0.5, camera_pos, yaw, pitch))
+    if not candidates:
+        camera_pos = target + np.array([distance, 0.55, distance], dtype=np.float32)
+        yaw, pitch = _look_at_yaw_pitch(camera_pos, target)
+        return camera_pos, yaw, pitch
+    _, _, _, camera_pos, yaw, pitch = max(candidates, key=lambda row: (row[0], row[1], row[2]))
     return camera_pos, yaw, pitch
 
 
@@ -652,29 +737,47 @@ def _render_frame(
     debug_offset: bool = False,
     offset_step: float = 0.02,
     offset_scope: str = "selected",
+    show_hud: bool = True,
 ) -> np.ndarray:
     try:
-        rgb = _set_camera(sim, camera_pos, yaw, pitch)
+        observations = _set_camera(sim, camera_pos, yaw, pitch)
+        rgb = observations["color"][:, :, :3]
         frame = cv2.cvtColor(rgb.astype(np.uint8), cv2.COLOR_RGB2BGR)
+        if loaded_items:
+            semantic = observations.get("semantic")
+            semantic_id = int(loaded_items[selected_idx % len(loaded_items)].get("semantic_id", -1))
+            if semantic is not None and semantic_id >= 0:
+                mask = (semantic == semantic_id).astype(np.uint8)
+                contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                if contours:
+                    cv2.drawContours(frame, contours, -1, (70, 255, 90), 3, cv2.LINE_AA)
+                    x, y, w, h = cv2.boundingRect(np.concatenate(contours))
+                    cv2.rectangle(frame, (x, y), (x + w, y + h), (70, 255, 90), 2)
+                    tag = f"TARGET: {loaded_items[selected_idx % len(loaded_items)]['model_id']}"
+                    cv2.putText(frame, tag, (x, max(30, y - 9)), cv2.FONT_HERSHEY_SIMPLEX,
+                                0.62, (20, 20, 20), 4, cv2.LINE_AA)
+                    cv2.putText(frame, tag, (x, max(30, y - 9)), cv2.FONT_HERSHEY_SIMPLEX,
+                                0.62, (70, 255, 90), 2, cv2.LINE_AA)
     except Exception as exc:
         frame = np.zeros((int(height), int(width), 3), dtype=np.uint8)
         _draw_text(frame, [f"Render error: {exc}"], 20, 60, (80, 80, 255))
 
-    hud = _build_hud(
-        scene_name=scene_name,
-        layout_path=layout_path,
-        loaded_items=loaded_items,
-        object_count=object_count,
-        skipped=skipped,
-        selected_idx=selected_idx,
-        camera_pos=camera_pos,
-        yaw=yaw,
-        pitch=pitch,
-        debug_offset=debug_offset,
-        offset_step=offset_step,
-        offset_scope=offset_scope,
-    )
-    _draw_text(frame, hud, 10, 24, (80, 255, 255))
+    if show_hud:
+        hud = _build_hud(
+            scene_name=scene_name,
+            layout_path=layout_path,
+            loaded_items=loaded_items,
+            object_count=object_count,
+            skipped=skipped,
+            selected_idx=selected_idx,
+            camera_pos=camera_pos,
+            yaw=yaw,
+            pitch=pitch,
+            debug_offset=debug_offset,
+            offset_step=offset_step,
+            offset_scope=offset_scope,
+        )
+        _draw_text(frame, hud, 10, 24, (80, 255, 255))
     if show_help:
         y0 = int(height) - len(help_lines) * 22 - 16
         _draw_text(frame, help_lines, 10, max(24, y0), (80, 255, 80))
@@ -871,7 +974,7 @@ def _apply_viewer_key(
     if key in (ord("."), ord(">"), ord("0")) and loaded_items:
         state["selected_idx"] = (int(state.get("selected_idx", 0)) + 1) % len(loaded_items)
     if key == ord("v") and loaded_items:
-        camera_pos, yaw, pitch = _focus_object(loaded_items[int(state.get("selected_idx", 0))])
+        camera_pos, yaw, pitch = _focus_object(loaded_items[int(state.get("selected_idx", 0))], sim)
         state["camera_pos"] = camera_pos
         state["yaw"] = yaw
         state["pitch"] = pitch
@@ -1175,7 +1278,7 @@ def _save_headless_snapshots(
     saved.append(overview_path)
 
     for idx, item in enumerate(loaded_items[: max(0, int(max_focus))]):
-        camera_pos, yaw, pitch = _focus_object(item)
+        camera_pos, yaw, pitch = _focus_object(item, sim)
         frame = _render_frame(
             sim=sim,
             scene_name=scene_name,
@@ -1191,6 +1294,7 @@ def _save_headless_snapshots(
             height=height,
             show_help=False,
             help_lines=help_lines,
+            show_hud=False,
         )
         safe_model = str(item.get("model_id", f"object_{idx}")).replace("/", "_")
         out_path = screenshot_dir / f"{scene_name}_focus_{idx + 1:02d}_{safe_model}_{timestamp}.png"

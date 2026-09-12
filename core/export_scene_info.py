@@ -46,6 +46,11 @@ try:
 except ImportError:
     habitat_sim = None
 
+try:
+    import trimesh
+except ImportError:
+    trimesh = None
+
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_DATA_DIR = str(resolve_hm3d_root())
@@ -109,23 +114,19 @@ def make_sim(scene_glb_path, dataset_config):
 
     说明:
         - 此处不做物理仿真，只读取语义图与包围盒，所以 enable_physics=False。
-        - scene_id 使用 glb 的绝对路径，兼容 val/minival split。
+        - scene_id 使用 glb 的绝对路径，兼容 train/val/minival split。
         - 传感器配置是最小可运行配置，脚本并不依赖图像输出。
     """
     sim_cfg = habitat_sim.SimulatorConfiguration()
     sim_cfg.scene_dataset_config_file = os.path.abspath(dataset_config)
     sim_cfg.scene_id = os.path.abspath(scene_glb_path)
     sim_cfg.enable_physics = False
-    sim_cfg.gpu_device_id = 0
     sim_cfg.load_semantic_mesh = True
 
-    sensor = habitat_sim.CameraSensorSpec()
-    sensor.uuid = "color"
-    sensor.sensor_type = habitat_sim.SensorType.COLOR
-    sensor.resolution = [480, 640]
-
     agent_cfg = habitat_sim.agent.AgentConfiguration()
-    agent_cfg.sensor_specifications = [sensor]
+    # Export only reads scene/semantic graphs. Keeping the agent sensor-free
+    # avoids initializing an EGL renderer on headless or CPU-only machines.
+    agent_cfg.sensor_specifications = []
 
     cfg = habitat_sim.Configuration(sim_cfg, [agent_cfg])
     return habitat_sim.Simulator(cfg)
@@ -256,6 +257,81 @@ def _obb_to_aabb_info(obb_center, obb_half_extents):
     }
 
 
+def _semantic_mesh_color_bboxes(semantic_glb_path):
+    """Recover instance AABBs from HM3D semantic mesh colors.
+
+    Some Habitat-Sim builds expose semantic IDs/categories but return zero
+    AABB/OBB values.  HM3D still stores the instance identity as a material
+    texture color in ``semantic.glb``.  Trimesh's ``to_color`` converts those
+    textures to vertex colors, after which bounds can be accumulated per RGB.
+    """
+    if trimesh is None or not os.path.isfile(semantic_glb_path):
+        return {}
+    try:
+        loaded = trimesh.load(semantic_glb_path, force="scene")
+        geometries = loaded.dump() if isinstance(loaded, trimesh.Scene) else [loaded]
+    except Exception as exc:
+        print(f"  [Warning] semantic mesh bbox fallback unavailable: {exc}")
+        return {}
+
+    bounds = {}
+    for geom in geometries:
+        vertices = np.asarray(getattr(geom, "vertices", []), dtype=np.float64)
+        faces = np.asarray(getattr(geom, "faces", []), dtype=np.int64)
+        if vertices.ndim != 2 or len(vertices) == 0 or faces.ndim != 2 or len(faces) == 0:
+            continue
+        # HM3D GLBs are stored Z-up, while Habitat-Sim exposes Y-up world
+        # coordinates. Match Habitat's convention before publishing bounds.
+        vertices = vertices[:, [0, 2, 1]]
+        vertices[:, 2] *= -1.0
+        try:
+            visual = geom.visual.to_color() if hasattr(geom.visual, "to_color") else geom.visual
+            colors = np.asarray(visual.vertex_colors)[:, :3]
+        except Exception:
+            continue
+        if len(colors) != len(vertices):
+            continue
+        face_rgb = np.rint(colors[faces[:, :3]].mean(axis=1)).astype(np.uint8)
+        for rgb in np.unique(face_rgb, axis=0):
+            mask = np.all(face_rgb == rgb, axis=1)
+            points = vertices[np.unique(faces[mask, :3])]
+            if not len(points):
+                continue
+            key = tuple(int(x) for x in rgb)
+            cur_min, cur_max = points.min(axis=0), points.max(axis=0)
+            if key in bounds:
+                cur_min = np.minimum(cur_min, bounds[key][0])
+                cur_max = np.maximum(cur_max, bounds[key][1])
+            bounds[key] = (cur_min, cur_max)
+    return bounds
+
+
+def _bbox_for_semantic_color(color_hex, color_bboxes):
+    text = str(color_hex or "").strip().lstrip("#")
+    if len(text) != 6 or not color_bboxes:
+        return None
+    try:
+        target = np.asarray([int(text[i:i + 2], 16) for i in (0, 2, 4)], dtype=np.int16)
+    except ValueError:
+        return None
+    key = tuple(int(x) for x in target)
+    match = color_bboxes.get(key)
+    if match is None:
+        keys = np.asarray(list(color_bboxes), dtype=np.int16)
+        distances = np.linalg.norm(keys - target[None, :], axis=1)
+        index = int(np.argmin(distances))
+        if float(distances[index]) > 6.0:
+            return None
+        match = color_bboxes[tuple(int(x) for x in keys[index])]
+    min_pt, max_pt = match
+    return {
+        "min": [round(float(x), 4) for x in min_pt],
+        "max": [round(float(x), 4) for x in max_pt],
+        "center": [round(float(x), 4) for x in ((min_pt + max_pt) / 2.0)],
+        "size": [round(float(x), 4) for x in (max_pt - min_pt)],
+    }
+
+
 def export_scene(scene_name, data_dir, dataset_config, output_dir):
     """
     导出单个场景信息并写入 JSON。
@@ -284,11 +360,13 @@ def export_scene(scene_name, data_dir, dataset_config, output_dir):
     scene_id = scene_paths.scene_id
     basis_glb = str(scene_paths.stage_glb)
     semantic_txt = str(scene_paths.semantic_txt)
+    semantic_glb = str(scene_paths.semantic_glb)
     navmesh = str(scene_paths.navmesh)
     dataset_config = str(dataset_config or scene_paths.dataset_config)
 
     # 1) 解析 semantic.txt，得到语义 ID 到类别/房间的映射。
     txt_entries = parse_semantic_txt(semantic_txt)
+    semantic_color_bboxes = _semantic_mesh_color_bboxes(semantic_glb)
 
     # 2) 通过 habitat_sim 读取语义场景与对象几何信息。
     sim = make_sim(basis_glb, dataset_config)
@@ -358,7 +436,12 @@ def export_scene(scene_name, data_dir, dataset_config, output_dir):
                 aabb_info = obb_fallback
                 bbox_source = "obb_fallback"
             else:
-                bbox_source = "zero"
+                mesh_fallback = _bbox_for_semantic_color(color_hex, semantic_color_bboxes)
+                if mesh_fallback is not None and not _bbox_is_zero(mesh_fallback):
+                    aabb_info = mesh_fallback
+                    bbox_source = "semantic_mesh_color"
+                else:
+                    bbox_source = "zero"
 
         obj_info = {
             "id": sid,
@@ -431,6 +514,21 @@ def export_scene(scene_name, data_dir, dataset_config, output_dir):
             },
         })
 
+    # Habitat-Sim versions which return zero semantic object bounds generally
+    # return a zero scene bound as well. Keep scene-level metadata useful by
+    # taking the union of the recovered object bounds.
+    if _bbox_is_zero(scene_aabb_info):
+        valid_object_boxes = [o["aabb"] for o in objects_list if not _bbox_is_zero(o["aabb"])]
+        if valid_object_boxes:
+            scene_min = np.asarray([b["min"] for b in valid_object_boxes]).min(axis=0)
+            scene_max = np.asarray([b["max"] for b in valid_object_boxes]).max(axis=0)
+            scene_aabb_info = {
+                "min": [round(float(x), 4) for x in scene_min],
+                "max": [round(float(x), 4) for x in scene_max],
+                "center": [round(float(x), 4) for x in ((scene_min + scene_max) / 2.0)],
+                "size": [round(float(x), 4) for x in (scene_max - scene_min)],
+            }
+
     # 5) 类别统计按数量降序，便于快速观察场景主导类别。
     categories_sorted = sorted(category_counter.items(), key=lambda x: -x[1])
 
@@ -478,7 +576,7 @@ def export_scene(scene_name, data_dir, dataset_config, output_dir):
 
 
 def find_scenes(data_dir):
-    """Return merged valid scenes from val/minival, de-duplicated with val priority."""
+    """Return merged valid scenes from train/val/minival, de-duplicated by priority."""
     return list_available_scenes(require_semantic=True, root=Path(data_dir))
 
 
@@ -495,7 +593,7 @@ def main():
     parser.add_argument("--scene", type=str, help="场景名, 例如 00808-y9hTuugGdiq")
     parser.add_argument("--all", action="store_true", help="导出 data_dir 下所有场景")
     parser.add_argument("--data-dir", type=str, default=DEFAULT_DATA_DIR,
-                        help="场景数据根目录 (默认优先 data/scenes/hm3d，兼容旧 hm3d，自动合并 val/minival)")
+                        help="场景数据根目录 (默认优先 data/scenes/hm3d，兼容旧 hm3d，自动合并 train/val/minival)")
     parser.add_argument("--dataset-config", type=str, default=None,
                         help="scene_dataset_config.json 路径（可选；默认按场景 split 自动选择）")
     parser.add_argument("--output-dir", type=str, default=None,

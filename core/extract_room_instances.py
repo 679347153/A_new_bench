@@ -70,6 +70,15 @@ except ImportError:
 
 DEFAULT_DATA_DIR = resolve_hm3d_root()
 DEFAULT_OUTPUT_DIR = resolve_results_root() / "room_instances"
+_TRIMESH_SCENE_CACHE: Dict[str, Any] = {}
+
+
+def _load_trimesh_scene(path: Path) -> Any:
+    """Load each large HM3D mesh once per process during batch extraction."""
+    key = str(path.resolve())
+    if key not in _TRIMESH_SCENE_CACHE:
+        _TRIMESH_SCENE_CACHE[key] = trimesh.load(path, force="scene")
+    return _TRIMESH_SCENE_CACHE[key]
 
 
 def _warn(message: str) -> None:
@@ -550,6 +559,11 @@ def _extract_mesh_face_colors(geom: Any) -> Optional[np.ndarray]:
             return arr[:, :3].astype(np.uint8, copy=False)
 
     vertex_colors = getattr(visual, "vertex_colors", None)
+    if vertex_colors is None and hasattr(visual, "to_color"):
+        try:
+            vertex_colors = visual.to_color().vertex_colors
+        except Exception:
+            vertex_colors = None
     vertices = np.asarray(getattr(geom, "vertices", []), dtype=np.float32)
     faces = np.asarray(getattr(geom, "faces", []), dtype=np.int64)
     if vertex_colors is None or len(vertices) == 0 or len(faces) == 0:
@@ -595,6 +609,33 @@ def _sample_points_from_triangles(vertices: np.ndarray, faces: np.ndarray, num_p
     bary_c = sqrt_r1 * r2
     points = bary_a * chosen[:, 0] + bary_b * chosen[:, 1] + bary_c * chosen[:, 2]
     return np.round(points.astype(np.float32), 4)
+
+
+def _hm3d_asset_to_world_points(points: np.ndarray) -> np.ndarray:
+    """Convert raw HM3D GLB vertices (Z-up) to Habitat world coordinates (Y-up)."""
+    arr = np.asarray(points, dtype=np.float32)
+    if arr.ndim != 2 or arr.shape[1] < 3:
+        return arr
+    converted = arr[:, :3][:, [0, 2, 1]].copy()
+    converted[:, 2] *= -1.0
+    return converted
+
+
+def _points_agree_with_instance_aabb(points: np.ndarray, instance: Dict[str, Any]) -> bool:
+    """Reject mesh points in a mismatched coordinate frame or from the wrong instance."""
+    bbox_pair = _get_instance_bbox_for_mesh_crop(instance)
+    arr = np.asarray(points, dtype=np.float32)
+    if bbox_pair is None or arr.ndim != 2 or arr.shape[1] < 3 or len(arr) == 0:
+        return True
+    min_arr, max_arr = bbox_pair
+    extent = np.maximum(max_arr - min_arr, 1e-4)
+    pad = np.maximum(extent * 0.12, 0.06)
+    inside = np.all(
+        (arr[:, :3] >= (min_arr - pad)[None, :])
+        & (arr[:, :3] <= (max_arr + pad)[None, :]),
+        axis=1,
+    )
+    return float(np.mean(inside)) >= 0.75
 
 
 def _populate_instance_color_from_semantic_txt(
@@ -647,7 +688,7 @@ def _extract_point_cloud_from_semantic_mesh(
         return None
 
     try:
-        loaded = trimesh.load(scene_paths.semantic_glb, force="scene")
+        loaded = _load_trimesh_scene(scene_paths.semantic_glb)
     except Exception as exc:
         _warn(f"加载 semantic.glb 失败: {exc}")
         return None
@@ -680,7 +721,9 @@ def _extract_point_cloud_from_semantic_mesh(
             match_mask = exact_mask
         else:
             # 兼容少量颜色量化误差：允许与目标色在 RGB 欧氏距离 <= 6 的面片作为近似匹配。
-            diff = per_face_int - target_arr[None, :]
+            # Promote before squaring; int16 multiplication can overflow for
+            # large RGB differences and produce invalid sqrt warnings.
+            diff = per_face_int.astype(np.int32) - target_arr[None, :].astype(np.int32)
             dist = np.sqrt(np.sum(diff * diff, axis=1))
             near_mask = dist <= 6.0
             if np.any(near_mask):
@@ -690,7 +733,7 @@ def _extract_point_cloud_from_semantic_mesh(
 
         matched_faces = faces[match_mask][:, :3]
         unique_vids, inverse = np.unique(matched_faces.reshape(-1), return_inverse=True)
-        local_vertices = vertices[unique_vids][:, :3]
+        local_vertices = _hm3d_asset_to_world_points(vertices[unique_vids][:, :3])
         local_faces = inverse.reshape(-1, 3).astype(np.int64) + vertex_offset
 
         collected_vertices.append(local_vertices)
@@ -788,7 +831,7 @@ def _extract_point_cloud_from_semantic_mesh_by_bbox(
         return None, stats
 
     try:
-        loaded = trimesh.load(scene_paths.semantic_glb, force="scene")
+        loaded = _load_trimesh_scene(scene_paths.semantic_glb)
     except Exception as exc:
         stats["reason"] = "semantic_glb_load_failed"
         stats["error"] = str(exc)
@@ -815,6 +858,7 @@ def _extract_point_cloud_from_semantic_mesh_by_bbox(
         faces = np.asarray(getattr(geom, "faces", []), dtype=np.int64)
         if vertices.ndim != 2 or vertices.shape[1] < 3 or faces.ndim != 2 or faces.shape[1] < 3 or len(faces) == 0:
             continue
+        vertices = _hm3d_asset_to_world_points(vertices)
         total_faces += int(len(faces))
 
         tris = vertices[faces[:, :3]]
@@ -1089,7 +1133,7 @@ def _extract_instance_mesh_points_by_semantic_color(
         return None
 
     try:
-        loaded = trimesh.load(scene_paths.stage_glb, force="scene")
+        loaded = _load_trimesh_scene(scene_paths.stage_glb)
     except Exception:
         return None
 
@@ -1105,6 +1149,7 @@ def _extract_instance_mesh_points_by_semantic_color(
         vertices = np.asarray(getattr(geom, "vertices", []), dtype=np.float32)
         if faces.ndim != 2 or faces.shape[1] != 3 or len(faces) == 0 or len(vertices) == 0:
             continue
+        vertices = _hm3d_asset_to_world_points(vertices)
 
         visual = getattr(geom, "visual", None)
         face_colors = None
@@ -1333,7 +1378,9 @@ def get_instance_point_cloud(
         data_dir=data_dir,
         num_points=num_points,
     )
-    if semantic_mesh_points is not None and len(semantic_mesh_points) > 0:
+    if semantic_mesh_points is not None and len(semantic_mesh_points) > 0 and _points_agree_with_instance_aabb(
+        semantic_mesh_points, instance
+    ):
         generation_trace.append("point_cloud_source=semantic_mesh_by_color")
         return {
             "scene_name": scene_name,
@@ -1345,6 +1392,11 @@ def get_instance_point_cloud(
                 "trace": generation_trace,
             },
         }
+    if semantic_mesh_points is not None and len(semantic_mesh_points) > 0:
+        generation_trace.append("semantic_mesh_points_rejected_by_instance_aabb")
+        _warn(
+            f"semantic.glb points rejected by AABB validation: instance_id={int(instance_id)}."
+        )
     generation_trace.append("semantic_mesh_by_color_unavailable")
     _warn(
         "semantic.glb 颜色匹配未命中，继续尝试 habitat-sim 直读与其他回退策略。"

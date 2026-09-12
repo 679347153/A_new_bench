@@ -197,10 +197,20 @@ class HabitatLayoutAdapter:
         pf = self.pathfinder
         s = pose_to_array(start) if isinstance(start, Pose) else np.asarray(start[:3], dtype=np.float32)
         g = pose_to_array(goal) if isinstance(goal, Pose) else np.asarray(goal[:3], dtype=np.float32)
-        try:
-            distance = pf.geodesic_distance(s, g)
-        except TypeError:
-            distance = pf.geodesic_distance(s, [g])
+        if hasattr(pf, "geodesic_distance"):
+            try:
+                distance = pf.geodesic_distance(s, g)
+            except TypeError:
+                distance = pf.geodesic_distance(s, [g])
+        else:
+            # Habitat-Sim 0.3.x exposes shortest-path queries through
+            # PathFinder.find_path() rather than geodesic_distance().
+            path = habitat_sim.ShortestPath()
+            path.requested_start = s
+            path.requested_end = g
+            if not pf.find_path(path):
+                return float("inf")
+            distance = path.geodesic_distance
         if distance is None or not np.isfinite(distance):
             return float("inf")
         return float(distance)

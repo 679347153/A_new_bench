@@ -238,6 +238,7 @@ from extract_room_instances import DEFAULT_DATA_DIR
 from object_catalog import object_entries_from_args
 from place_objects_on_instances import place_objects_on_instances
 from project_paths import OBJECT_CATALOG_PATH, default_object_config_dirs_str, resolve_results_root
+from qwen_credentials import load_dashscope_api_key
 from sample_and_place_objects import (
     DEFAULT_IMAGES_DIR,
     DEFAULT_LAYOUTS_DIR,
@@ -394,6 +395,8 @@ def _ensure_room_queries(args: argparse.Namespace) -> None:
         str(args.object_datasets),
         "--output-dir",
         args.rooms_info_dir,
+        "--data-dir",
+        str(args.data_dir),
         "--max-tokens",
         str(args.room_query_max_tokens),
     ]
@@ -529,6 +532,14 @@ def _start_assignment_client(args: argparse.Namespace) -> Tuple[bool, Optional[S
     if OpenAI is None:
         print("[Warning] openai package unavailable; using heuristic assignment.", file=sys.stderr)
         return False, None, None
+    dashscope_key = load_dashscope_api_key()
+    if dashscope_key:
+        base_url = os.environ.get(
+            "DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        )
+        client = OpenAI(api_key=dashscope_key, base_url=base_url, timeout=args.timeout)
+        print(f"[Info] Assignment LLM using DashScope direct API: {base_url}")
+        return True, None, client
     if not (args.ssh_host and args.ssh_user and (args.ssh_key or args.ssh_password)):
         print("[Warning] SSH args incomplete; using heuristic assignment.", file=sys.stderr)
         return False, None, None
@@ -643,6 +654,8 @@ def _assign_objects(
                 "backup_instance_ids": decision.get("backup_instance_ids", []),
                 "confidence_score": float(decision.get("confidence_score", 0.5)),
                 "reasoning": str(decision.get("reasoning", "")),
+                "orientation_mode": str(decision.get("orientation_mode", "free")),
+                "yaw_offset_deg": float(decision.get("yaw_offset_deg", 0.0)),
                 "source": source if not llm_error else "heuristic_assignment",
             }
         )
@@ -1057,6 +1070,7 @@ def _run_scene_batch(args: argparse.Namespace) -> Tuple[int, Path]:
                     object_set=args.object_set,
                     limit_objects=int(args.limit_objects),
                     objects_dir=args.objects_dir,
+                    data_dir=args.data_dir,
                 )
                 if not sampled_layout or not isinstance(sampled_layout.get("objects"), list):
                     raise RuntimeError("sampling produced no layout objects")

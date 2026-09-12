@@ -4,6 +4,7 @@ from __future__ import annotations
 """Chronological object state propagation for lifespan generation."""
 
 from copy import deepcopy
+import re
 from typing import Any, Dict, List, Mapping, Sequence, Tuple
 
 
@@ -65,6 +66,9 @@ def _apply_effect(states: List[JsonDict], effect: Mapping[str, Any], event: Mapp
         if effect_type == "MOVE":
             state["location_state"] = str(effect.get("target_state", "active"))
             state["semantic_target"] = str(effect.get("target", "activity_surface"))
+            event_rooms = event.get("rooms", [])
+            if isinstance(event_rooms, list) and event_rooms:
+                state["semantic_room_type"] = str(event_rooms[0])
         elif effect_type == "CLEANUP":
             state["location_state"] = "home"
             state["semantic_target"] = (state.get("home_anchor", {}) or {}).get("receptacle_category", "home_anchor")
@@ -84,6 +88,15 @@ def _apply_effect(states: List[JsonDict], effect: Mapping[str, Any], event: Mapp
         elif effect_type == "INTRODUCE":
             state["exists"] = True
             state["location_state"] = "home"
+        elif effect_type == "DAMAGE":
+            state["condition"] = str(effect.get("condition", "damaged"))
+        elif effect_type == "REPAIR":
+            state["condition"] = "normal"
+        elif effect_type == "REPLACE":
+            state["exists"] = True
+            state["condition"] = "normal"
+            state["location_state"] = "home"
+            state["quantity"] = max(1, int(state.get("quantity", 1)))
         else:
             continue
         state["last_changed_at"] = f"day_{int(event.get('day_index', 0)):02d}_{event.get('time', '')}"
@@ -94,6 +107,26 @@ def _apply_effect(states: List[JsonDict], effect: Mapping[str, Any], event: Mapp
         if effect_type in {"MOVE", "CLEANUP"} and changed >= 3:
             break
     return changed, changed_ids
+
+
+def _time_minutes(value: Any) -> int:
+    """Convert HH:MM, H:MM AM/PM, and time ranges to minutes.
+
+    For a range such as ``9:00 AM - 5:00 PM`` the start time is used because
+    that is when the activity begins affecting the scene.
+    """
+    text = str(value or "00:00").strip().upper()
+    match = re.search(r"(?<!\d)(\d{1,2})(?::(\d{1,2}))?\s*(AM|PM)?", text)
+    if not match:
+        return 0
+    hour = int(match.group(1))
+    minute = int(match.group(2) or 0)
+    meridiem = match.group(3)
+    if meridiem:
+        hour %= 12
+        if meridiem == "PM":
+            hour += 12
+    return max(0, min(23, hour)) * 60 + max(0, min(59, minute))
 
 
 def propagate_states(
@@ -109,46 +142,63 @@ def propagate_states(
     events = event_log.get("events", [])
     if not isinstance(events, list):
         events = []
-    events_by_day: Dict[int, List[JsonDict]] = {}
-    for event in events:
-        if isinstance(event, dict):
-            events_by_day.setdefault(int(event.get("day_index", 1)), []).append(event)
+    ordered_events = sorted(
+        (event for event in events if isinstance(event, dict)),
+        key=lambda event: (int(event.get("day_index", 1)), _time_minutes(event.get("time", ""))),
+    )
+    snapshot_points = sorted(
+        (
+            (day, _time_minutes(time_text), str(time_text))
+            for day in range(1, int(duration_days) + 1)
+            for time_text in snapshots_per_day
+        ),
+        key=lambda item: (item[0], item[1]),
+    )
 
-    snapshot_index = 0
-    for day in range(1, int(duration_days) + 1):
-        day_changed_ids: List[str] = []
-        day_event_ids: List[str] = []
-        for event in sorted(events_by_day.get(day, []), key=lambda x: str(x.get("time", ""))):
-            day_event_ids.append(str(event.get("event_id", "")))
+    event_index = 0
+    changed_since_snapshot: List[str] = []
+    events_since_snapshot: List[str] = []
+    for snapshot_index, (day, snapshot_minute, time_text) in enumerate(snapshot_points):
+        while event_index < len(ordered_events):
+            event = ordered_events[event_index]
+            event_key = (int(event.get("day_index", 1)), _time_minutes(event.get("time", "")))
+            if event_key > (day, snapshot_minute):
+                break
+            event_changed_ids: List[str] = []
             for effect in event.get("effects", []) if isinstance(event.get("effects"), list) else []:
                 if isinstance(effect, dict):
                     _, changed_ids = _apply_effect(states, effect, event)
-                    day_changed_ids.extend(changed_ids)
+                    event_changed_ids.extend(changed_ids)
+            event_id = str(event.get("event_id", ""))
+            events_since_snapshot.append(event_id)
+            changed_since_snapshot.extend(event_changed_ids)
             history.append(
                 {
-                    "event_id": event.get("event_id", ""),
-                    "day_index": day,
+                    "event_id": event_id,
+                    "day_index": int(event.get("day_index", 1)),
                     "time": event.get("time", ""),
-                    "changed_object_ids": sorted(set(day_changed_ids)),
+                    "changed_object_ids": sorted(set(event_changed_ids)),
                     "present_object_count": sum(1 for state in states if state.get("exists", True)),
                     "absent_object_count": sum(1 for state in states if not state.get("exists", True)),
                 }
             )
-        for time_text in snapshots_per_day:
-            snapshot_requests.append(
-                {
-                    "snapshot_index": snapshot_index,
-                    "day_index": day,
-                    "time": str(time_text),
-                    "time_label": f"day_{day:02d}_{str(time_text).replace(':', '')}",
-                    "event_ids": day_event_ids,
-                    "changed_object_ids": sorted(set(day_changed_ids)),
-                    "present_object_count": sum(1 for state in states if state.get("exists", True)),
-                    "absent_object_count": sum(1 for state in states if not state.get("exists", True)),
-                    "objects": deepcopy(states),
-                }
-            )
-            snapshot_index += 1
+            event_index += 1
+
+        snapshot_requests.append(
+            {
+                "snapshot_index": snapshot_index,
+                "day_index": day,
+                "time": time_text,
+                "time_label": f"day_{day:02d}_{time_text.replace(':', '')}",
+                "event_ids": list(events_since_snapshot),
+                "changed_object_ids": sorted(set(changed_since_snapshot)),
+                "present_object_count": sum(1 for state in states if state.get("exists", True)),
+                "absent_object_count": sum(1 for state in states if not state.get("exists", True)),
+                "objects": deepcopy(states),
+            }
+        )
+        changed_since_snapshot = []
+        events_since_snapshot = []
     return {
         "schema_version": "1.0",
         "initial_object_count": len(states),

@@ -644,6 +644,7 @@ def sample_object_positions(
     object_set: Optional[str] = None,
     limit_objects: int = 0,
     objects_dir: str = "",
+    data_dir: Optional[str] = None,
 ) -> Optional[Dict]:
     """
     Sample an object position for each image based on probabilities.
@@ -759,7 +760,12 @@ def sample_object_positions(
         print("[Error] No objects sampled")
         return None
 
-    scene_paths = resolve_scene_paths(scene_name, require_semantic=True)
+    scene_root = Path(data_dir).expanduser() if data_dir else None
+    scene_paths = resolve_scene_paths(
+        scene_name,
+        require_semantic=True,
+        root=scene_root,
+    )
     if scene_paths is None:
         print(f"[Error] Scene not found in merged hm3d splits or missing semantic.txt: {scene_name}")
         return None
