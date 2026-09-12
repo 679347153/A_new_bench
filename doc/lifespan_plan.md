@@ -4,10 +4,10 @@
 
 核心目标不是生成“随机变化的房间”，而是生成一个具有**稳定规律、短期随机性、长期变化和事件因果关系**的家庭世界，使机器人能够通过多次访问同一场景逐步习得：
 
-[
+$$
 P(\text{object state/location}\mid
 \text{time, history, household})
-]
+$$
 
 以及这种规律随时间发生变化时如何更新已有记忆。
 
@@ -23,7 +23,7 @@ P(\text{object state/location}\mid
 
 所有活动和事件最终都被转化为对环境状态的显式修改，包括：
 
-[
+$$
 \text{Move},
 \quad
 \text{Consume},
@@ -39,11 +39,11 @@ P(\text{object state/location}\mid
 \text{Repair},
 \quad
 \text{Replace}.
-]
+$$
 
 与独立生成每一天不同，整个一个月采用**连续状态传播**：
 
-[
+$$
 S_{t_0}
 \xrightarrow{e_1}
 S_{t_1}
@@ -52,47 +52,47 @@ S_{t_2}
 \rightarrow \cdots
 \xrightarrow{e_N}
 S_{t_N},
-]
+$$
 
 因此 Day 15 的场景状态严格建立在 Day 1–14 已经发生的所有行为和事件之上。
 
 整个生成系统可以概括为
 
-[
+$$
 \boxed{
 \begin{aligned}
 &\text{Static House}
 +\text{Persistent Residents}
 +\text{Geo-temporal Context}
-\
-&\qquad\downarrow\
+\\
+&\qquad\downarrow\\
 &\text{Household Profile Initialization}
-\
-&\qquad\downarrow\
+\\
+&\qquad\downarrow\\
 &\text{Monthly Event Planning}
-\
-&\qquad\downarrow\
+\\
+&\qquad\downarrow\\
 &\text{Weekly Routine Modeling}
-\
-&\qquad\downarrow\
+\\
+&\qquad\downarrow\\
 &\text{Daily Schedule Generation}
-\
-&\qquad\downarrow\
+\\
+&\qquad\downarrow\\
 &\text{Fine-grained Indoor Activities}
-\
-&\qquad\downarrow\
+\\
+&\qquad\downarrow\\
 &\text{Activity/Event State Transition}
-\
-&\qquad\downarrow\
+\\
+&\qquad\downarrow\\
 &\text{Long-term Object Lifecycle Simulation}
-\
-&\qquad\downarrow\
+\\
+&\qquad\downarrow\\
 &\text{Scene Grounding and Physical Validation}
-\
-&\qquad\downarrow\
+\\
+&\qquad\downarrow\\
 &{S_{t_1},S_{t_2},\ldots,S_{t_K}}.
 \end{aligned}}
-]
+$$
 
 ---
 
@@ -100,19 +100,19 @@ S_{t_N},
 
 给定时间区间
 
-[
+$$
 [t_s,t_e],
-]
+$$
 
 其中
 
-[
+$$
 t_e-t_s\approx 1\text{ month},
-]
+$$
 
 定义一个长期动态家庭场景为
 
-[
+$$
 \mathcal S=
 (
 \mathcal H,
@@ -126,7 +126,7 @@ t_e-t_s\approx 1\text{ month},
 \mathcal C,
 t_s,t_e
 ).
-]
+$$
 
 其中：
 
@@ -144,7 +144,7 @@ t_s,t_e
 
 对于任意时间 (t)，场景状态定义为
 
-[
+$$
 S_t=
 (
 \mathcal H,
@@ -154,25 +154,25 @@ S_t=
 \mathcal O_t,
 \mathcal X_t
 ).
-]
+$$
 
 其中房屋结构在一个月内保持不变，而居民活动和长期事件不断改变
 
-[
+$$
 \mathcal O_t,\mathcal X_t.
-]
+$$
 
 换言之：
 
-[
+$$
 \mathcal H_t=\mathcal H,
-]
+$$
 
 但
 
-[
+$$
 \mathcal X_t\neq\mathcal X_{t+\Delta t}.
-]
+$$
 
 ---
 
@@ -180,7 +180,7 @@ S_t=
 
 为了描述长期变化，单纯记录 object pose 不够。每个物体实例 (o) 被赋予一个长期状态：
 
-[
+$$
 x_o(t)=
 (
 b_o,
@@ -193,7 +193,7 @@ h_o,
 u_o,
 t_o^{last}
 ).
-]
+$$
 
 其中：
 
@@ -211,44 +211,44 @@ t_o^{last}
 
 其中
 
-[
+$$
 b_o(t)\in{0,1}.
-]
+$$
 
 因此已经损坏并丢弃的物品虽然仍属于历史对象集合
 
-[
+$$
 o\in\mathcal O,
-]
+$$
 
 但在当前场景中：
 
-[
+$$
 b_o(t)=0.
-]
+$$
 
 对于可消耗类别 (c)，进一步定义库存：
 
-[
+$$
 Q_c(t)
-======
+=
 
 \sum_{o\in\mathcal O}
 \mathbb I[c_o=c]
 \mathbb I[b_o(t)=1].
-]
+$$
 
 例如：
 
-[
+$$
 Q_{\text{Apple}}(t)=6.
-]
+$$
 
 早餐消费一个苹果后：
 
-[
+$$
 Q_{\text{Apple}}(t+1)=5.
-]
+$$
 
 这样既可以在高层表达“苹果剩几个”，又可以在实际仿真中将每一个 Apple 建模成独立 3D 实例。
 
@@ -266,9 +266,9 @@ Q_{\text{Apple}}(t+1)=5.
 
 于是整个状态演化可以抽象为
 
-[
+$$
 X_{t+\Delta t}
-==============
+=
 
 F_{\mathrm{fast}}
 \circ
@@ -276,7 +276,7 @@ F_{\mathrm{medium}}
 \circ
 F_{\mathrm{slow}}
 (X_t).
-]
+$$
 
 Fast dynamics 主要产生**位置分布规律**。
 
@@ -286,23 +286,23 @@ Medium dynamics 产生**数量和周期状态变化**。
 
 例如：
 
-[
+$$
 Apple:
 8\rightarrow7\rightarrow5\rightarrow3
 \rightarrow1\rightarrow0
 \rightarrow8.
-]
+$$
 
 Slow dynamics 则使场景本身出现 distribution shift，例如：
 
-[
+$$
 CoffeeMachine:
 Absent
 \rightarrow
 Introduced
 \rightarrow
 FrequentlyUsed.
-]
+$$
 
 ---
 
@@ -312,7 +312,7 @@ FrequentlyUsed.
 
 我们为每个家庭采样一次长期 latent household profile：
 
-[
+$$
 \Theta_H=
 {
 \Theta_U,
@@ -322,7 +322,7 @@ FrequentlyUsed.
 \Theta_S,
 \Theta_E
 }.
-]
+$$
 
 其中包括居民属性、routine、placement preference、inventory habit、shopping habit 和 special-event propensity。
 
@@ -345,15 +345,15 @@ FrequentlyUsed.
 
 因此：
 
-[
+$$
 P(X_t)
 \neq
 P(X_t\mid t)
-]
+$$
 
 而应表示成：
 
-[
+$$
 P(
 X_t
 \mid
@@ -362,7 +362,7 @@ C_t,
 X_{<t},
 E_{<t}
 ).
-]
+$$
 
 这也是整个数据集产生“可学习长期规律”的根本来源。
 
@@ -372,14 +372,14 @@ E_{<t}
 
 设长期居住居民集合为
 
-[
+$$
 \mathcal U=
 {u_1,u_2,\ldots,u_N}.
-]
+$$
 
 每一个居民拥有自己的 profile：
 
-[
+$$
 \theta_i=
 (
 Age,
@@ -391,13 +391,13 @@ RoomAssignment,
 Tidiness,
 ConsumptionHabit
 ).
-]
+$$
 
 其中 RoomAssignment 用于建立稳定的个人空间。例如：
 
-[
+$$
 u_i\rightarrow Bedroom_i.
-]
+$$
 
 卫生间可以是私人或共享。
 
@@ -407,13 +407,13 @@ u_i\rightarrow Bedroom_i.
 
 个人物体包括：
 
-[
+$$
 Phone_i,\ Laptop_i,\ Glasses_i,\ Bag_i,\ Mug_i.
-]
+$$
 
 对于个人物体：
 
-[
+$$
 P(
 u_i\text{ uses }o_i
 )
@@ -422,7 +422,7 @@ P(
 u_j\text{ uses }o_i
 ),
 \quad i\neq j.
-]
+$$
 
 因此物体位置可以携带明显的 resident-specific pattern。
 
@@ -432,22 +432,22 @@ u_j\text{ uses }o_i
 
 例如：
 
-[
+$$
 TVRemote,\ VacuumCleaner,\ Plates,
 KitchenUtensils.
-]
+$$
 
 多人均可以改变其位置。
 
 于是可能产生：
 
-[
+$$
 Sofa
 \xrightarrow{u_1}
 CoffeeTable
 \xrightarrow{u_2}
 TVStand.
-]
+$$
 
 因此 shared object 往往具有更高的位置熵，但仍受到家庭活动习惯约束。
 
@@ -459,24 +459,24 @@ TVStand.
 
 允许一个事件对应居民子集：
 
-[
+$$
 U_e\subseteq\mathcal U.
-]
+$$
 
 例如：
 
-[
+$$
 {u_1,u_2,u_3}
 \xrightarrow{\text{Family Dinner}}
 DiningRoom.
-]
+$$
 
 这类活动可以同时调用：
 
-[
+$$
 Plate,\ Fork,\ Cup,\ Food,\ Napkin,
 DiningChair.
-]
+$$
 
 因此，多居民之间不仅是 schedule 的简单叠加，而会形成真正的 household-level interactions。
 
@@ -486,7 +486,7 @@ DiningChair.
 
 每一天引入 context：
 
-[
+$$
 C_d=
 (
 Location,
@@ -496,25 +496,25 @@ Weekday,
 Season,
 Calendar
 ).
-]
+$$
 
 当前默认：
 
-[
+$$
 Location=\text{Los Angeles, USA}.
-]
+$$
 
 月份：
 
-[
+$$
 Month\in{1,\ldots,12}.
-]
+$$
 
 Location 和 Month 不直接强制某个事件发生，而是影响：
 
-[
+$$
 P(e\mid C_d,\Theta_H).
-]
+$$
 
 例如月度事件池可具有如下结构：
 
@@ -545,7 +545,7 @@ P(e\mid C_d,\Theta_H).
 
 整个一个月的行为生成采用：
 
-[
+$$
 \boxed{
 Month
 \rightarrow
@@ -555,7 +555,7 @@ Day
 \rightarrow
 Activity
 }
-]
+$$
 
 的层级结构。
 
@@ -567,13 +567,13 @@ Activity
 
 首先生成一个月级的 household calendar：
 
-[
+$$
 M_H=
 {
 E^{planned},
 E^{periodic}
 }.
-]
+$$
 
 这里不需要生成分钟级活动，只确定长期事件。
 
@@ -599,7 +599,7 @@ Monthly Calendar 是后续每日 schedule 的高层约束。
 
 对于每名居民 (u_i)，生成稳定 weekly template：
 
-[
+$$
 R_i=
 {
 R_i^{Mon},
@@ -607,66 +607,66 @@ R_i^{Tue},
 \ldots,
 R_i^{Sun}
 }.
-]
+$$
 
 例如工作日：
 
-[
+$$
 07{:}00~WakeUp
-]
+$$
 
-[
+$$
 07{:}20~Breakfast
-]
+$$
 
-[
+$$
 08{:}00~LeaveHome
-]
+$$
 
-[
+$$
 18{:}30~ReturnHome
-]
+$$
 
-[
+$$
 19{:}00~Dinner
-]
+$$
 
-[
+$$
 20{:}00~Leisure
-]
+$$
 
-[
+$$
 23{:}00~Sleep.
-]
+$$
 
 Saturday 可能对应：
 
-[
+$$
 Breakfast
 \rightarrow
 GroceryShopping
 \rightarrow
 Leisure.
-]
+$$
 
 Sunday：
 
-[
+$$
 Breakfast
 \rightarrow
 HouseCleaning
 \rightarrow
 FamilyActivity.
-]
+$$
 
 这种 weekly skeleton 在一个月内重复，使：
 
-[
+$$
 Day~1,
 Day~8,
 Day~15,
 Day~22
-]
+$$
 
 之间出现显著关联。
 
@@ -678,43 +678,43 @@ Day~22
 
 因此每一天的实际 activity time 从稳定 routine 周围采样：
 
-[
+$$
 t_a^{(d)}
 \sim
 \mathcal N(
 \mu_a,
 \sigma_a^2
 ).
-]
+$$
 
 例如：
 
-[
+$$
 \mu_{\text{breakfast}}=7{:}20.
-]
+$$
 
 实际一个月中可能出现：
 
-[
+$$
 07{:}12,\quad
 07{:}27,\quad
 07{:}18,\quad
 07{:}34.
-]
+$$
 
 因此数据具有：
 
-[
+$$
 \text{regularity}
 +
 \text{variation}.
-]
+$$
 
 每日最终计划可以表示为
 
-[
+$$
 D_i^d
-=====
+=
 
 F(
 R_i^{weekday(d)},
@@ -723,13 +723,13 @@ C_d,
 X_{d,0},
 \epsilon_i^d
 ).
-]
+$$
 
 其中：
 
-[
+$$
 \epsilon_i^d
-]
+$$
 
 表示当天的随机扰动。
 
@@ -741,53 +741,53 @@ Daily plan 中较粗粒度活动进一步展开成可以影响物体的 atomic a
 
 例如：
 
-[
+$$
 Breakfast
-]
+$$
 
 可以展开为：
 
-[
+$$
 OpenRefrigerator
-]
+$$
 
-[
+$$
 TakeApple
-]
+$$
 
-[
+$$
 TakePlate
-]
+$$
 
-[
+$$
 PrepareFood
-]
+$$
 
-[
+$$
 EatBreakfast
-]
+$$
 
-[
+$$
 PlacePlate
-]
+$$
 
-[
+$$
 PlaceMug
-]
+$$
 
-[
+$$
 WashDishes.
-]
+$$
 
 只有这些 fine-grained activities 才真正进入 environment transition module。
 
 因此：
 
-[
+$$
 \text{Semantic Schedule}
 \rightarrow
 \text{Object-interaction Activities}.
-]
+$$
 
 ---
 
@@ -795,20 +795,20 @@ WashDishes.
 
 一个月的事件集合分成：
 
-[
+$$
 \mathcal E=
 \mathcal E^{routine}
 \cup
 \mathcal E^{special}.
-]
+$$
 
 Routine event 包括高频行为，如早餐、洗澡、工作、看电视、做饭、洗碗和睡觉。
 
 Special event 则进一步包含：
 
-[
+$$
 \mathcal E^{special}
-====================
+=
 
 \mathcal E^{calendar}
 \cup
@@ -821,7 +821,7 @@ Special event 则进一步包含：
 \mathcal E^{personal}
 \cup
 \mathcal E^{stochastic}.
-]
+$$
 
 例如 Calendar Event 可以是 Thanksgiving，Social Event 可以是朋友来访，Inventory Event 可以是 grocery shopping，Maintenance Event 可以是 lamp failure，Personal Event 可以是 birthday，Stochastic Event 可以是临时聚餐。
 
@@ -833,7 +833,7 @@ Special event 则进一步包含：
 
 定义：
 
-[
+$$
 P(
 e_d
 \mid
@@ -842,32 +842,32 @@ C_d,
 X_d,
 E_{<d}
 ).
-]
+$$
 
 因此 event generator 同时考虑：
 
-[
+$$
 CalendarPrior,
 HouseholdPreference,
 CurrentState,
 HistoricalEvents.
-]
+$$
 
 例如 grocery shopping 一方面具有固定周期：
 
-[
+$$
 Saturday
 \rightarrow
 P(Shopping)\uparrow,
-]
+$$
 
 另一方面也由库存触发：
 
-[
+$$
 Q_{\text{Apple}}<\tau_{\text{Apple}}
 \rightarrow
 P(Shopping)\uparrow.
-]
+$$
 
 因此购物既具有 habitual component，又具有 state-driven component。
 
@@ -879,16 +879,16 @@ P(Shopping)\uparrow.
 
 将特殊事件表示为：
 
-[
+$$
 E^{special}
-===========
+=
 
 E^{pre}
 \rightarrow
 E^{main}
 \rightarrow
 E^{post}.
-]
+$$
 
 例如家庭聚会。
 
@@ -896,16 +896,16 @@ E^{post}.
 
 居民提前购买：
 
-[
+$$
 Food,\ Drinks,\ Snacks,
 DisposableCups.
-]
+$$
 
 因此：
 
-[
+$$
 Q_{\mathrm{Food}}\uparrow.
-]
+$$
 
 部分装饰物从 absent 变为 present。
 
@@ -913,58 +913,58 @@ Q_{\mathrm{Food}}\uparrow.
 
 聚会过程中：
 
-[
+$$
 Plate:
 Cabinet
 \rightarrow
 DiningTable
-]
+$$
 
-[
+$$
 Drink:
 Refrigerator
 \rightarrow
 CoffeeTable
-]
+$$
 
-[
+$$
 Snack:
 Pantry
 \rightarrow
 CoffeeTable.
-]
+$$
 
 同时：
 
-[
+$$
 Q_{\mathrm{Food}}\downarrow.
-]
+$$
 
 ### Aftermath
 
 聚会结束之后：
 
-[
+$$
 DirtyDish\uparrow,
 \qquad
 Trash\uparrow.
-]
+$$
 
 随后 Cleaning Event：
 
-[
+$$
 DirtyDish
 \rightarrow
 Sink
 \rightarrow
 Cabinet
-]
+$$
 
-[
+$$
 Trash
 \rightarrow
 Removed.
-]
+$$
 
 这样可以形成明显的 event-caused environmental pattern。
 
@@ -976,21 +976,21 @@ Removed.
 
 因此构建：
 
-[
+$$
 G_E=(V_E,D_E).
-]
+$$
 
 其中：
 
-[
+$$
 e_i\rightarrow e_j
-]
+$$
 
 表示 (e_j) 由 (e_i) 触发或依赖。
 
 例如：
 
-[
+$$
 Consumption
 \rightarrow
 LowInventory
@@ -998,11 +998,11 @@ LowInventory
 Shopping
 \rightarrow
 Replenishment.
-]
+$$
 
 或者：
 
-[
+$$
 ObjectUsage
 \rightarrow
 Failure
@@ -1012,7 +1012,7 @@ Removal
 Purchase
 \rightarrow
 Replacement.
-]
+$$
 
 因此整个模拟不是独立事件集合，而是具有因果链的长期过程。
 
@@ -1024,39 +1024,39 @@ Replacement.
 
 首先建模 activity location：
 
-[
+$$
 P(l\mid a,u,C_t).
-]
+$$
 
 然后确定 activity 涉及哪些物体：
 
-[
+$$
 P(o\mid a,l,u,X_t).
-]
+$$
 
 对于需要重新放置的物体：
 
-[
+$$
 P(
 r
 \mid
 o,a,l,u,\Theta_H
 ).
-]
+$$
 
 进一步增加 effect type：
 
-[
+$$
 P(
 \eta
 \mid
 o,a,X_t
 ),
-]
+$$
 
 其中
 
-[
+$$
 \eta\in
 {
 MOVE,
@@ -1067,11 +1067,11 @@ DAMAGE,
 REPAIR,
 REPLACE
 }.
-]
+$$
 
 因此：
 
-[
+$$
 Activity
 \rightarrow
 Location
@@ -1081,7 +1081,7 @@ Objects
 Effects
 \rightarrow
 NewState.
-]
+$$
 
 ---
 
@@ -1091,48 +1091,48 @@ NewState.
 
 例如：
 
-[
+$$
 \pi_{u,o}(r)
-============
+=
 
 P(
 r
 \mid
 u,o
 ).
-]
+$$
 
 假设 Resident A 使用 Mug 后：
 
-[
+$$
 P(Desk)=0.55
-]
+$$
 
-[
+$$
 P(KitchenCounter)=0.30
-]
+$$
 
-[
+$$
 P(DiningTable)=0.15.
-]
+$$
 
 而 Resident B：
 
-[
+$$
 P(DiningTable)=0.50
-]
+$$
 
-[
+$$
 P(CoffeeTable)=0.35
-]
+$$
 
-[
+$$
 P(KitchenCounter)=0.15.
-]
+$$
 
 最终实际 placement probability 可以由多种因素融合：
 
-[
+$$
 P_t(r)
 \propto
 \alpha P_{\mathrm{habit}}(r)
@@ -1142,19 +1142,19 @@ P_t(r)
 \gamma P_{\mathrm{event}}(r)
 +
 \delta P_{\mathrm{noise}}(r).
-]
+$$
 
 其中
 
-[
+$$
 \alpha+\beta+\gamma+\delta=1.
-]
+$$
 
 通常：
 
-[
+$$
 \alpha,\beta>\delta.
-]
+$$
 
 因此物体存在规律，但不是确定性的。
 
@@ -1164,35 +1164,35 @@ P_t(r)
 
 对于食品、饮料、纸巾等 consumable objects，显式维护库存：
 
-[
+$$
 Q_c(t).
-]
+$$
 
 消费事件执行：
 
-[
+$$
 Q_c(t+\Delta t)
-===============
+=
 
 \max
 (
 0,
 Q_c(t)-k
 ).
-]
+$$
 
 例如：
 
-[
+$$
 Apple:
 6\rightarrow5.
-]
+$$
 
 多人同时消费时：
 
-[
+$$
 Q_c(t+\Delta t)
-===============
+=
 
 \max
 \left(
@@ -1202,32 +1202,32 @@ Q_c(t)
 
 \sum_{u_i}k_i
 \right).
-]
+$$
 
 当：
 
-[
+$$
 Q_c<\tau_c
-]
+$$
 
 时，购物概率上升。
 
 购物之后：
 
-[
+$$
 Q_c(t^+)
-========
+=
 
 Q_c(t^-)+K_c.
-]
+$$
 
 因此长期库存形成典型 saw-tooth pattern：
 
-[
+$$
 8\rightarrow6\rightarrow4
 \rightarrow2\rightarrow1
 \rightarrow9.
-]
+$$
 
 这类变化非常适合机器人学习 longer-term recurrence。
 
@@ -1237,32 +1237,32 @@ Q_c(t^-)+K_c.
 
 一个月中允许：
 
-[
+$$
 \mathcal O_t\neq\mathcal O_{t+\Delta t}.
-]
+$$
 
 如果 Day 1 不存在 CoffeeMachine：
 
-[
+$$
 b_{\text{CoffeeMachine}}=0.
-]
+$$
 
 Day 12 发生：
 
-[
+$$
 Purchase(CoffeeMachine).
-]
+$$
 
 随后：
 
-[
+$$
 b_{\text{CoffeeMachine}}:
 0\rightarrow1.
-]
+$$
 
 接下来新的物体还可以改变后续行为概率：
 
-[
+$$
 P(
 MakeCoffee
 \mid
@@ -1276,7 +1276,7 @@ MakeCoffee
 \mid
 CoffeeMachineAbsent
 ).
-]
+$$
 
 因此 special event 可以改变未来整个 activity distribution。
 
@@ -1286,85 +1286,85 @@ CoffeeMachineAbsent
 
 耐用物体维护 condition：
 
-[
+$$
 h_o(t)\in[0,1].
-]
+$$
 
 随着长期使用：
 
-[
+$$
 h_o(t+\Delta t)
-===============
+=
 
 h_o(t)-\Delta h.
-]
+$$
 
 并定义：
 
-[
+$$
 P(
 Failure_o
 \mid
 h_o,
 Usage_o
 ).
-]
+$$
 
 通常：
 
-[
+$$
 h_o\downarrow
 \Rightarrow
 P(Failure_o)\uparrow.
-]
+$$
 
 例如：
 
-[
+$$
 Lamp_A:
 Normal
 \rightarrow
 Broken
 \rightarrow
 Removed.
-]
+$$
 
 随后：
 
-[
+$$
 Lamp_B:
 Absent
 \rightarrow
 Purchased
 \rightarrow
 Installed.
-]
+$$
 
 从机器人的视角来看：
 
 Day 5：
 
-[
+$$
 Lamp_A@Bedroom.
-]
+$$
 
 Day 17：
 
-[
+$$
 Lamp_A@Bedroom,\ Broken.
-]
+$$
 
 Day 20：
 
-[
+$$
 Lamp_A=Absent.
-]
+$$
 
 Day 24：
 
-[
+$$
 Lamp_B@Bedroom.
-]
+$$
 
 这构成真正的长期场景变化。
 
@@ -1376,33 +1376,33 @@ Lamp_B@Bedroom.
 
 例如：
 
-[
+$$
 Package,\ GiftBox,\ PartyDecoration,
 GuestBag.
-]
+$$
 
 它们具有：
 
-[
+$$
 t_{\mathrm{enter}}
-]
+$$
 
 和
 
-[
+$$
 t_{\mathrm{leave}}.
-]
+$$
 
 因此：
 
-[
+$$
 b_o(t)=
 \begin{cases}
-0,&t<t_{\mathrm{enter}}\
-1,&t_{\mathrm{enter}}\le t<t_{\mathrm{leave}}\
+0,&t<t_{\mathrm{enter}}\\
+1,&t_{\mathrm{enter}}\le t<t_{\mathrm{leave}}\\
 0,&t\ge t_{\mathrm{leave}}.
 \end{cases}
-]
+$$
 
 这可以显著提高长期环境中的 novelty。
 
@@ -1412,7 +1412,7 @@ b_o(t)=
 
 最终每个事件统一表示为：
 
-[
+$$
 e_k=
 (
 id_k,
@@ -1425,52 +1425,52 @@ Pre_k,
 \Delta_k,
 Parent_k
 ).
-]
+$$
 
 其中：
 
-[
+$$
 U_k
-]
+$$
 
 表示参与居民；
 
-[
+$$
 Pre_k
-]
+$$
 
 表示事件前置条件；
 
-[
+$$
 \Delta_k
-]
+$$
 
 表示对场景产生的变化。
 
 例如：
 
-[
+$$
 e=
 \text{Eat Apple}
-]
+$$
 
 具有前置条件：
 
-[
+$$
 Q_{\text{Apple}}>0.
-]
+$$
 
 effect 为：
 
-[
+$$
 CONSUME(Apple_i).
-]
+$$
 
 如果：
 
-[
+$$
 Q_{\text{Apple}}=0,
-]
+$$
 
 则该 activity 不允许直接执行。
 
@@ -1484,37 +1484,37 @@ Q_{\text{Apple}}=0,
 
 所有居民生成的 activities 和 household events 按真实时间排序：
 
-[
+$$
 E=
 {
 e_1,e_2,\ldots,e_N
 },
-]
+$$
 
 满足：
 
-[
+$$
 t(e_1)\le
 t(e_2)\le\cdots\le
 t(e_N).
-]
+$$
 
 环境依次更新：
 
-[
+$$
 X_{k+1}
-=======
+=
 
 T(
 X_k,e_k
 ).
-]
+$$
 
 因此：
 
-[
+$$
 X_{Day~20}
-]
+$$
 
 天然包含过去 19 天发生的所有持久变化。
 
@@ -1530,39 +1530,39 @@ X_{Day~20}
 
 Resident A：
 
-[
+$$
 19{:}00~CookDinner
-]
+$$
 
 Resident B：
 
-[
+$$
 19{:}05~TakeDrink.
-]
+$$
 
 这种情况允许同时发生。
 
 但是如果两个人同时需要唯一共享物体，例如：
 
-[
+$$
 TVRemote,
-]
+$$
 
 系统需要进行 availability check。
 
 如果：
 
-[
+$$
 state(TVRemote)=InUseBy(u_1),
-]
+$$
 
 那么 (u_2) 的事件可以：
 
-[
+$$
 Delay,
 Resample,
 Skip
-]
+$$
 
 或者使用 alternative object。
 
@@ -1574,11 +1574,11 @@ Skip
 
 High-level event generation只产生：
 
-[
+$$
 Room,
 Object,
 Receptacle
-]
+$$
 
 级别的语义关系。
 
@@ -1588,39 +1588,39 @@ Receptacle
 
 对于目标房间 (l)，只允许：
 
-[
+$$
 l\in\mathcal L_H.
-]
+$$
 
 对于目标 receptacle：
 
-[
+$$
 r\in\mathcal R(l).
-]
+$$
 
 如果概率模型给出：
 
-[
+$$
 P(r_1)=0.5,
 P(r_2)=0.3,
 P(r_3)=0.2,
-]
+$$
 
 但具体场景中不存在 (r_3)，则重新归一化：
 
-[
+$$
 P'(r_1)
-=======
+=
 
 \frac{0.5}{0.8},
-]
+$$
 
-[
+$$
 P'(r_2)
-=======
+=
 
 \frac{0.3}{0.8}.
-]
+$$
 
 ---
 
@@ -1628,7 +1628,7 @@ P'(r_2)
 
 选择 receptacle 后，在其有效 support surface 或 container volume 上生成具体 3D pose：
 
-[
+$$
 p_o
 \sim
 P(
@@ -1636,31 +1636,31 @@ p
 \mid
 r,o
 ).
-]
+$$
 
 Placement 需要满足：
 
-[
+$$
 CollisionFree(p_o)=True,
-]
+$$
 
-[
+$$
 InsideValidRegion(p_o,r)=True,
-]
+$$
 
 以及合理的 object-receptacle relation。
 
 例如：
 
-[
+$$
 Plate\rightarrow DiningTable
-]
+$$
 
 允许；
 
-[
+$$
 Plate\rightarrow Bed
-]
+$$
 
 在特定行为下可能允许；
 
@@ -1668,15 +1668,15 @@ Plate\rightarrow Bed
 
 对于 refrigerator、cabinet、drawer：
 
-[
+$$
 relation(o,r)=inside.
-]
+$$
 
 对于 table、desk：
 
-[
+$$
 relation(o,r)=on.
-]
+$$
 
 整个 semantic-to-3D grounding 与具体 house layout 解耦，使同一套居民行为模型能够应用到多个家庭场景。
 
@@ -1686,10 +1686,10 @@ relation(o,r)=on.
 
 整个数据生成的一个重要设计原则是：
 
-[
+$$
 \boxed{
 Dynamics
-========
+=
 
 Routine
 +
@@ -1697,67 +1697,67 @@ Variation
 +
 LongTermChange
 }
-]
+$$
 
 如果完全随机：
 
-[
+$$
 P(X_t|X_{<t})
 \approx P(X_t),
-]
+$$
 
 机器人无法利用历史。
 
 如果完全确定：
 
-[
+$$
 X_{t+7d}=X_t,
-]
+$$
 
 问题又过于简单。
 
 因此通过 stochasticity 参数：
 
-[
+$$
 \epsilon
-]
+$$
 
 控制随机行为。
 
 例如：
 
-[
+$$
 P(r)
-====
+=
 
 (1-\epsilon)
 P_{\mathrm{habit}}(r)
 +
 \epsilon
 P_{\mathrm{random}}(r).
-]
+$$
 
 当：
 
-[
+$$
 \epsilon\rightarrow0,
-]
+$$
 
 场景规律非常稳定。
 
 当：
 
-[
+$$
 \epsilon\rightarrow1,
-]
+$$
 
 环境趋近随机。
 
 正常数据集需要使：
 
-[
+$$
 0<\epsilon<1.
-]
+$$
 
 这样机器人经过多次探索可以降低位置预测的不确定性，但永远不能简单记忆一个固定坐标。
 
@@ -1769,48 +1769,48 @@ P_{\mathrm{random}}(r).
 
 例如前 15 天：
 
-[
+$$
 P(
 Mug@Desk
 )=0.15.
-]
+$$
 
 Day 16 居民开始长期在家办公后：
 
-[
+$$
 P(
 Mug@Desk
 )=0.55.
-]
+$$
 
 或者新增 CoffeeMachine 后：
 
-[
+$$
 P(
 Mug@KitchenCounter
 )
 \uparrow.
-]
+$$
 
 因此：
 
-[
+$$
 P(X_t|\Theta)
-]
+$$
 
 本身允许随长期事件发生局部漂移。
 
 这使机器人不仅需要：
 
-[
+$$
 Learn
-]
+$$
 
 还需要：
 
-[
+$$
 Update.
-]
+$$
 
 ---
 
@@ -1820,75 +1820,75 @@ Update.
 
 而采用：
 
-[
+$$
 Human
 \leftrightarrow
 Environment
-]
+$$
 
 双向过程。
 
 Human activity 改变 environment：
 
-[
+$$
 Activity_t
 \rightarrow
 X_{t+1}.
-]
+$$
 
 但 environment 也反过来影响 future activity：
 
-[
+$$
 X_{t+1}
 \rightarrow
 Activity_{t+1}.
-]
+$$
 
 例如：
 
-[
+$$
 Apple=0
-]
+$$
 
 会降低 EatApple 的概率并提高：
 
-[
+$$
 Shopping
-]
+$$
 
 或 alternative food 的概率。
 
 CoffeeMachine 被购买后提高：
 
-[
+$$
 MakeCoffee.
-]
+$$
 
 TV 损坏后降低：
 
-[
+$$
 WatchTV.
-]
+$$
 
 因此：
 
-[
+$$
 P(
 A_t
 \mid
 X_t,\Theta,C_t
 )
-]
+$$
 
 与：
 
-[
+$$
 P(
 X_{t+1}
 \mid
 A_t,X_t
 )
-]
+$$
 
 共同构成 closed-loop household simulation。
 
@@ -1902,56 +1902,56 @@ A_t,X_t
 
 定义：
 
-[
+$$
 S(t)=
 {
 x_o(t)
 }_{o\in\mathcal O}.
-]
+$$
 
 对于任意查询时间：
 
-[
+$$
 t_q,
-]
+$$
 
 均可以恢复：
 
-[
+$$
 S_{t_q}.
-]
+$$
 
 实际数据集建议同时保存两种 timestamp。
 
 第一类是 regular snapshots，例如每天：
 
-[
+$$
 07{:}00,
 12{:}00,
 18{:}00,
 22{:}00.
-]
+$$
 
 第二类是 event-aligned snapshots：
 
-[
+$$
 t_e^-,
 \qquad
 t_e^+.
-]
+$$
 
 也就是重要事件发生前后。
 
 最终：
 
-[
+$$
 T_{\mathrm{save}}
-=================
+=
 
 T_{\mathrm{periodic}}
 \cup
 T_{\mathrm{event}}.
-]
+$$
 
 因此一天内的动态和一个月尺度的变化都能够被保留下来。
 
@@ -1961,54 +1961,54 @@ T_{\mathrm{event}}.
 
 每个 snapshot 包含当前所有 visible/present objects 的 ground-truth state：
 
-[
+$$
 S_t=
 \left{
 \begin{array}{l}
-ObjectID,\
-Category,\
-Existence,\
-Room,\
-Receptacle,\
-Position,\
-Rotation,\
-Condition,\
-Owner,\
+ObjectID,\\
+Category,\\
+Existence,\\
+Room,\\
+Receptacle,\\
+Position,\\
+Rotation,\\
+Condition,\\
+Owner,\\
 LastChangeTime
 \end{array}
 \right}.
-]
+$$
 
 另外保存：
 
-[
+$$
 Q_c(t)
-]
+$$
 
 用于表示 consumable inventory。
 
 但对于机器人本身，应区分：
 
-[
+$$
 \text{Environment Observation}
-]
+$$
 
 和
 
-[
+$$
 \text{Generator Ground Truth}.
-]
+$$
 
 机器人只能通过视觉和自己的 exploration 获得物体信息。
 
 诸如：
 
-[
+$$
 EventCause,
 Owner,
 FutureSchedule,
 HouseholdProfile
-]
+$$
 
 可以保存在 ground truth 中，但不能直接暴露给 agent。
 
@@ -2045,51 +2045,51 @@ HouseholdProfile
 
 物体只有当前位置唯一：
 
-[
+$$
 Location(o,t)=1.
-]
+$$
 
 已经消耗的实例：
 
-[
+$$
 b_o=0
-]
+$$
 
 不能再次出现，除非 ADD 创建新的 instance。
 
 状态还必须满足：
 
-[
+$$
 Consume(o)
 \Rightarrow
 b_o(t^-)=1.
-]
+$$
 
 以及：
 
-[
+$$
 Move(o)
 \Rightarrow
 b_o(t^-)=1.
-]
+$$
 
 购物引入物体：
 
-[
+$$
 ADD(o)
 \Rightarrow
 b_o(t^-)=0,
 \quad
 b_o(t^+)=1.
-]
+$$
 
 Replacement 必须满足：
 
-[
+$$
 REMOVE(o_{old})
 +
 ADD(o_{new}).
-]
+$$
 
 ---
 
@@ -2099,28 +2099,28 @@ ADD(o_{new}).
 
 例如不允许：
 
-[
+$$
 AppleInventory=0
-]
+$$
 
 但连续三天仍然 EatApple。
 
 也不允许：
 
-[
+$$
 Lamp_A=Removed
-]
+$$
 
 之后居民再次 Move(Lamp_A)。
 
 如果出现无效活动，应根据上下文执行：
 
-[
+$$
 Resample,
 Alternative,
 Delay,
 Cancel.
-]
+$$
 
 而不是强制执行。
 
@@ -2130,21 +2130,21 @@ Cancel.
 
 每次 placement 都必须满足：
 
-[
+$$
 ValidRoom(o)
-]
+$$
 
-[
+$$
 ValidReceptacle(o,r)
-]
+$$
 
-[
+$$
 CollisionFree(o)
-]
+$$
 
-[
+$$
 StablePlacement(o,r).
-]
+$$
 
 这保证最终 snapshot 真正能够在 embodied simulator 中加载。
 
@@ -2156,20 +2156,20 @@ StablePlacement(o,r).
 
 例如居民工作日通常 08:00 离家，则其 10:00 不应该频繁出现在家中做大量活动，除非：
 
-[
+$$
 WorkFromHome,
 Holiday,
 SickDay,
 SpecialEvent
-]
+$$
 
 等 context 明确改变 schedule。
 
 同样，如果 Resident A 有固定 bedroom：
 
-[
+$$
 Bedroom_A,
-]
+$$
 
 其私人 nighttime routine 通常应优先发生在那里。
 
@@ -2213,9 +2213,9 @@ LLM 更适合负责：
 
 所有真正的 object state transition 都由 deterministic/probabilistic state engine 完成：
 
-[
+$$
 X_{t+1}=T(X_t,e_t).
-]
+$$
 
 因此可以避免 LLM 在 Day 20 忘记 Day 10 已经发生的事情。
 
@@ -2247,21 +2247,21 @@ X_{t+1}=T(X_t,e_t).
 
 这样生成的数据本质上不是：
 
-[
+$$
 \text{30 independent scenes}.
-]
+$$
 
 而是一条完整的：
 
-[
+$$
 \boxed{
 \text{Household Evolution Trajectory}
 }
-]
+$$
 
 即：
 
-[
+$$
 \mathcal T_H=
 {
 S_{t_0},
@@ -2272,36 +2272,36 @@ e_2,
 e_N,
 S_{t_N}
 }.
-]
+$$
 
 其中连续时间上的 snapshot 来自同一个 persistent household。
 
 因此：
 
-[
+$$
 S_{Day~20}
-]
+$$
 
 和
 
-[
+$$
 S_{Day~1}
-]
+$$
 
 不是两个随机生成的房间，而是同一个家庭经过 19 天真实活动之后形成的两个状态。
 
 最终希望机器人通过：
 
-[
+$$
 Observation_1,
 Observation_2,
 \ldots,
 Observation_K
-]
+$$
 
 逐渐学习：
 
-[
+$$
 P(
 Location(o)
 \mid
@@ -2309,11 +2309,11 @@ Time,
 History,
 Context
 ),
-]
+$$
 
 进一步学习：
 
-[
+$$
 P(
 Existence(o),
 Location(o),
@@ -2322,13 +2322,13 @@ Quantity(o)
 Time,
 History
 ).
-]
+$$
 
 当长期事件发生后，还需要根据新 observation 对原来的长期规律进行更新。
 
 因此整个项目的方法论核心可以最终归纳为：
 
-[
+$$
 \boxed{
 \textbf{
 Persistent Household
@@ -2341,7 +2341,7 @@ Object Lifecycle
 +
 Causal State Propagation
 }}
-]
+$$
 
 它们共同形成一个**具有日内周期、周级重复、月级事件、物体生命周期和长期非平稳性的家庭场景生成模型**。这样生成的数据尤其适合研究 lifelong object memory、spatio-temporal object prediction、long-term ObjectNav，以及机器人在重复访问同一环境时的经验积累与记忆更新。
 
